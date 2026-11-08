@@ -992,16 +992,27 @@ export function ObjectValidationsPanel({
    * never opens is never counted. Strictly better than no gate, and the
    * mechanical scope the #4527 phase-2 ruling asked for. */
   const [celErrors, setCelErrors] = React.useState<Record<string, number>>({});
-  const reportCel = React.useCallback((ruleName: string, count: number) => {
-    setCelErrors((prev) => (prev[ruleName] === count ? prev : { ...prev, [ruleName]: count }));
-  }, []);
   // objectstack#27482 — a rename moves the rule's verdict to its new name. The
   // guard's editor reports only when its count CHANGES, so a verdict left under
   // the old name is pruned below and never reported again: a rule whose name
-  // follows its message would autosave a guard the server refuses.
+  // follows its message would autosave a guard the server refuses. A report
+  // still in flight under the old name (the editor's effect ran on the render
+  // before the rename) follows the rename too.
+  const renamedTo = React.useRef(new Map<string, string>());
+  const reportCel = React.useCallback((ruleName: string, count: number) => {
+    let name = ruleName;
+    for (const seen = new Set<string>(); renamedTo.current.has(name) && !seen.has(name); ) {
+      seen.add(name);
+      name = renamedTo.current.get(name)!;
+    }
+    setCelErrors((prev) => (prev[name] === count ? prev : { ...prev, [name]: count }));
+  }, []);
   const renameCel = React.useCallback((from: string, to: string) => {
+    if (from === to) return;
+    renamedTo.current.delete(to);
+    renamedTo.current.set(from, to);
     setCelErrors((prev) => {
-      if (from === to || !Object.prototype.hasOwnProperty.call(prev, from)) return prev;
+      if (!Object.prototype.hasOwnProperty.call(prev, from)) return prev;
       const { [from]: count, ...rest } = prev;
       return { ...rest, [to]: count };
     });
@@ -1081,6 +1092,8 @@ export function ObjectValidationsPanel({
 
   /** Put a new rule in place: written when it lacks nothing, held otherwise (objectui#11820, objectstack#26731). */
   const placeNewRule = (rule: ValidationRuleDraft) => {
+    // A new rule may take a name a rename left: its reports are its own.
+    if (rule.name) renamedTo.current.delete(rule.name);
     if (rule.name) derivedNames.current.add(rule.name);
     if (missingPart(rule) === null) commit([...rules, rule]);
     else setUnsaved((prev) => [...prev, rule]);
