@@ -10,7 +10,8 @@
  * narrowed 2026-11-06). Each family of covered types joins in its own change
  * under #30803: the data family first, then the request family (`api`, the
  * object-less `action`, the engine's function registry), then the flow family
- * (`flow`, `webhook`, `connector`, `email_template`).
+ * (`flow`, `webhook`, `connector`, `email_template`), and last the AI family
+ * (`agent`, `skill`), which closes the series.
  *
  * ## The rule
  *
@@ -52,7 +53,14 @@
  *    per name, and a second one at boot already refuses the boot (ADR-0097);
  *  - `email_template` — a send's `template: NAME` resolves the
  *    FIRST-registered package's bundle, and `/meta/email_template/NAME`
- *    serves the same one.
+ *    serves the same one;
+ *  - `agent` — `/meta/agent/NAME` serves the FIRST-registered package's
+ *    agent, the one by-name read of an agent the open framework serves (the
+ *    agent runtime that resolves an agent by name is the cloud's);
+ *  - `skill` — an MCP client's `prompts/get` of a skill keeps the
+ *    FIRST-registered package's skill (`listSkillPrompts` keeps the first
+ *    row per name and drops the other), and `/meta/skill/NAME` serves the
+ *    same one.
  *
  * Every one of them flips with registration order, and none says so (the
  * object-less action's handler bind warns that it replaces one, and names
@@ -145,7 +153,8 @@ import { isObjectLessActionKey, standaloneActionOwnerKey } from './action-govern
 export type BareNameRegistryType =
   | 'picklist' | 'mapping' | 'dataset'
   | 'api' | 'action'
-  | 'flow' | 'webhook' | 'connector' | 'email_template';
+  | 'flow' | 'webhook' | 'connector' | 'email_template'
+  | 'agent' | 'skill';
 
 /**
  * A covered type: a registry type, or `function` — the engine's function
@@ -171,6 +180,9 @@ export const BARE_NAME_ONE_HOLDER_TYPES: readonly BareNameOneHolderType[] = Obje
   'webhook',
   'connector',
   'email_template',
+  // the AI family
+  'agent',
+  'skill',
 ]);
 
 /** The covered registry types, in the order a refusal lists them. */
@@ -213,6 +225,8 @@ const COLLECTION_KEY: Readonly<Record<BareNameRegistryType, string>> = Object.fr
   webhook: 'webhooks',
   connector: 'connectors',
   email_template: 'emailTemplates',
+  agent: 'agents',
+  skill: 'skills',
 });
 
 /**
@@ -232,6 +246,8 @@ export const BUILT_IN_BARE_NAMES: Readonly<Record<BareNameOneHolderType, Readonl
   webhook: new Set<string>(),
   connector: new Set<string>(),
   email_template: new Set<string>(),
+  agent: new Set<string>(),
+  skill: new Set<string>(),
 });
 
 /**
@@ -259,6 +275,8 @@ export const OVERRIDABLE_BASELINE_PACKAGES: Readonly<Record<BareNameOneHolderTyp
   webhook: new Set<string>(),
   connector: new Set<string>(),
   email_template: new Set<string>(['com.objectstack.service.email']),
+  agent: new Set<string>(),
+  skill: new Set<string>(),
 });
 
 /**
@@ -383,6 +401,8 @@ const CONSUMER_CLAUSE: Readonly<Record<BareNameOneHolderType, string>> = Object.
   webhook: 'the webhook dispatcher subscribes one declared webhook per name',
   connector: 'a flow `connector_action` node and the connector picker name a connector',
   email_template: 'a send names its email template',
+  agent: '`/meta/agent/NAME` serves one agent per name',
+  skill: 'an MCP client fetches a skill\'s prompt by its name',
 });
 
 /** The noun a reason names a covered type by. */
@@ -397,6 +417,8 @@ const TYPE_NOUN: Readonly<Record<BareNameOneHolderType, string>> = Object.freeze
   webhook: 'a webhook',
   connector: 'a connector',
   email_template: 'an email template',
+  agent: 'an agent',
+  skill: 'a skill',
 });
 
 const joinList = (parts: readonly string[]): string =>
