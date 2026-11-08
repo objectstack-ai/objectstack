@@ -24,9 +24,11 @@ import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 import { AuditPlugin } from './audit-plugin.js';
 import {
   PACKAGE_UNINSTALL_AUDIT_ACTION,
+  PACKAGE_UNMANAGED_IMPORT_AUDIT_ACTION,
   buildPackageLifecycleAuditRow,
   createPackageLifecycleAuditWriter,
-  type PackageLifecycleAuditEvent,
+  type PackageUninstallAuditEvent,
+  type PackageUnmanagedImportAuditEvent,
   type PackageLifecycleAuditWriter,
 } from './package-lifecycle-audit.js';
 
@@ -34,7 +36,7 @@ const LEDGER = 'sys_audit_log';
 const SYS = { isSystem: true } as const;
 
 /** An uninstall as the verb hands it; each case overrides what it is about. */
-function uninstallEvent(overrides: Partial<PackageLifecycleAuditEvent> = {}): PackageLifecycleAuditEvent {
+function uninstallEvent(overrides: Partial<PackageUninstallAuditEvent> = {}): PackageUninstallAuditEvent {
   return {
     action: 'package_uninstall',
     packageId: 'com.acme.leave',
@@ -43,6 +45,21 @@ function uninstallEvent(overrides: Partial<PackageLifecycleAuditEvent> = {}): Pa
     actor: 'u_admin',
     itemsRemoved: 3,
     itemsFailed: 0,
+    ...overrides,
+  };
+}
+
+/** [#30964] An unmanaged copy as the install-local door hands it. */
+function importEvent(overrides: Partial<PackageUnmanagedImportAuditEvent> = {}): PackageUnmanagedImportAuditEvent {
+  return {
+    action: 'package_unmanaged_import',
+    packageId: 'com.acme.crm',
+    version: '2.0.0',
+    actor: 'u_installer',
+    targetPackageId: 'com.acme.crm-copy',
+    namespace: 'acme',
+    copiedCount: 7,
+    outcome: 'success',
     ...overrides,
   };
 }
@@ -124,6 +141,61 @@ describe('[#31186] the package lifecycle writer on the real `audit` slot', () =>
     const row = rows[rows.length - 1];
     expect(row).toMatchObject({ user_id: null, actor: null });
     expect(metadataOf(row)).toMatchObject({ package_id: 'com.acme.leave', version: null, environment_id: null, keep_data: false });
+  });
+
+  // ── [#30964] the unmanaged copy's row ──
+
+  const importRows = async (): Promise<Array<Record<string, any>>> =>
+    (await engine.find(LEDGER, {
+      where: { action: PACKAGE_UNMANAGED_IMPORT_AUDIT_ACTION },
+      orderBy: [{ field: 'created_at', order: 'asc' }],
+      context: SYS,
+    })) as Array<Record<string, any>>;
+
+  it('[#30964] a copy that landed writes ONE deployment-level row: the source, the new base, its namespace, the count, success', async () => {
+    const before = (await importRows()).length;
+    await audit.recordPackageLifecycleEvent(importEvent({ sourceNamespace: 'crm' }));
+    const rows = await importRows();
+    expect(rows).toHaveLength(before + 1);
+    const row = rows[rows.length - 1];
+    expect(row).toMatchObject({
+      action: 'package_unmanaged_import',
+      user_id: 'u_installer',
+      actor: 'u_installer',
+      object_name: null,
+      record_id: null,
+      tenant_id: null,
+    });
+    expect(metadataOf(row)).toEqual({
+      package_id: 'com.acme.crm',
+      version: '2.0.0',
+      environment_id: null,
+      target_package_id: 'com.acme.crm-copy',
+      namespace: 'acme',
+      source_namespace: 'crm',
+      copied_count: 7,
+      outcome: 'success',
+    });
+  });
+
+  it('[#30964] a copy that failed records the failure, its code and status, and the absences as null', async () => {
+    await audit.recordPackageLifecycleEvent(importEvent({
+      targetPackageId: undefined, namespace: undefined, copiedCount: undefined,
+      outcome: 'failure', errorCode: 'RESOURCE_CONFLICT', status: 409,
+    }));
+    const rows = await importRows();
+    expect(metadataOf(rows[rows.length - 1])).toEqual({
+      package_id: 'com.acme.crm',
+      version: '2.0.0',
+      environment_id: null,
+      target_package_id: null,
+      namespace: null,
+      source_namespace: null,
+      copied_count: 0,
+      outcome: 'failure',
+      error_code: 'RESOURCE_CONFLICT',
+      status: 409,
+    });
   });
 
   it('an event that names no package, or another action, writes nothing', async () => {

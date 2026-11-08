@@ -560,14 +560,20 @@ export const ko: PlatformTranslationData = {
         retention_overrides: {
           label: '보존 기간 재정의',
           help: '객체별 보존 기간 재정의입니다. 기간 단위는 h/d/w/y입니다. 조직별로 설정하므로 규제 대상 조직은 수년, 개발용 조직은 며칠만 보관할 수 있습니다. 플랫폼 기능에 필요한 최소 기간(예: 작업 대기열의 중복 감지 기간)보다 짧은 재정의는 무시되고 오류로 기록되며, 기본 기간이 계속 적용됩니다.',
+          keyColumn: { label: '객체' },
+          columns: { maxAge: { label: '행 보존 기간' }, expireAfter: { label: '행 만료 기간' } },
         },
         quotas: {
           label: '행 할당량',
           help: '객체별 최대 행 수입니다. 초과하면 거버넌스 알림이 발생하며, 할당량은 선언된 정책을 넘어 데이터를 삭제하지 않습니다.',
+          keyColumn: { label: '객체' },
+          columns: { max_rows: { label: '최대 행 수' } },
         },
         quota_defaults: {
           label: '클래스별 기본 할당량',
           help: '수명 주기 클래스별 대체 할당량입니다 (telemetry, transient, event, audit).',
+          keyColumn: { label: '수명 주기 클래스' },
+          columns: { max_rows: { label: '최대 행 수' } },
         },
         growth_alert_rows: {
           label: '증가 알림 임계값(정리당 행 수)',

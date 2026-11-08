@@ -153,6 +153,9 @@ import { createCloudBinding } from './cloud-binding.js';
 import { CLOUD_BINDING_SERVICE, type ICloudBindingService } from '@objectstack/spec/contracts';
 import { CLOUD_CONNECTION_CAPABILITY, CLOUD_CONNECTION_UI_BUNDLE } from './cloud-connection-ui.js';
 import { readJsonRequestBody } from './request-json-body.js';
+// [#30964] The install mode's one declaration, read by reference: never a copy of its two spellings.
+import { InstallModeSchema, type InstallMode } from '@objectstack/spec/kernel';
+import { INSTALL_LOCAL_DOOR_SERVICE, type InstallLocalDoor } from './install-local-door-service.js';
 
 const CLOUD_CONNECTION_PREFIX = '/api/v1/cloud-connection';
 
@@ -218,6 +221,11 @@ interface EnvironmentKernel {
     getService?<T = unknown>(name: string): T;
 }
 
+/** [#30964] The slice of the `kernel-manager` service the unmanaged-grant copy reads: the environment's own kernel. */
+interface EnvironmentKernelManager {
+    getOrCreate?(environmentId: string): Promise<EnvironmentKernel | undefined>;
+}
+
 /** What the auth service's in-process session read answers, as `AuthSessionApi` declares it. */
 type SessionRead = Awaited<ReturnType<NonNullable<AuthSessionApi['getSession']>>>;
 
@@ -264,6 +272,37 @@ interface ResolvedSession {
  * to an environment.
  */
 const ENVIRONMENT_NOT_FOUND_MESSAGE = 'Could not resolve an environment for this request host.';
+
+/**
+ * [#30964, cloud#3624 ruling A] The install mode a `POST /install` body asks
+ * for: `install_mode` (the control plane's own spelling) or `installMode` (the
+ * install-local door's), parsed against {@link InstallModeSchema} by reference.
+ * `mode` is `undefined` when the body names none — a managed install, as every
+ * install was before the key. A value the schema refuses, or the two spellings
+ * naming different modes, is a 400: never read as `managed`.
+ */
+function installModeOf(body: any): { ok: true; mode: InstallMode | undefined } | { ok: false; message: string } {
+    const snake = body?.install_mode;
+    const camel = body?.installMode;
+    if (snake !== undefined && camel !== undefined && snake !== camel) {
+        return {
+            ok: false,
+            message: `\`install_mode\` (${JSON.stringify(snake)}) and \`installMode\` (${JSON.stringify(camel)}) disagree. `
+                + 'Send one of them. Nothing was installed.',
+        };
+    }
+    const raw = snake !== undefined ? snake : camel;
+    if (raw === undefined) return { ok: true, mode: undefined };
+    const parsed = InstallModeSchema.safeParse(raw);
+    if (!parsed.success) {
+        return {
+            ok: false,
+            message: `\`install_mode\` must be 'managed' or 'unmanaged', received ${JSON.stringify(raw)}. `
+                + 'Omit it for a managed install. Nothing was installed.',
+        };
+    }
+    return { ok: true, mode: parsed.data };
+}
 
 export interface CloudConnectionPluginConfig {
     /**
@@ -932,7 +971,7 @@ export class CloudConnectionPlugin implements Plugin {
                 return c.json({ success: true, data: { environmentId: environmentId ?? null, revoked, cleared } });
             });
 
-            // POST /install { package_id, seed_sample_data? } — in-environment
+            // POST /install { package_id, seed_sample_data?, install_mode? } — in-environment
             // marketplace install. Authorizes the caller against the
             // environment's own session (SSO-as-owner only ever admits org
             // owners/admins), then performs the install against the cloud
@@ -962,10 +1001,20 @@ export class CloudConnectionPlugin implements Plugin {
                 const packageId = String(body?.package_id ?? body?.packageId ?? '').trim();
                 if (!packageId) return c.json({ success: false, error: { code: 'INVALID_REQUEST', message: 'package_id is required' } }, 400);
                 const seedSampleData = body?.seed_sample_data === true || body?.seedSampleData === true;
+                // [#30964, cloud#3624 ruling A] The install mode the caller asked
+                // for, parsed against the manifest key's own enum. Absent means
+                // `managed`, as before, and the control plane is then sent no
+                // `install_mode` (its absent value is `managed` too), so a managed
+                // install's request is the one it always was.
+                const requested = installModeOf(body);
+                if (!requested.ok) return c.json({ success: false, error: { code: 'INVALID_REQUEST', message: requested.message } }, 400);
+                const installMode = requested.mode;
 
                 // Call the cloud install endpoint in service mode. We do NOT send
                 // an active org → package-install treats this as platform/CI and
                 // installs unrestricted (we already authorized the env admin above).
+                // The installer travels only as the `installer_user_id` body param
+                // below, always sent: the id of the session admitted above.
                 try {
                     const resp = await fetch(`${cloudUrl}/api/v1/actions/sys_package/install_package`, {
                         method: 'POST',
@@ -973,15 +1022,128 @@ export class CloudConnectionPlugin implements Plugin {
                             'Content-Type': 'application/json',
                             ...authHeaders(),
                         },
-                        body: JSON.stringify({ recordId: packageId, params: { environment_id: environmentId, seed_sample_data: seedSampleData } }),
+                        body: JSON.stringify({
+                            recordId: packageId,
+                            params: {
+                                environment_id: environmentId,
+                                seed_sample_data: seedSampleData,
+                                // [#30964] The cloud half's param name (cloud#3624, PR cloud#3683): snake_case, absent = managed.
+                                ...(installMode !== undefined ? { install_mode: installMode } : {}),
+                                // [#30964] The person installing, so the control
+                                // plane's audit row can name a person rather than
+                                // this environment's service principal. A body
+                                // param, never a header (cloud#2245 removed
+                                // `x-actor-id` as an authorization input). It is
+                                // the id of the session this door admitted above,
+                                // never a value the caller sent; the control plane
+                                // reads it only for a member of the environment's
+                                // organization and records its service principal
+                                // otherwise (cloud#3624).
+                                installer_user_id: session.userId,
+                            },
+                        }),
                     });
-                    const json = await resp.json().catch(() => ({ success: false, error: 'install failed (no body)' }));
-                    return c.json(json, resp.status as any);
+                    const json: any = await resp.json().catch(() => ({ success: false, error: 'install failed (no body)' }));
+                    // [#30964] A control-plane refusal, and every managed answer, is relayed as it was.
+                    if (installMode !== 'unmanaged' || !resp.ok || json?.success === false) return c.json(json, resp.status as any);
+                    return await copyOnUnmanagedGrant(c, { environmentId, packageId, seedSampleData, grant: json });
                 } catch (err: any) {
                     ctx.logger?.error?.('[CloudConnectionPlugin] install failed', err instanceof Error ? err : new Error(String(err)));
                     return c.json({ success: false, error: { code: 'PLUGIN_INSTALL_FAILED', message: String(err?.message ?? err) } }, 502);
                 }
             });
+
+            /**
+             * [#30964, cloud#3624 ruling A] The copy an UNMANAGED grant asks for,
+             * made in the environment by its own install-local door
+             * ({@link INSTALL_LOCAL_DOOR_SERVICE}): `installMode: 'unmanaged'`,
+             * the granted version, the caller's own headers (so the door admits
+             * and gates the same person, and the copy and any sample rows are
+             * the installer's), and `seedSampleData` only when the caller asked
+             * for it. The answer is that door's own answer.
+             *
+             * Cross-repo, NOT MEASURED: the grant's shape. The control plane is
+             * assumed to skip its own install on an unmanaged grant and answer
+             * `data.install_mode: 'unmanaged'` with the granted `data.version_id`;
+             * the door then fetches that version's manifest itself, as its
+             * cloud branch always has. Fail closed: an answer that does not echo
+             * the mode, or names no version, copies nothing (502). A
+             * `data.manifest` in the answer is never read.
+             */
+            const copyOnUnmanagedGrant = async (
+                c: any,
+                args: { environmentId: string; packageId: string; seedSampleData: boolean; grant: any },
+            ): Promise<Response> => {
+                const { environmentId, packageId, seedSampleData, grant } = args;
+                const data = grant?.data;
+                const versionId = typeof data?.version_id === 'string' ? data.version_id.trim() : '';
+                // An answer with no `install_mode` at all may come from a control
+                // plane that does not read the param, and so may already have
+                // installed the package MANAGED; the refusal says so, so the
+                // installer checks Installed before retrying.
+                const unechoed = data?.install_mode === undefined || data?.install_mode === null;
+                const unread = data?.install_mode !== 'unmanaged'
+                    ? 'its answer does not echo `install_mode: \'unmanaged\'`'
+                    : versionId === '' ? 'its answer names no `version_id`' : undefined;
+                if (unread !== undefined) {
+                    const managedNote = unechoed
+                        ? ' The control plane did not echo install_mode; a control plane that does not read it may have '
+                            + 'installed the package managed. Check Installed before retrying.'
+                        : '';
+                    ctx.logger?.warn?.(
+                        `[CloudConnectionPlugin] the unmanaged install of ${packageId} in ${environmentId} was not copied: `
+                        + `the control plane's grant could not be read (${unread}).${managedNote}`,
+                    );
+                    return c.json({
+                        success: false,
+                        error: {
+                            code: 'PLUGIN_INSTALL_FAILED',
+                            message: `The control plane answered the unmanaged install of '${packageId}', but ${unread}, so this `
+                                + `environment cannot tell which version it granted. Nothing was copied.${managedNote}`,
+                        },
+                    }, 502);
+                }
+                let door: InstallLocalDoor | undefined;
+                try {
+                    if (this.cfg.singleEnvironment) {
+                        door = ctx.getService<InstallLocalDoor>(INSTALL_LOCAL_DOOR_SERVICE);
+                    } else {
+                        const kernels = ctx.getService<EnvironmentKernelManager>('kernel-manager');
+                        const kernel = await kernels?.getOrCreate?.(environmentId);
+                        try { door = await kernel?.getServiceAsync?.<InstallLocalDoor>(INSTALL_LOCAL_DOOR_SERVICE); } catch { /* not registered */ }
+                        if (!door) { try { door = kernel?.getService?.<InstallLocalDoor>(INSTALL_LOCAL_DOOR_SERVICE); } catch { /* not registered */ } }
+                    }
+                } catch { /* no door */ }
+                if (!door || typeof door.install !== 'function') {
+                    return c.json({
+                        success: false,
+                        error: {
+                            code: 'SERVICE_UNAVAILABLE',
+                            message: `The control plane granted an unmanaged install of '${packageId}', but this environment has no `
+                                + 'install-local door to make the copy with (MarketplaceInstallLocalPlugin is not mounted). Nothing was copied.',
+                        },
+                    }, 503);
+                }
+                const headers = new Headers(c.req.raw?.headers);
+                headers.set('content-type', 'application/json');
+                headers.delete('content-length');
+                const request = new Request(new URL('/api/v1/marketplace/install-local', c.req.url).toString(), {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify({
+                        packageId,
+                        versionId,
+                        installMode: 'unmanaged',
+                        ...(seedSampleData ? { seedSampleData: true } : {}),
+                    }),
+                });
+                const answer = await door.install(request);
+                const body = await answer.json().catch(() => ({
+                    success: false,
+                    error: { code: 'PLUGIN_INSTALL_FAILED', message: `The unmanaged copy of '${packageId}' answered no body.` },
+                }));
+                return c.json(body, answer.status as any);
+            };
 
             // GET /installation?package_id=… — same-origin installed-state
             // probe. Always returns 200 with `{ installed: boolean, … }`;

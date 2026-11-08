@@ -178,7 +178,9 @@ export function actionCopyRefusals(key: ActionCopyKey, options: { localeMap?: bo
  * string is shorthand for `{ dialect: 'template', source }`, an envelope must
  * declare `dialect: 'template'` — then a blank-string arm, so a stored blank
  * sentence still loads while the doors refuse it (the module note); then, on
- * `ActionSchema`, the inline locale map its `I18nLabel` took.
+ * `ActionSchema`, the inline locale map its `I18nLabel` took — and on
+ * `ActionParamSchema.helpText`, the same map (#28266), so an inline action's
+ * hint can be written per locale like the rest of its dialog.
  *
  * The `template` input itself is built at each declaring `.zod.ts` file
  * (`templateExpressionInput(ExpressionSchema, actionCopyRefusals(key))`), not
