@@ -29,6 +29,8 @@ name: Framework Build Base Image
 # settings (Danger Zone, Change visibility; it cannot be made private again).
 # Until then the anonymous-pull step below is red and names that fix.
 
+# dispatch-gates: no-check-families -- the steps are an image build, a registry read and an in-image check script (docker/framework-build-base/check-image.sh, which needs the built image), not named local checks
+
 on:
   workflow_dispatch:
     inputs:
@@ -138,9 +140,11 @@ jobs:
     # security boundary: anyone who can push a branch can also edit it there.
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    # No reading of this workflow is on record yet. The same build, as a stage
-    # of downstream image builds on this runner class, runs about 20 minutes
-    # cold; the budget leaves room for a slow npm and the anonymous pull.
+    # One cold reading on record, the `verify` job of run 42464408854: job wall
+    # 18m45s, of which the build 15m25s (install 33 s, 82 framework tasks
+    # 1m58s, 74 Console tasks 10m47s, load into the runner 94 s). This job
+    # skips the load and adds a push and an anonymous pull of about 0.8 GB.
+    # 60 minutes is about 3x, room for a slow npm or a slow registry.
     timeout-minutes: 60
     permissions:
       contents: read
