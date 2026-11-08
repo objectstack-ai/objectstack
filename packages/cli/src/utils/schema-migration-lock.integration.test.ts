@@ -41,7 +41,7 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { SqlDriver } from '@objectstack/driver-sql';
-import { SCHEMA_MIGRATION_PG_LOCK_KEY } from './schema-migrate.js';
+import { SCHEMA_MIGRATION_PG_LOCK_KEY } from './schema-migration-lock.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 /** The source entry, as `test/helpers/serve-process.ts` spawns it; `src/` cannot import that helper. */

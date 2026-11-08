@@ -10,7 +10,7 @@
  * exception: an uncontended lock call, output unchanged) are the first two
  * describes — an uncontended lock prints nothing, and SQLite runs nothing at
  * all. Two concurrent migrators against a live Postgres are
- * `schema-migrate.migration-lock.integration.test.ts`'s.
+ * `schema-migration-lock.integration.test.ts`'s.
  */
 
 import { describe, expect, it, vi } from 'vitest';
@@ -20,7 +20,7 @@ import {
   SCHEMA_MIGRATION_LOCK_NAME,
   SCHEMA_MIGRATION_LOCK_WAIT_MS,
   SCHEMA_MIGRATION_PG_LOCK_KEY,
-} from './schema-migrate.js';
+} from './schema-migration-lock.js';
 
 interface Statement {
   sql: string;
