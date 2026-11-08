@@ -372,7 +372,7 @@ describe('[#31605] handleMcp hands the MCP runtime the caller it admitted', () =
       { jsonrpc: '2.0', id: 1, method: 'tools/list' },
       makeContext({ request, executionContext, environmentId: 'env_prod' }),
     );
-    expect(res.response.status).toBe(200);
+    expect(res.response?.status).toBe(200);
     expect(mcpService.lastOpts.caller).toEqual({ executionContext, environmentId: 'env_prod' });
     expect(mcpService.lastOpts.caller.executionContext).toBe(executionContext);
   });
