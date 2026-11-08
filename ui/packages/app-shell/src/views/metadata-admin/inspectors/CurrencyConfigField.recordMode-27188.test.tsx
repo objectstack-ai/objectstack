@@ -13,7 +13,9 @@ import userEvent from '@testing-library/user-event';
 import { ObjectSchema } from '@objectstack/spec/data';
 import {
   currencyCodeFieldCandidates,
+  homeAmountCandidates,
   nextCurrencyCodeFieldName,
+  setHomeAmountPointer,
   switchCurrencyMode,
 } from './CurrencyConfigField';
 
@@ -141,5 +143,129 @@ describe('Studio currency section (ADR-0144 D2)', () => {
     expect(fields.amount.currencyConfig).toEqual({ currencyMode: 'record', currencyField: 'currency_code' });
     expect(fields.currency_code).toEqual({ type: 'text', label: 'Currency', valueDomain: 'iso_4217_currency', required: true });
     expect(ObjectSchema.safeParse({ name: 'invoice', label: 'Invoice', fields }).success).toBe(true);
+  });
+});
+
+// ADR-0144 D5: the `homeAmount` pickers. The spec's object judge
+// (`refuseDishonestHomeAmount`) exports no predicate, so the spec itself is the
+// oracle: every pick the editor offers must parse, and every shape it leaves
+// out must be refused, at `homeAmount`. No refusal text is asserted.
+describe('Studio homeAmount editor (ADR-0144 D5)', () => {
+  const RO_CURRENCY = (label: string) => ({ type: 'currency', label, readonly: true });
+  const RO_NUMBER = (label: string, extra: Record<string, unknown> = {}) => ({ type: 'number', label, readonly: true, ...extra });
+  const RECORD = { currencyMode: 'record', currencyField: 'currency_code' } as const;
+  const OBJECT: Record<string, Record<string, unknown>> = {
+    currency_code: CODE,
+    other_code: { ...CODE, label: 'Other currency' },
+    invoice_date: { type: 'date', label: 'Invoice date' },
+    posted_at: { type: 'datetime', label: 'Posted at' },
+    note: { type: 'text', label: 'Note' },
+    amount: { type: 'currency', label: 'Amount', currencyConfig: RECORD },
+    amount_home: RO_CURRENCY('Home'),
+    home_2: RO_CURRENCY('Home 2'),
+    home_writable: { type: 'currency', label: 'Writable' },
+    home_expr: { ...RO_CURRENCY('Computed'), expression: 'record.amount' },
+    home_fixed: { ...RO_CURRENCY('Fixed'), currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'EUR' } },
+    amount_rate: RO_NUMBER('Rate'),
+    rate_12: RO_NUMBER('Rate 12', { scale: 12 }),
+    rate_low: RO_NUMBER('Rate 2', { scale: 2 }),
+    rate_writable: { type: 'number', label: 'Writable rate' },
+    other_amount: { type: 'currency', label: 'Other', currencyConfig: { ...RECORD, homeAmount: { field: 'claimed_home', rateDate: 'invoice_date', rateField: 'shared_rate' } } },
+    claimed_home: RO_CURRENCY('Claimed'),
+    shared_rate: RO_NUMBER('Shared rate'),
+  };
+  const withHome = (homeAmount: Record<string, string>, amount: Record<string, unknown> = {}) => ({
+    ...OBJECT,
+    amount: { ...OBJECT.amount, ...amount, currencyConfig: { ...RECORD, ...(amount.currencyConfig as object), homeAmount } },
+  });
+  const entriesOf = (fields: Record<string, Record<string, unknown>>) => Object.entries(fields).map(([name, def]) => ({ name, def }));
+  const parse = (fields: Record<string, unknown>) => ObjectSchema.safeParse({ name: 'invoice', label: 'Invoice', fields });
+  const refusedAtHomeAmount = (fields: Record<string, unknown>) => {
+    const r = parse(fields);
+    // At either claimant's `homeAmount`: the judge gives a shared home field to
+    // the first amount declared and refuses the other one.
+    return !r.success && r.error.issues.some((i) => /^fields\.[a-z_]+\.currencyConfig\.homeAmount/.test(i.path.join('.')));
+  };
+
+  it('the fixture object parses as it stands', () => {
+    expect(parse(OBJECT).success).toBe(true);
+  });
+
+  it('lists each pointer\'s candidates, the rate field judged against the picked document date and code field', () => {
+    expect(homeAmountCandidates(entriesOf(OBJECT), 'amount')).toEqual({
+      field: ['amount_home', 'home_2'],
+      rateDate: ['invoice_date', 'posted_at'],
+      rateField: ['amount_rate', 'rate_12'],
+    });
+    // Same code field and document date as `other_amount`: its rate field may be shared.
+    expect(homeAmountCandidates(entriesOf(withHome({ rateDate: 'invoice_date' })), 'amount').rateField).toEqual(['amount_rate', 'rate_12', 'shared_rate']);
+    expect(homeAmountCandidates(entriesOf(withHome({ rateDate: 'invoice_date' }, { currencyConfig: { currencyField: 'other_code' } })), 'amount').rateField).toEqual(['amount_rate', 'rate_12']);
+  });
+
+  it('ORACLE: every combination the editor offers parses', () => {
+    const offered = homeAmountCandidates(entriesOf(OBJECT), 'amount');
+    let combos = 0;
+    for (const rateDate of offered.rateDate) {
+      const now = homeAmountCandidates(entriesOf(withHome({ rateDate })), 'amount');
+      for (const field of now.field) {
+        for (const rateField of now.rateField) {
+          const fields = withHome({ field, rateDate, rateField });
+          expect(parse(fields).success, `${field} / ${rateDate} / ${rateField}`).toBe(true);
+          combos += 1;
+        }
+      }
+    }
+    expect(combos).toBe(2 * 3 + 2 * 2);
+  });
+
+  it('ORACLE: every shape the editor leaves out is refused at homeAmount', () => {
+    const ok = { field: 'amount_home', rateDate: 'invoice_date', rateField: 'amount_rate' };
+    expect(parse(withHome(ok)).success).toBe(true);
+    for (const field of ['home_writable', 'home_expr', 'home_fixed', 'claimed_home']) {
+      expect(refusedAtHomeAmount(withHome({ ...ok, field })), field).toBe(true);
+    }
+    for (const rateField of ['rate_low', 'rate_writable']) {
+      expect(refusedAtHomeAmount(withHome({ ...ok, rateField })), rateField).toBe(true);
+    }
+    expect(refusedAtHomeAmount(withHome({ ...ok, rateDate: 'posted_at', rateField: 'shared_rate' })), 'shared rate, other date').toBe(true);
+    expect(refusedAtHomeAmount(withHome({ ...ok, rateDate: 'note' })), 'text date').toBe(true);
+    const formula = { type: 'formula', label: 'Net', expression: 'record.gross * 0.9', returnType: 'currency' };
+    expect(refusedAtHomeAmount({ ...withHome(ok, formula), gross: { type: 'currency', label: 'Gross' } }), 'formula amount').toBe(true);
+  });
+
+  it('a pointer unpicked is deleted, and homeAmount with it once none is left', () => {
+    const one = setHomeAmountPointer({ currencyMode: 'record', currencyField: 'currency_code' }, 'field', 'amount_home');
+    expect(one).toEqual({ currencyMode: 'record', currencyField: 'currency_code', homeAmount: { field: 'amount_home' } });
+    expect(setHomeAmountPointer(one, 'field', '')).toEqual({ currencyMode: 'record', currencyField: 'currency_code' });
+  });
+
+  it('picking the three pointers writes homeAmount, and the object parses', async () => {
+    const { saved } = renderAmountLive(OBJECT);
+    expect(screen.getByTestId('currency-config-home-amount')).toBeInTheDocument();
+    await pick('Home amount field', 'amount_home');
+    await pick('Document date', 'invoice_date');
+    await pick('Rate field', 'shared_rate');
+    const fields = saved();
+    expect((fields.amount.currencyConfig as any).homeAmount).toEqual({ field: 'amount_home', rateDate: 'invoice_date', rateField: 'shared_rate' });
+    expect(parse(fields).success).toBe(true);
+  });
+
+  it('re-picking the currency field keeps homeAmount; leaving record mode drops it', async () => {
+    const home = { field: 'amount_home', rateDate: 'invoice_date', rateField: 'amount_rate' };
+    const { saved } = renderAmountLive(withHome(home));
+    await pick(/Currency field/, 'other_code');
+    expect(saved().amount.currencyConfig).toEqual({ currencyMode: 'record', currencyField: 'other_code', homeAmount: home });
+    await pick('Currency mode', 'Dynamic — the organization currency');
+    expect(saved().amount.currencyConfig).toEqual({ currencyMode: 'dynamic' });
+    expect(switchCurrencyMode({ currencyMode: 'record', currencyField: 'currency_code', homeAmount: home }, 'record')).toEqual({ currencyMode: 'record', currencyField: 'currency_code', homeAmount: home });
+  });
+
+  it('shows the editor only under record mode, and never on a formula amount', () => {
+    renderAmount({ ...OBJECT, amount: { type: 'currency', label: 'Amount' } });
+    expect(screen.queryByTestId('currency-config-home-amount')).toBeNull();
+    cleanup();
+    renderAmount({ ...OBJECT, amount: { type: 'formula', label: 'Net', expression: 'record.gross', returnType: 'currency', currencyConfig: RECORD } });
+    expect(screen.getByRole('combobox', { name: /Currency field/ })).toBeInTheDocument();
+    expect(screen.queryByTestId('currency-config-home-amount')).toBeNull();
   });
 });
