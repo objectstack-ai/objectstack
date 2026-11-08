@@ -124,14 +124,65 @@ const ORG = 'organization_id';
  * it names carries `--dev`. A production boot whose auth secret came from a
  * file the operator never exported (`os start`'s `<home>/auth-secret`) names
  * the command with that secret exported from the file, for the same reason:
- * the ceremony composes the security plugin only with it.
+ * the ceremony composes the security plugin only with it. A boot on a
+ * database the ceremony would not find by its own default (#31488,
+ * {@link OrganizationOwnershipBootGuardOptions.databaseUrl}) names it with
+ * `--database-url`, so the commands plan the database that was refused.
  */
 function ceremonyCommand(opts: OrganizationOwnershipBootGuardOptions): string {
-  if (opts.dev) return 'os migrate organization-ownership --dev';
+  const database = opts.databaseUrl ? ` --database-url ${databaseWord(opts.databaseUrl)}` : '';
+  if (opts.dev) return `os migrate organization-ownership --dev${database}`;
   if (opts.authSecretFile) {
-    return `OS_AUTH_SECRET="$(cat ${shellWord(opts.authSecretFile)})" os migrate organization-ownership`;
+    return `OS_AUTH_SECRET="$(cat ${shellWord(opts.authSecretFile)})" os migrate organization-ownership${database}`;
   }
-  return 'os migrate organization-ownership';
+  return `os migrate organization-ownership${database}`;
+}
+
+/**
+ * What a shell running a printed command without `OS_DATABASE_URL` says, and
+ * stops at, when the boot's database URL carries a credential: the commands
+ * read the URL from that variable (`${OS_DATABASE_URL:?…}`) rather than print
+ * it, and an unset variable must not fall through to the ceremony's own
+ * default, which is the other database #31488 is about.
+ */
+export const ORGANIZATION_OWNERSHIP_CREDENTIAL_URL_UNSET =
+  'export OS_DATABASE_URL as the database URL this server was started with';
+
+/**
+ * The `--database-url` value: the URL as one shell word, or — when it carries a
+ * credential the refusal must not print — a reference to `OS_DATABASE_URL`
+ * that stops the shell when the variable is unset or empty.
+ */
+function databaseWord(url: string): string {
+  if (carriesCredential(url)) return `"\${OS_DATABASE_URL:?${ORGANIZATION_OWNERSHIP_CREDENTIAL_URL_UNSET}}"`;
+  return shellWord(url);
+}
+
+/**
+ * Whether a database URL holds a secret: a password in its user-info, or a
+ * query parameter whose name says token, password, secret or key (libSQL's
+ * `authToken`). A value that does not parse as a URL is treated as holding
+ * one: a refusal never guesses a credential away.
+ */
+function carriesCredential(url: string): boolean {
+  if (/^file:/i.test(url)) return false;
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return true;
+  }
+  if (parsed.password !== '') return true;
+  return [...parsed.searchParams.keys()].some((key) => /token|password|passwd|secret|key/i.test(key));
+}
+
+/** Why the named commands read the database URL from `OS_DATABASE_URL` instead of naming it. */
+function databaseNote(opts: OrganizationOwnershipBootGuardOptions): string {
+  if (!opts.databaseUrl || !carriesCredential(opts.databaseUrl)) return '';
+  return (
+    ' The database URL this server was started with carries a credential, so it is not printed: export it as ' +
+    'OS_DATABASE_URL in the shell that runs both commands, which read it from there and stop if it is unset.'
+  );
 }
 
 /**
@@ -159,6 +210,17 @@ export interface OrganizationOwnershipBootGuardOptions {
    * conversion step.
    */
   authSecretFile?: string;
+  /**
+   * The database this boot serves, when the ceremony run bare in the
+   * operator's shell would plan another one (#31488): `os start` reached it
+   * through its `-d` flag, or through the file of a `--home` home, neither of
+   * which the ceremony sees. Both named commands then carry
+   * `--database-url URL`, so run verbatim they plan the database that was
+   * refused. A URL that carries a credential is not printed: the commands
+   * read it from `OS_DATABASE_URL` and stop if it is unset. Unset — the
+   * ceremony's own default reaches this database — the commands name none.
+   */
+  databaseUrl?: string;
 }
 
 export class OrganizationOwnershipBootRefusal extends Error {
@@ -304,7 +366,7 @@ export function organizationOwnershipRefusalMessage(
   const ceremony = ceremonyCommand(opts);
   const run =
     `Run '${ceremony} --out PLAN' to write and review its plan, take a backup, then run ` +
-    `'${ceremony} --apply --plan-file PLAN --backup-taken', and start again.${secretNote(opts)}`;
+    `'${ceremony} --apply --plan-file PLAN --backup-taken', and start again.${secretNote(opts)}${databaseNote(opts)}`;
   const columns = tables.length > 0
     ? ` ${tables.join(', ')} still carr${tables.length === 1 ? 'ies' : 'y'} a physical organization_id column its ` +
       'object no longer declares.'
@@ -336,7 +398,7 @@ export function organizationOwnershipRefusalMessage(
     `'${ORGANIZATION_OWNERSHIP_MIGRATION_ID}') is not verified, so the post-check still found rows the ceremony has ` +
     `not carried.${columns} The server refuses to start rather than serve rows of an organization-owned object with ` +
     `no organization. Resolve what the apply report names, then run '${ceremony} --out PLAN' again, review it, run ` +
-    `'${ceremony} --apply --plan-file PLAN --backup-taken', and start again.${secretNote(opts)}`
+    `'${ceremony} --apply --plan-file PLAN --backup-taken', and start again.${secretNote(opts)}${databaseNote(opts)}`
   );
 }
 

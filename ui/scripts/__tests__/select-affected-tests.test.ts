@@ -106,6 +106,7 @@ function workspace() {
     'packages/c/src/reads.test.ts': "import './helpers/tree';\n",
     'packages/c/src/helpers/tree.ts': "import fs from 'node:fs';\nexport const t = fs.existsSync('.');\n",
     'packages/c/src/undeclared.test.ts': "import { a } from '@fx/a';\n",
+    'packages/c/src/reach.test.ts': "import { b } from '../../b/src/index';\n",
     'packages/c/src/escapes.test.ts': "import '../../../scripts/helper.mjs';\n",
     'packages/heavy-user/package.json': manifest('@fx/heavy-user'),
     'packages/heavy-user/src/heavy.test.tsx': 'export {};\n',
@@ -164,17 +165,58 @@ describe('select-affected-tests — the always-on set', () => {
     expect(why.get('packages/c/src/reads.test.ts')).toBe('reads the disk or spawns a process');
   });
 
-  it('keeps a test that imports a workspace package its own package does not depend on', () => {
-    expect(why.get('packages/c/src/undeclared.test.ts')).toMatch(/imports @fx\/a, which @fx\/c does not depend on/);
+  it('keeps a test that reaches a file outside every package', () => {
+    expect(why.get('packages/c/src/escapes.test.ts')).toMatch(/reaches the repository root outside packages\/c/);
   });
 
-  it('keeps a test that reaches a file outside its own package', () => {
-    expect(why.get('packages/c/src/escapes.test.ts')).toMatch(/reaches the repository root outside packages\/c/);
+  it('does not keep a test whose only edges past its package are into other packages (objectstack#31520)', () => {
+    expect(why.has('packages/c/src/undeclared.test.ts')).toBe(false);
+    expect(why.has('packages/c/src/reach.test.ts')).toBe(false);
+    expect(v.attributed).toEqual([]);
+    expect(v.filters.some((f) => f.includes('undeclared.test') || f.includes('reach.test'))).toBe(false);
   });
 
   it('leaves out a test the package graph can place', () => {
     expect(why.has('packages/c/src/plain.test.ts')).toBe(false);
     expect(v.filters.some((f) => f.includes('plain.test'))).toBe(false);
+  });
+});
+
+describe('select-affected-tests — attributed test files (objectstack#31520)', () => {
+  // `undeclared.test.ts` (in @fx/c) imports @fx/a by name, which @fx/c does
+  // not declare; `reach.test.ts` (in @fx/c) imports a file of @fx/b, which
+  // depends on @fx/a. Neither is always-on; each is selected exactly when a
+  // package it reads is affected.
+  const { root, tracked } = workspace();
+  const attributedOf = (changed: string[]) => new Map(affected(root, tracked, changed).attributed.map((a) => [a.file, a.via]));
+
+  it('selects a test when the package it imports by name without declaring it changes', () => {
+    const v = affected(root, tracked, ['packages/a/src/index.ts']);
+    expect(v.filters).toContain('packages/c/src/undeclared.test.ts');
+    expect(attributedOf(['packages/a/src/index.ts']).get('packages/c/src/undeclared.test.ts')).toEqual(['@fx/a']);
+  });
+
+  it('selects a test when the package it reaches by a relative import changes', () => {
+    const v = affected(root, tracked, ['packages/b/src/index.ts']);
+    expect(v.filters).toContain('packages/c/src/reach.test.ts');
+    expect(attributedOf(['packages/b/src/index.ts']).get('packages/c/src/reach.test.ts')).toEqual(['@fx/b']);
+  });
+
+  it('selects a test when a dependency of the package it reaches changes, through that package', () => {
+    expect(affected(root, tracked, ['packages/a/src/index.ts']).filters).toContain('packages/c/src/reach.test.ts');
+    expect(attributedOf(['packages/a/src/index.ts']).get('packages/c/src/reach.test.ts')).toEqual(['@fx/a', '@fx/b']);
+  });
+
+  it('does not select either when only a package neither reads changes', () => {
+    const v = affected(root, tracked, ['packages/registry/src/index.ts']);
+    expect(v.attributed).toEqual([]);
+    expect(v.filters.some((f) => f.includes('undeclared.test') || f.includes('reach.test'))).toBe(false);
+  });
+
+  it('a change to its own package selects it through the package directory, not as an attributed file', () => {
+    const v = affected(root, tracked, ['packages/c/src/index.ts']);
+    expect(v.filters).toContain('packages/c/');
+    expect(v.attributed).toEqual([]);
   });
 });
 

@@ -405,6 +405,34 @@ export function timingModeNote(event) {
 // density cap equals the 8-shard mean; the slice that reads built declarations
 // is admitted by closureAllowance() (#29777 ruling B).
 //
+// RAISED TO 3 (#25870), on the same dataset, inside that band. Both counts pass
+// pin 3c at 1432.04s (2's slice 716.02s is within 773.27s; 3's n - 1 slice,
+// 716.02s, is above the 699.63s LOWER edge), so the band admits the choice and
+// the shard wall makes it. A slice runs as its shard's serial leg AFTER the
+// whole-package leg (ci.yml, "Run this shard's tests"), so it adds to that
+// shard's wall at full weight while the whole leg runs four wide. Measured over
+// the 79 full-plan runs (57 merge_group, 22 schedule) on 2026-11-04..08 where
+// all eight shards ran green, the two slice shards were the slowest:
+//
+//   Test Core (4/8)  median job 19.4 min   313s whole leg + 873s cli 2/2
+//   Test Core (1/8)  median job 16.8 min    43s whole leg + 766s cli 1/2
+//   the other six    median job 9.3-14.8 min, no slice
+//
+// (leg medians from 112 shard logs of 14 of those runs). The CLI measured
+// ~1640s alone there, 766 + 873, against its 1432.04s weight -- so at the next
+// refresh 2 leaves the band ("Raise it to 3") and 3 stays inside it. Cut 3
+// ways the slices land on three shards that hold neither spec's nor runtime's
+// suite (shards 1, 7 and 8 on the full list: the reader slice beside 291s of
+// whole packages, the other two beside ~1075s), and the slowest CLI shard's
+// tests step, modelled as whole sum / WHOLE_LEG_WALL_DIVISOR + slice with the
+// slices cut from measured per-file times, falls from ~1164s to ~977s (the
+// model reads ~10% high on today's 4/8). Its job median goes ~19.4 -> ~16.4
+// min; that shard stays the slowest, ~1.5 min above runtime's 3/8.
+// 4 and 5 would close that gap and pin 3c refuses both (4: "Lower it to 3";
+// 5: "Lower it to 4"), because it reads a slice beside the other packages' heaviest task rather than
+// after the shard's whole leg; re-grounding the pin is a ruled gate's change,
+// not this count's.
+//
 // ⛔ THE COUNT IS CONFIGURED; WHETHER A RUN SLICES IS DECIDED BY THAT RUN. A
 // pull_request or merge_group run splits its own affected set, so planShards()
 // asks, of the run's own list, whether a configured package is that run's
@@ -425,7 +453,7 @@ export function timingModeNote(event) {
 // a change to what that generator can DECODE, which is why the map it replaced
 // is kept below.
 export const FILE_SHARDED_PACKAGES = Object.freeze({
-  '@objectstack/cli': 2,
+  '@objectstack/cli': 3,
 });
 
 // THE MAP AS IT STOOD BEFORE ITS LAST CHANGE, read only by the generator's
@@ -454,9 +482,9 @@ export const FILE_SHARDED_PACKAGES = Object.freeze({
 // retained summary predates the change and this map decodes nothing.
 // The outgoing map of #22075's third round was empty -- the runs before it
 // carried no slice. #25870 raised the CLI from 3 slices to 4; #29777 lowered
-// it from 4 to 2, so this holds 4.
+// it from 4 to 2; #25870 raised it again from 2 to 3, so this holds 2.
 export const PREVIOUS_FILE_SHARDED_PACKAGES = Object.freeze({
-  '@objectstack/cli': 4,
+  '@objectstack/cli': 2,
 });
 
 // ── THE SLICE THAT READS BUILT DECLARATIONS CARRIES THEIR CLOSURE (#25870) ──

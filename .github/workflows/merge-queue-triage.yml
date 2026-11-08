@@ -182,6 +182,14 @@ on:
   workflow_run:
     workflows: [CI]
     types: [completed]
+    # Trigger-level narrowing (#31521): GitHub matches `branches` against the
+    # branch the triggering CI run ran on, and every merge_group run runs on
+    # `gh-readonly-queue/<base>/pr-…`. Without it every CI run of any event
+    # started a run here that the job `if:` then skipped (about 757 a day over
+    # 2026-11-01..07, against about 263 merge_group CI runs). The trigger
+    # cannot filter on event or conclusion, so the job `if:` below stays the
+    # authority and this line only stops runs it would skip anyway.
+    branches: ['gh-readonly-queue/**']
 
 permissions: {}
 
