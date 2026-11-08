@@ -45,6 +45,24 @@ export type RecycleBinListHost = Pick<
   '_registry' | 'logger' | 'effectiveObjectPermissionsResolver' | 'getDriver' | 'buildDriverOptions' | 'engineLayer0Verdict'
 >;
 
+/**
+ * [ADR-0148 D1, #30237] The recycle-bin half of `ObjectQL.delete`'s options:
+ * `onRecycleBinEntry` is told the id of the entry a by-id delete wrote, once
+ * the driver reports the row removed, so the data door can answer
+ * `DeleteDataResponse.recycleBinEntryId`, the entry a caller offers to undo.
+ * Not called when the delete wrote no entry (a platform object, a delete by
+ * predicate or with `multi: true`, `permanent: true`, a composition with no
+ * bin) or the driver removed nothing.
+ *
+ * A function, so it lives beside `EngineDeleteOptions` rather than on it, as
+ * update's `WriteObservabilityOptions` do: a callback has no JSON Schema, the
+ * spec's options type stays the serialisable bag, and the hook face
+ * (`HookDeleteOptions`) does not inherit it.
+ */
+export interface RecycleBinDeleteObservability {
+  onRecycleBinEntry?: (entryId: string) => void;
+}
+
 /** The most entries one page of {@link listRecycleBin} answers. */
 export const RECYCLE_BIN_LIST_MAX_LIMIT = 200;
 

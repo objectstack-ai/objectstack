@@ -8,6 +8,9 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+// Pays `@objectstack/lint`'s first load at collection, never inside a clocked case
+// (the diagnostics import it lazily).
+import '@objectstack/lint';
 import { assertEngineDeleteDispatch } from '@objectstack/metadata-core';
 import { DeleteDataResponseSchema } from '@objectstack/spec/api';
 import { ObjectStackProtocolImplementation } from './protocol.js';

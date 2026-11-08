@@ -2,6 +2,9 @@
 // [#30237 PR 5, ADR-0148] The recycle bin's REST doors under `{data}/:object/recycle-bin`.
 
 import { describe, it, expect, vi } from 'vitest';
+// Pays `@objectstack/objectql`'s first load at collection, never inside a clocked case
+// (the route modules import it lazily).
+import '@objectstack/objectql';
 import { RestServer } from './rest-server';
 
 function mockServer() {

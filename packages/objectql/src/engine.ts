@@ -87,7 +87,7 @@ import { openRecycleBinCapture, type RecycleBinCapture } from './recycle-bin/cap
 import { emptyRecycleBin, purgeRecycleBinEntry, readPermanentDelete, type RecycleBinRemovalOptions } from './recycle-bin/purge.js';
 import type { RecycleBinRetentionSettings } from './recycle-bin/retention.js';
 import { restoreRecycleBinEntry, type RecycleBinRestoreOptions, type RecycleBinRestoreResult } from './recycle-bin/restore.js';
-import { listRecycleBin, type RecycleBinListOptions, type RecycleBinListResult } from './recycle-bin/list.js';
+import { listRecycleBin, type RecycleBinDeleteObservability, type RecycleBinListOptions, type RecycleBinListResult } from './recycle-bin/list.js';
 // [#25522 cut 6] The predicate-write hook dispatch bodies; the methods of the
 // same names below hand each body the members it reads (`HookDispatchHost`).
 import {
@@ -8589,7 +8589,7 @@ export class ObjectQL implements IObjectQLEngine {
     return CascadePlanningFacet.organizationOwnedRowCounts.call(cascadePlanningHost.of(this), organizationId, options);
   }
 
-  async delete(object: string, options?: EngineDeleteOptions): Promise<boolean | number> {
+  async delete(object: string, options?: EngineDeleteOptions & RecycleBinDeleteObservability): Promise<boolean | number> {
     object = this.resolveObjectName(object);
     // [#22782] An aborting `afterDelete` rolls this write back — see `opensAfterAbortUnit`.
     if (this.opensAfterAbortUnit('afterDelete', object, options?.context)) {

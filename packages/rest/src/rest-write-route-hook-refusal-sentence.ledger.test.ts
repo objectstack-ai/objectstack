@@ -57,6 +57,9 @@
  */
 
 import { describe, it, expect, vi, beforeAll, afterAll, type MockInstance } from 'vitest';
+// Pays `@objectstack/objectql`'s first load at collection, never inside a clocked case
+// (the route modules import it lazily).
+import '@objectstack/objectql';
 import { RestServer } from './rest-server.js';
 import { mountAndRecordDirectRoutes } from './direct-mount-composition.js';
 import { REST_ROUTE_LEDGER } from './rest-route-ledger.js';
