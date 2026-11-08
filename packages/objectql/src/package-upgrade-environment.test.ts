@@ -12,6 +12,7 @@ import { ObjectKernel } from '@objectstack/core';
 import { ObjectQL } from './engine.js';
 import { ObjectQLPlugin } from './plugin.js';
 import { planPackageUpgrade } from './package-upgrade-environment.js';
+import { isEmptyPackageUpgradePlan } from '@objectstack/metadata-core';
 
 type Row = Record<string, unknown>;
 
@@ -176,7 +177,8 @@ describe('rows in each column the upgrade touches', () => {
   it('an identical pair reads nothing', async () => {
     const engine = await makeEngine([lead({ company: { type: 'text' } })], { acme_lead: [{ id: 'l1', company: 'Acme' }] });
     const body = { objects: [lead({ company: { type: 'text' } })] };
-    expect((await planPackageUpgrade(engine, body, structuredClone(body))).environment).toEqual({ columns: [], removedObjects: [], seeds: [] });
+    // `overrides: null`: no override reader was given, so the advisory class was not read.
+    expect((await planPackageUpgrade(engine, body, structuredClone(body))).environment).toEqual({ columns: [], removedObjects: [], seeds: [], overrides: null });
   });
 });
 
@@ -198,6 +200,117 @@ describe("the `manifest` service's planUpgrade", () => {
 
       expect(plan.suspectedRenames.map((s) => `${s.field}→${s.candidates.map((c) => c.field).join('|')}`)).toEqual(['company→account_name']);
       expect(environment.columns).toEqual([{ object: 'acme_lead', field: 'company', reasons: ['removed', 'suspected_rename'], rows: 1 }]);
+    } finally {
+      await kernel.shutdown();
+    }
+  });
+});
+
+describe('overrides of the base, as advice (ADR-0146 D2, as amended)', () => {
+  const BASE = 'com.acme.crm';
+  const LEAD = { name: 'acme_lead', fields: { name: { type: 'text' } } };
+  const view = (label: string) => ({ name: 'acme_lead_list', object: 'acme_lead', viewKind: 'list', label, columns: ['name'] });
+  const crm = (version: string, views: unknown[], extra: Record<string, unknown> = {}) =>
+    ({ id: BASE, version, objects: [LEAD], views, ...extra });
+  const override = (basedOn: string) => ({ type: 'view', name: 'acme_lead_list', basedOn });
+  const reader = (entries: Array<Record<string, unknown>>) => vi.fn(async (_packageId: string) => entries as any);
+
+  it('v1 → v2 changes an overridden view: one finding that hides the change; the schema plan is untouched', async () => {
+    const engine = await makeEngine([LEAD], {});
+    const listOverrides = reader([override('1.0.0')]);
+
+    const { plan, environment } = await planPackageUpgrade(engine, crm('1.0.0', [view('Leads')]), crm('2.0.0', [view('All leads')]), { listOverrides });
+
+    expect(listOverrides).toHaveBeenCalledWith(BASE);
+    expect(environment.overrides?.hidesChange).toEqual([expect.objectContaining({
+      package: BASE, type: 'view', name: 'acme_lead_list', basedOn: '1.0.0', installedVersion: '1.0.0', incomingVersion: '2.0.0', change: 'changed',
+    })]);
+    expect(environment.overrides?.hidesChange[0].next).toMatch(/Studio/);
+    expect(environment.overrides?.stale).toEqual([]);
+    // Advice only: the comparison a refusal reads names nothing.
+    expect(isEmptyPackageUpgradePlan(plan)).toBe(true);
+  });
+
+  it('v2 leaves the overridden view as it was: no finding', async () => {
+    const engine = await makeEngine([LEAD], {});
+    const { environment } = await planPackageUpgrade(engine, crm('1.0.0', [view('Leads')]), crm('2.0.0', [view('Leads')]), {
+      listOverrides: reader([override('1.0.0')]),
+    });
+    expect(environment.overrides).toEqual({ hidesChange: [], stale: [] });
+  });
+
+  it('an override whose basedOn is not the installed version is stale, whether or not the upgrade changes its item', async () => {
+    const engine = await makeEngine([LEAD], {});
+    const { environment } = await planPackageUpgrade(engine, crm('1.2.0', [view('Leads')]), crm('2.0.0', [view('Leads')]), {
+      listOverrides: reader([override('1.0.0')]),
+    });
+    expect(environment.overrides?.hidesChange).toEqual([]);
+    expect(environment.overrides?.stale).toEqual([expect.objectContaining({
+      package: BASE, type: 'view', name: 'acme_lead_list', basedOn: '1.0.0', installedVersion: '1.2.0', incomingVersion: '2.0.0',
+    })]);
+    expect(environment.overrides?.stale[0]).not.toHaveProperty('change');
+  });
+
+  it('a view item of an aggregated container, and a base item the new version removes', async () => {
+    const engine = await makeEngine([LEAD], {});
+    const container = (label: string) => ({ object: 'acme_lead', list: { type: 'grid', label, columns: ['name'] } });
+    const { environment } = await planPackageUpgrade(
+      engine,
+      crm('1.0.0', [container('Leads')], { dashboards: [{ name: 'acme_home', label: 'Home', widgets: [] }] }),
+      crm('2.0.0', [container('All leads')]),
+      { listOverrides: reader([{ type: 'view', name: 'acme_lead' }, { type: 'dashboard', name: 'acme_home', basedOn: '1.0.0' }]) },
+    );
+    expect(environment.overrides?.hidesChange.map((f) => `${f.type}:${f.name}:${f.change}`)).toEqual([
+      'view:acme_lead:changed', 'dashboard:acme_home:removed',
+    ]);
+  });
+
+  it('loader stamps that name the version an item came with are not a change', async () => {
+    const engine = await makeEngine([LEAD], {});
+    const stamped = (version: string) => ({ ...view('Leads'), _packageId: BASE, _packageVersion: version });
+    const { environment } = await planPackageUpgrade(engine, crm('1.0.0', [stamped('1.0.0')]), crm('2.0.0', [stamped('2.0.0')]), {
+      listOverrides: reader([override('1.0.0')]),
+    });
+    expect(environment.overrides).toEqual({ hidesChange: [], stale: [] });
+  });
+
+  it('no reader: the class is null, never an empty answer; a reading that fails is null and told', async () => {
+    const engine = await makeEngine([LEAD], {});
+    const v1 = crm('1.0.0', [view('Leads')]);
+    const v2 = crm('2.0.0', [view('All leads')]);
+    expect((await planPackageUpgrade(engine, v1, v2)).environment.overrides).toBeNull();
+
+    const warn = vi.fn();
+    const failing = vi.fn(async () => { throw new Error('sys_metadata unreachable'); });
+    expect((await planPackageUpgrade(engine, v1, v2, { listOverrides: failing, warn })).environment.overrides).toBeNull();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('overrides'), expect.objectContaining({ package: BASE }));
+  });
+});
+
+describe("the `manifest` service's planUpgrade reads the protocol's served overrides", () => {
+  it('a protocol registered after the engine is asked when the plan is, for each base the artifact delivers', async () => {
+    const listServedOverrides = vi.fn(async ({ packageId }: { packageId: string }) =>
+      packageId === 'com.acme.crm' ? [{ type: 'view', name: 'acme_lead_list', basedOn: '1.0.0' }] : []);
+    const kernel = new ObjectKernel({ logger: { level: 'silent' }, gracefulShutdown: false });
+    await kernel.use(new ObjectQLPlugin({ registerProtocol: false } as any));
+    await kernel.use({
+      name: 'test.protocol', version: '1.0.0', dependencies: ['com.objectstack.engine.objectql'],
+      init: async (ctx: any) => { ctx.registerService('protocol', { listServedOverrides }); },
+    } as any);
+    await kernel.bootstrap();
+    try {
+      const ql = kernel.getService<ObjectQL>('objectql');
+      ql.registerDriver(makeDriver({}) as any, true);
+      const artifact = (version: string, label: string) => ({
+        packages: [{ manifest: { id: 'com.acme.crm', name: 'crm', version, type: 'app', views: [{ name: 'acme_lead_list', object: 'acme_lead', viewKind: 'list', label }] } }],
+      });
+
+      const manifest = kernel.getService<{ planUpgrade(a: unknown, b: unknown): ReturnType<typeof planPackageUpgrade> }>('manifest');
+      const { environment } = await manifest.planUpgrade(artifact('1.0.0', 'Leads'), artifact('2.0.0', 'All leads'));
+
+      expect(listServedOverrides).toHaveBeenCalledWith({ packageId: 'com.acme.crm' });
+      expect(environment.overrides?.hidesChange.map((f) => `${f.package} ${f.type}:${f.name} ${f.installedVersion}→${f.incomingVersion}`))
+        .toEqual(['com.acme.crm view:acme_lead_list 1.0.0→2.0.0']);
     } finally {
       await kernel.shutdown();
     }
