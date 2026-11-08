@@ -25,12 +25,14 @@
 - 红/踢出处置在同一落地窗口内做:机器输入是 merge-queue triage workflow 的分诊评论。
 - 判据唯一来源是签名台账(锚点 issue),优先于现场判断;只有人工能升级台账。
 - 疑似新 flaky 只留提请,⛔ 不自行加表;纯计数不追记,只有改变修法作用域时才记。
-- 四分支:已知 flaky ⇒ 原样重投;已修签名再现 ⇒ ⛔ 不重投,判新问题重新诊断。
+- 四分支,head 未变只凭 flake 重投:已知 flaky ⇒ 原样重投;已修签名再现 ⇒ 判新问题重诊。
 - 基上缺已合修复 ⇒ merge main 推新提交,重跑无效;新语种包落地致翻译门禁红同属此支。
 - 新签名 ⇒ ⛔ 不重投,PR 与其 `Fixes` 卡各留完整签名与初判;下条三事实全立可重投一次。
 - 三事实:失败文件 import 闭包与 diff 不相交、队列基座同 shard 绿、首错是超时非断言。
 - 每次处置留审计评论,重投写签名与台账依据或三行回执;同签名再弹即停,交下一席重诊。
-- 标签 PR 末次绿 PR 跑后 main 落新语种包 ⇒ 挂 auto-merge/入队前 merge main 重跑,`behind` 例外。
+- 挂 auto-merge/入队前读 K = `git rev-list --count --first-parent PRBASE..origin/main`。
+- PRBASE = 末次绿 PR 跑 Test Core 所印 `Affected-set diff base`,⛔ 不取该跑起始时刻。
+- K ≥ 15,或标签 PR 的 PRBASE 后 main 落新语种包(任何 K)⇒ 先 merge main 等重跑绿,`behind` 例外。
 - 标签即 `check-generated-translation-bundles`、`check-no-new-untranslated-declared-labels` 所计显示标签。
 
 ## A. 碰生成物的 PR:入队前先同步 + 整体重生成
@@ -38,11 +40,9 @@
 - `merge=os-regen` 路径清单当场读 `grep os-regen .gitattributes`,那是唯一权威清单。
 - ⛔ 不把该清单抄进派发令当常量;文档产物同在清单、同样会被吞。
 - 四步序已机械化 `bash scripts/pm/os-regen-merge.sh`,步骤以脚本为权威;⛔ 禁 rebase 与 force-push。
-- ⛔ 永不在 MERGE 状态下跑 `gen:schema`:锚点会静默倒退回旧分叉点且全部门禁放行。
 - 重生成后断言所有兄弟单的条目都还在。
 - 更硬的旁证是查上一单的实现体完好:`git grep` 带引号精确名对 `origin/main` 与实现文件。
 - 锚点断言的正确措辞:断言 `pnpm --filter @objectstack/spec check:authorable-surface` 绿即可。
-- `baseRev` 允许滞后,是一行提示不是错误;⛔ 禁为凑相等手改锚点。
 
 ## B. 跟到 MERGED 为止;入队后的看护归车道 PM 落地窗口
 
