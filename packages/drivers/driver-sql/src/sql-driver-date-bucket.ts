@@ -59,8 +59,16 @@ export interface DateBucketHost {
 }
 
 /** The body of `SqlDriver#buildDateBucketExpr`; the method's docblock there is its contract. */
-export function buildDateBucketExpr(this: Pick<DateBucketHost, 'dateGranularityCapabilities' | 'isMysql' | 'isPostgres' | 'isSqlite' | 'sqliteTemporalArg' | 'temporalFieldKind'>, field: string, granularity: 'day' | 'week' | 'month' | 'quarter' | 'year', table?: string | null): { sql: string; bindings: any[] } | null {
+export function buildDateBucketExpr(this: Pick<DateBucketHost, 'dateGranularityCapabilities' | 'isMysql' | 'isPostgres' | 'isSqlite' | 'sqliteTemporalArg' | 'temporalFieldKind'>, field: string, granularity: 'day' | 'week' | 'month' | 'quarter' | 'year', table?: string | null, column: string = field): { sql: string; bindings: any[] } | null {
   if (!this.dateGranularityCapabilities[granularity]) return null;
+
+  // `field` is the FIELD — the registries (`temporalFieldKind`, the SQLite
+  // repair) are keyed by it; `column` is the identifier the statement names,
+  // the remote column an `external.columnMap` maps the field to.
+  if (column !== field) {
+    const bucket = buildDateBucketExpr.call(this, field, granularity, table);
+    return bucket && { sql: bucket.sql, bindings: bucket.bindings.map((b) => (b === field ? column : b)) };
+  }
 
   const calendarDay = this.temporalFieldKind(table, field) === 'date';
 
