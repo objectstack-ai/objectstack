@@ -17,7 +17,7 @@ Metadata-protocol: none
   - an installed plugin that loads and declares `crypto-provider` is the plugin the run seals and opens with;
   - a refused installed plugin that may provide it refuses the run, naming the plugin, its refusal code and the step `os serve`'s refusal names;
   - two declaring plugins, config or installed, are refused, both named;
-  - an installed plugin whose name a config plugin takes is refused as `plugin_name_taken`, as `os serve` refuses it.
+  - an installed plugin whose name a config plugin, or an installed plugin read before it, takes is refused as `plugin_name_taken`, as `os serve` refuses it.
   The run registers and removes none of the installed plugins: a pending uninstall is left for the next boot.
 - **`@objectstack/runtime`.** `loadInstalledPlugins` takes an optional `leaveUninstallsPending`. When it is set, a pending uninstall is neither finished nor loaded.
 - **Who moves, and the fix.** A deployment whose one-shot run now stops runs the step the refusal names (fix the installed plugin, or `os plugin disable <id>`), or keeps one declaration of the crypto provider, then runs it again.

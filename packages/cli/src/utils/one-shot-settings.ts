@@ -212,12 +212,16 @@ export async function oneShotCrypto(
     const host = createHostCryptoProvider(() => {
       throw new HostCryptoProviderRefusal(
         `Refusing to seal or open a secret: the plugin '${declared.name}' declares the crypto provider `
-        + `('crypto-provider') in the host config, and registered none in this run. Every secret this `
+        + `('crypto-provider') ${declaredWhere(declared.source)}, and registered none in this run. Every secret this `
         + 'deployment holds is sealed by that provider, so this run uses no other key. Nothing was opened or written.',
       );
     });
     return {
-      plugins: [refusingNamedOnFailure(declared.plugin, declared.name, HostCryptoProviderRefusal), host.plugin, settingsOver(host.provider)],
+      plugins: [
+        await refusingNamedOnFailure(declared.plugin, declared.name, declaredWhere(declared.source), HostCryptoProviderRefusal),
+        host.plugin,
+        settingsOver(host.provider),
+      ],
       provider: host.provider,
       declaredBy: declared.name,
       key: null,
@@ -248,16 +252,38 @@ export async function oneShotSettingsPlugins(crypto?: OneShotCrypto): Promise<un
  * lists (module header); ⛔ never guessed: an unreadable config or entry, or a
  * refused installed plugin that may provide it, is refused, not read as "none".
  */
-async function readDeclaredCryptoProvider(cwd: string): Promise<{ name: string; plugin: object } | null> {
+async function readDeclaredCryptoProvider(
+  cwd: string,
+): Promise<{ name: string; plugin: object; source: CryptoProviderSource } | null> {
   const {
     cryptoProviderPlugins,
     refuseTwoCryptoProviderPlugins,
     refuseRefusedInstalledCryptoProviderPlugins,
   } = await import('../commands/serve.js');
   const composed = await readHostConfigPlugins(cwd);
-  composed.push(...await readInstalledPlugins(composed, refuseRefusedInstalledCryptoProviderPlugins));
+  const installed = await readInstalledPlugins(composed, refuseRefusedInstalledCryptoProviderPlugins);
+  composed.push(...installed);
   refuseTwoCryptoProviderPlugins(composed);
-  return cryptoProviderPlugins(composed)[0] ?? null;
+  const declared = cryptoProviderPlugins(composed)[0];
+  if (!declared) return null;
+  return { ...declared, source: installed.includes(declared.plugin) ? 'installed' : 'host-config' };
+}
+
+/** Where the plugin that declares the crypto provider came from. */
+type CryptoProviderSource = 'host-config' | 'installed';
+
+/** The words a refusal uses for {@link CryptoProviderSource}. */
+function declaredWhere(source: CryptoProviderSource): string {
+  return source === 'installed' ? 'as a plugin installed by `os plugin install`' : 'in the host config';
+}
+
+/** A thrown value's message, or words for one that cannot be printed. */
+function thrownMessage(error: unknown): string {
+  try {
+    return String(error instanceof Error ? error.message : error);
+  } catch {
+    return 'a value that cannot be printed';
+  }
 }
 
 /**
@@ -313,9 +339,10 @@ async function readHostConfigPlugins(cwd: string): Promise<unknown[]> {
  * `refuseRefusedInstalledCryptoProviderPlugins`), and each one that loads is
  * answered, so the provider it declares is the one this run seals with. ⛔
  * Nothing is registered or removed here: a pending uninstall is left for the
- * next boot. One whose name an entry of the host config already takes is
- * refused as `os serve` refuses it (`plugin_name_taken`), and so is one whose
- * name cannot be read (`kernel_refused`).
+ * next boot. One whose name an entry of the host config, or an installed
+ * plugin read before it, already takes is refused as `os serve` refuses it
+ * (`plugin_name_taken`), and so is one whose name cannot be read
+ * (`kernel_refused`).
  */
 async function readInstalledPlugins(
   configPlugins: readonly unknown[],
@@ -333,6 +360,7 @@ async function readInstalledPlugins(
       // a name that cannot be read takes none
     }
   }
+  const takenByInstalled = new Set<string>();
   const refused: InstalledPluginRefusal[] = [...installed.refused];
   const loaded: unknown[] = [];
   for (const { record, plugin, declaredServices } of installed.loaded) {
@@ -344,14 +372,19 @@ async function readInstalledPlugins(
     let name: string;
     try {
       name = String((plugin as { name?: unknown }).name ?? record.id);
-    } catch {
-      refusal('kernel_refused', 'its plugin name cannot be read');
+    } catch (error) {
+      refusal('kernel_refused', `its plugin name cannot be read: ${thrownMessage(error)}`);
       continue;
     }
     if (taken.has(name)) {
       refusal('plugin_name_taken', `its plugin name '${name}' is a plugin of the host config, and an installed plugin does not replace one.`);
       continue;
     }
+    if (takenByInstalled.has(name)) {
+      refusal('plugin_name_taken', `its plugin name '${name}' is an installed plugin read before it, and an installed plugin does not replace one.`);
+      continue;
+    }
+    takenByInstalled.add(name);
     loaded.push(plugin);
   }
   refuseRefused(refused);
@@ -363,14 +396,17 @@ async function readInstalledPlugins(
  * one-shot run boots the deployment's crypto provider plugin, and a failure
  * there must say whose provider could not boot. Every other member is
  * forwarded, `constructor` unbound so a class-name presence test still reads
- * the plugin's own class.
+ * the plugin's own class. The artifact verdict a host recorded for `plugin`
+ * is recorded for the wrapper too, since the kernel reads it by object
+ * identity.
  */
-function refusingNamedOnFailure<T extends object>(
+async function refusingNamedOnFailure<T extends object>(
   plugin: T,
   name: string,
+  where: string,
   Refusal: new (message: string) => Error,
-): T {
-  return new Proxy(plugin, {
+): Promise<T> {
+  const wrapper = new Proxy(plugin, {
     get(target, prop) {
       const value = (target as Record<string | symbol, unknown>)[prop];
       if (prop === 'init' && typeof value === 'function') {
@@ -380,7 +416,7 @@ function refusingNamedOnFailure<T extends object>(
           } catch (error) {
             throw new Refusal(
               `Refusing to seal or open a secret: the plugin '${name}', which declares the crypto provider `
-              + `('crypto-provider') in the host config, could not boot in this run `
+              + `('crypto-provider') ${where}, could not boot in this run `
               + `(${error instanceof Error ? error.message : String(error)}). Every secret this deployment holds is `
               + 'sealed by that provider, so this run uses no other key. Nothing was opened or written.',
             );
@@ -393,4 +429,8 @@ function refusingNamedOnFailure<T extends object>(
       return value;
     },
   }) as T;
+  const { pluginArtifactVerdict, recordPluginArtifactVerdict } = await import('@objectstack/core');
+  const verdict = pluginArtifactVerdict(plugin);
+  if (verdict) recordPluginArtifactVerdict(wrapper, verdict);
+  return wrapper;
 }

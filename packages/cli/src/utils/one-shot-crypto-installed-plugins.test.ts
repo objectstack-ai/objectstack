@@ -16,14 +16,16 @@
  * Pinned, each composition booted in a REAL `ObjectKernel`:
  *
  *   1. an installed plugin that loads and declares the provider is the one the
- *      run seals and opens with, and the local key is never resolved;
+ *      run seals and opens with, and the local key is never resolved — signed
+ *      too, with the verdict its host recorded; a refusal of it says it is
+ *      installed, never that the host config declares it;
  *   2. a refused installed plugin that may provide it refuses the run, named,
  *      before anything boots — ⛔ never the local key;
  *   3. CONTROL: a refusal `serve` rules out, and no installations file, leave
  *      the local provider over the key that already exists;
  *   4. a config plugin and an installed one both declaring it are refused,
- *      both named; an installed declaring plugin whose name the config takes
- *      is refused as `serve` refuses it;
+ *      both named; an installed declaring plugin whose name the config, or an
+ *      installed plugin read before it, takes is refused as `serve` refuses it;
  *   5. the read leaves a pending uninstall as it is.
  */
 
@@ -32,7 +34,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { ObjectKernel } from '@objectstack/core';
+import { ObjectKernel, recordPluginArtifactVerdict } from '@objectstack/core';
 import { LocalCryptoProvider } from '@objectstack/service-settings';
 import type { CryptoContext, CryptoHandle, ICryptoProvider } from '@objectstack/spec/contracts';
 import type { InstalledPluginsLoad } from '@objectstack/runtime';
@@ -172,6 +174,36 @@ describe('an installed plugin that declares the crypto provider is the one the r
     await expect(new LocalCryptoProvider({ key: Buffer.from(LOCAL_KEY_HEX, 'hex') }).decrypt(handle, CTX)).rejects.toThrow();
   }, 60_000);
 
+  it('a signed one boots with the verdict its host recorded', async () => {
+    const signature = `ed25519:acme-kid:${Buffer.from('a detached signature').toString('base64url')}`;
+    const kms = { ...providerPlugin('com.acme.kms', kmsProvider()), signature };
+    recordPluginArtifactVerdict(kms, { signature, keyId: 'acme-kid', fingerprint: null, artifactSha256: '00'.repeat(32) });
+    installed({ loaded: [{ record: record('com.acme.kms'), plugin: kms, declaredServices: [CRYPTO_PROVIDER_SERVICE] }] });
+    const crypto = await oneShotCrypto({ cwd: project(null), env: envWith({ OS_SECRET_KEY: LOCAL_KEY_HEX }) });
+
+    await boot(crypto);
+    expect(crypto.provider.source).toBe('registered');
+    const handle = await crypto.provider.encrypt('kms-sealed', CTX);
+    expect(handle.kmsKeyId).toBe('test-kms');
+  }, 60_000);
+
+  it('a refusal of it says it is installed, never that the host config declares it', async () => {
+    installed({ loaded: [{ record: record('com.acme.kms'), plugin: providerPlugin('com.acme.kms', undefined), declaredServices: [CRYPTO_PROVIDER_SERVICE] }] });
+    const silent = await oneShotCrypto({ cwd: project(null), env: envWith({ OS_SECRET_KEY: LOCAL_KEY_HEX }) });
+    const none = await refusalOf(boot(silent));
+    expect(none).toBeInstanceOf(HostCryptoProviderRefusal);
+    expect(String((none as Error).message)).toContain("'com.acme.kms' declares the crypto provider ('crypto-provider') as a plugin installed by `os plugin install`");
+    expect(String((none as Error).message)).not.toContain('host config');
+
+    const failing = { ...providerPlugin('com.acme.kms', undefined), init: async () => { throw new Error('kms unreachable'); } };
+    installed({ loaded: [{ record: record('com.acme.kms'), plugin: failing, declaredServices: [CRYPTO_PROVIDER_SERVICE] }] });
+    const broken = await oneShotCrypto({ cwd: project(null), env: envWith({ OS_SECRET_KEY: LOCAL_KEY_HEX }) });
+    const failed = await refusalOf(boot(broken));
+    expect(String((failed as Error).message)).toContain("'com.acme.kms', which declares the crypto provider ('crypto-provider') as a plugin installed by `os plugin install`, could not boot");
+    expect(String((failed as Error).message)).toContain('kms unreachable');
+    expect(String((failed as Error).message)).not.toContain('host config');
+  }, 60_000);
+
   it('beside a host config whose plugins declare none', async () => {
     const kms = providerPlugin('com.acme.kms', kmsProvider());
     installed({ loaded: [{ record: record('com.acme.kms'), plugin: kms, declaredServices: [CRYPTO_PROVIDER_SERVICE] }] });
@@ -235,6 +267,19 @@ describe('with the host config, serve\'s rules for both lists hold', () => {
     const refusal = await refusalOf(oneShotCrypto({ cwd: dir, env: envWith({ OS_SECRET_KEY: LOCAL_KEY_HEX }) }));
     expect(refusal).toBeInstanceOf(HostCryptoProviderRefusal);
     expect(String((refusal as Error).message)).toContain('installed plugin com.acme.kms@1.0.0 was refused (plugin_name_taken)');
+  }, 60_000);
+
+  it('an installed declaring plugin whose name an installed plugin read before it takes is refused, as serve refuses it', async () => {
+    installed({
+      loaded: [
+        { record: record('com.acme.first'), plugin: { name: 'com.example.shared', version: '1.0.0', init: async () => {} }, declaredServices: [] },
+        { record: record('com.acme.kms'), plugin: providerPlugin('com.example.shared', kmsProvider()), declaredServices: [CRYPTO_PROVIDER_SERVICE] },
+      ],
+    });
+    const refusal = await refusalOf(oneShotCrypto({ cwd: project(null), env: envWith({ OS_SECRET_KEY: LOCAL_KEY_HEX }) }));
+    expect(refusal).toBeInstanceOf(HostCryptoProviderRefusal);
+    expect(String((refusal as Error).message)).toContain('installed plugin com.acme.kms@1.0.0 was refused (plugin_name_taken)');
+    expect(String((refusal as Error).message)).not.toContain('com.acme.first@');
   }, 60_000);
 });
 
