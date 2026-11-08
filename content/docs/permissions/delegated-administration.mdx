@@ -102,9 +102,15 @@ fact. Capability bits are never BU-scoped.
 
 The [explain engine](/docs/permissions/explain) closes the loop twice:
 
-- explaining **another user** is authorized by `manage_users` *or* a delegated
-  `adminScope` whose subtree covers that user — a delegate can diagnose their
-  own people, and only their own people;
+- explaining **another user** — and reading that user's effective access — is
+  authorized by `manage_users`, organization administration of an
+  organization that user is a member of, *or* a delegated `adminScope` whose
+  subtree covers that user — a delegate can diagnose their own people, and
+  only their own people. A scope covers a user the delegate can read, through
+  a business unit of the subtree; a user it cannot read is covered by no
+  scope, so the answer about that user does not depend on whether it exists
+  or what it is a member of. The direct-grant write gate judges its target
+  user the same way, a stored grant's holder included;
 - contributor attribution plus the `granted_by` stamp answer both *who
   granted this* and *who could have*.
 
