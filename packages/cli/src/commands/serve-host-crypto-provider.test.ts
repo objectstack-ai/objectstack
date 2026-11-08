@@ -562,6 +562,25 @@ describe('an installed plugin refused at boot refuses the boot unless it is rule
     expect(refusal!.message).not.toContain('os plugin disable');
   });
 
+  it('a code os plugin disable cannot clear names its own step instead of the disable', () => {
+    for (const [error, step] of [
+      ['install_dir_unexpected', 'Install com.acme.kms again (os plugin install)'],
+      ['uninstall_failed', 'com.acme.kms is being uninstalled'],
+      ['record_changed', 'com.acme.kms is being uninstalled'],
+      ['disabled_state_unreadable', "Repair this environment's disable-state file"],
+    ] as const) {
+      const refusal = refusalOf([refused('com.acme.kms', error)]);
+      expect(refusal, error).toBeInstanceOf(HostCryptoProviderRefusal);
+      expect(refusal!.message).toContain(`installed plugin com.acme.kms@1.0.0 was refused (${error})`);
+      expect(refusal!.message).toContain(step);
+      expect(refusal!.message).not.toContain('os plugin disable');
+    }
+    const mixed = refusalOf([refused('com.acme.one', 'tree_changed'), refused('com.acme.two', 'install_dir_unexpected')]);
+    expect(mixed!.message).toContain('boot without it: os plugin disable com.acme.one.');
+    expect(mixed!.message).toContain('Install com.acme.two again (os plugin install)');
+    expect(mixed!.message).not.toContain('os plugin disable com.acme.two');
+  });
+
   it('every refused plugin is named, and the ruled-out ones are not', () => {
     const refusal = refusalOf([
       refused('com.acme.one', 'tree_changed'),

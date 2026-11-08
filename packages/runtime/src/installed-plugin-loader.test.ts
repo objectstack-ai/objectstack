@@ -470,12 +470,21 @@ describe('what an imported plugin declares rides on its answer', () => {
   it.each([
     ['refused after its import', 'export default { name: "x", init() {}, providesServices: ["crypto-provider", 7], signature: "ed25519:other:AAAA" };\n', ['crypto-provider']],
     ['refused after its import, declaring none', 'export default Object.freeze({ name: "x", init() {} });\n', []],
-    ['refused after its import, not an object', 'export default 42;\n', []],
   ])('%s: declaredServices is what providesServices names', async (_label, entry, declared) => {
     install({ entry });
     const out = await load();
     expect(out.refused).toHaveLength(1);
     expect(out.refused[0].declaredServices).toEqual(declared);
+  });
+
+  it.each([
+    ['a number', 'export default 42;\n'],
+    ['a class, whose instances would declare', 'export default class Kms { providesServices = ["crypto-provider"]; init() {} }\n'],
+  ])('a refusal of an import that is not an object (%s) carries nothing read', async (_label, entry) => {
+    install({ entry });
+    const out = await load();
+    expect(out.refused).toEqual([expect.objectContaining({ error: 'not_a_plugin' })]);
+    expect('declaredServices' in out.refused[0]).toBe(false);
   });
 
   it('a declaration that throws when read is absent, not empty', async () => {
