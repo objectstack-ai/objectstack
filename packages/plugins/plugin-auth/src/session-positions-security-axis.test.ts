@@ -76,13 +76,13 @@ const makeManager = (engine: any) =>
     dataEngine: engine,
   } as any);
 
-const signUp = (manager: AuthManager, email: string, name: string) => {
-  inviteForAudienceGate(manager, email);
+const signUp = async (manager: AuthManager, email: string, name: string) => {
+  const invitationId = await inviteForAudienceGate(manager, email);
   return manager.handleRequest(
     new Request(`${BASE}/sign-up/email`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password: PASSWORD, name }),
+      body: JSON.stringify({ email, password: PASSWORD, name, invitationId }),
     }),
   );
 };

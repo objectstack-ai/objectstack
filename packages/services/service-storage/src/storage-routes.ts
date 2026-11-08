@@ -226,6 +226,28 @@ function chunkIndexRefusalMessage(totalChunks: number): string {
 }
 
 /**
+ * Hand the backend the object key of chunked upload `uploadId`, read from the
+ * upload session row, before every backend call that names the upload.
+ *
+ * S3 addresses a multipart upload by key AND upload id, but the
+ * `IStorageService` chunk and completion methods carry the upload id alone, so
+ * the S3 adapter answers the key from what `setUploadKey` gave it. That record
+ * lives in one process: a chunk or a completion served by another replica, or
+ * after a restart or an adapter swap, finds nothing there. The durable record
+ * is `sys_upload_session.key`, which the init door writes and every later door
+ * already reads, so each door hands it down again rather than trusting
+ * whichever process happened to start the upload.
+ *
+ * Off the `IStorageService` contract: reached by name, on the swappable proxy
+ * (which forwards it) or on a bare adapter. A no-op for a backend without it —
+ * the local adapter records the key beside the parts itself.
+ */
+function handUploadKeyToBackend(storage: IStorageService, uploadId: string, key: string): void {
+  const keyed = storage as IStorageService & { setUploadKey?: (uploadId: string, key: string) => void };
+  if (typeof keyed.setUploadKey === 'function') keyed.setUploadKey(uploadId, key);
+}
+
+/**
  * [#22332] How many times the chunk door tries to record a stored chunk in the
  * upload's progress before it refuses.
  *
@@ -1274,10 +1296,6 @@ export function registerStorageFamily(
       let backendUploadId: string | undefined;
       if (storage.initiateChunkedUpload) {
         backendUploadId = await storage.initiateChunkedUpload(key, { contentType: mimeType, metadata });
-        // S3 adapter needs to know the key for subsequent chunk/complete calls
-        if ('setUploadKey' in storage && typeof (storage as any).setUploadKey === 'function') {
-          (storage as any).setUploadKey(backendUploadId, key);
-        }
       }
 
       const uploadId = backendUploadId ?? randomUUID().replace(/-/g, '');
@@ -1420,6 +1438,7 @@ export function registerStorageFamily(
       // Upload the chunk (S3 uses 1-based part numbers)
       let eTag = '';
       if (storage.uploadChunk) {
+        handUploadKeyToBackend(storage, uploadId, session.key);
         eTag = await storage.uploadChunk(uploadId, chunkIndex + 1, data);
       }
 
@@ -1565,6 +1584,7 @@ export function registerStorageFamily(
       let finalKey = session.key;
       try {
         if (storage.completeChunkedUpload) {
+          handUploadKeyToBackend(storage, uploadId, session.key);
           finalKey = await storage.completeChunkedUpload(uploadId, partsForBackend);
         }
 

@@ -58,6 +58,7 @@ import {
   useBootstrapStatus,
   InvitationGoneNotice,
   invitationArrivalCopy,
+  invitationIdOf,
   useInvitationArrival,
   useInvitationSignUpJoin,
   hasSignInLanguagePick,
@@ -387,6 +388,9 @@ export function RegisterPage() {
         }
         loginUrl={loginUrl}
         verificationCallbackURL={mailCallbackURL}
+        // The sign-up presents the invitation its link names: under
+        // `invite_only` the server admits a sign-up only by it.
+        invitationId={invitationIdOf(redirect) ?? undefined}
         linkComponent={RouterLink}
         // Server refusal `code` → localized end-user text: the one map both
         // register pages pass, owned by `@object-ui/app-shell` (objectui#11030).

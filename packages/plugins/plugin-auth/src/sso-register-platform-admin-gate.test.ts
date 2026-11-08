@@ -225,12 +225,12 @@ async function signUp(
 ): Promise<string> {
   // [#11739] default posture invite_only: fixture users beyond the first
   // enter through the invitation carve-out (see audience-gate-test-support).
-  if (engine) await inviteForAudienceGate(engine, email);
+  const invitationId = engine ? await inviteForAudienceGate(engine, email) : undefined;
   const res = await send(
     new Request(`${AUTH}/sign-up/email`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', origin: BASE },
-      body: JSON.stringify({ email, password: 'S3cure!Passw0rd-10009', name: 'Probe' }),
+      body: JSON.stringify({ email, password: 'S3cure!Passw0rd-10009', name: 'Probe', invitationId }),
     }),
   );
   expect(res.status, `sign-up failed: ${await res.clone().text()}`).toBeLessThan(400);

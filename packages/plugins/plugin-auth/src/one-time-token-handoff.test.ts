@@ -93,8 +93,8 @@ const signedUpOnce = (): Promise<Map<string, any[]>> =>
   (signedUpTables ??= (async () => {
     const template = createMemoryEngine();
     const manager = makeManager(template);
-    await inviteForAudienceGate(manager, ALICE_EMAIL);
-    const res = await postJson(manager, '/sign-up/email', { email: ALICE_EMAIL, password: PASSWORD, name: 'Alice' });
+    const invitationId = await inviteForAudienceGate(manager, ALICE_EMAIL);
+    const res = await postJson(manager, '/sign-up/email', { email: ALICE_EMAIL, password: PASSWORD, name: 'Alice', invitationId });
     expect(res.status, `sign-up: ${await res.clone().text()}`).toBe(200);
     return template.tables as Map<string, any[]>;
   })());

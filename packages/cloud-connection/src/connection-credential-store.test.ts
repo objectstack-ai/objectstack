@@ -11,7 +11,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { ConnectionCredentialStore } from './connection-credential-store.js';
@@ -396,5 +396,145 @@ describe('[#31554] a single node keeps the binding credential in its file', () =
         await rawApp.routes.get('POST /api/v1/cloud-connection/unbind')!(makeC('http://localhost:3000/x'));
         expect(readFileSync(credPath, 'utf8')).toBe(JSON.stringify({ runtimeToken: '', runtimeId: 'rt-1' }, null, 2));
         expect(existsSync(credPath)).toBe(true);
+    });
+});
+
+/**
+ * A single node's credential file follows `OS_HOME`, the home the rest of the
+ * instance's state follows (the default database, the uploads root, the
+ * install ledger). Under the working directory it sat in the container's own
+ * layer, so recreating the container — not restarting it — lost the binding
+ * and an online-licensed node fell back to Community until someone bound it
+ * again. With `OS_HOME` on the data volume the file now outlives the container.
+ */
+describe('a single node keeps the binding credential under OS_HOME', () => {
+    let home: string;
+    let project: string;
+    let legacyPath: string;
+    let homePath: string;
+    beforeEach(() => {
+        home = join(dir, 'home');
+        project = join(dir, 'project');
+        mkdirSync(project, { recursive: true });
+        legacyPath = join(project, '.objectstack', 'cloud-connection.json');
+        homePath = join(home, 'cloud-connection.json');
+        vi.spyOn(process, 'cwd').mockReturnValue(project);
+        vi.stubEnv('OS_HOME', home);
+        vi.stubEnv('OS_INTERNAL_FRESH_HOME', undefined);
+    });
+    afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); });
+
+    /** A plugin on the default credential path, booted the way the kernel boots it. */
+    async function boot(config: Record<string, unknown> = {}) {
+        const rawApp = makeRawApp();
+        const registered = new Map<string, unknown>();
+        const { ctx, fire } = makeCtx(rawApp, { auth: sessionAuth('admin'), manifest: { register: vi.fn() } });
+        (ctx as any).registerService = (name: string, svc: unknown) => registered.set(name, svc);
+        const plugin = new CloudConnectionPlugin({ singleEnvironment: true, environmentId: 'env_1', controlPlaneUrl: 'http://cloud.test', ...config });
+        await plugin.init(ctx as any);
+        await plugin.start(ctx as any);
+        await fire();
+        const reader = registered.get(CLOUD_BINDING_CREDENTIAL_SERVICE) as CloudBindingCredentialReader;
+        return { rawApp, info: ctx.logger.info, error: ctx.logger.error, reader };
+    }
+
+    async function bind(rawApp: ReturnType<typeof makeRawApp>) {
+        vi.stubGlobal('fetch', vi.fn(async (url: any) => {
+            const u = String(url);
+            if (u.includes('/auth/device/token')) return new Response(JSON.stringify({ access_token: 'op-token' }), { status: 200 });
+            if (u.includes('/cloud-connection/bind')) {
+                return new Response(JSON.stringify({ success: true, data: { bound: true, runtime_id: 'rt-1', runtime_token: 'oscc_minted', connection: { organization_id: 'org_x' } } }), { status: 200 });
+            }
+            throw new Error(`unexpected fetch ${u}`);
+        }));
+        const res = await rawApp.routes.get('POST /api/v1/cloud-connection/bind/poll')!(makeC('http://localhost:3000/x', { device_code: 'dc' }));
+        expect(res.payload.success).toBe(true);
+    }
+
+    function writeLegacy(token: string) {
+        new ConnectionCredentialStore(legacyPath).write({ runtimeToken: token, runtimeId: 'rt-old', environmentId: 'env_1' });
+        return readFileSync(legacyPath, 'utf8');
+    }
+
+    function movedLines(info: ReturnType<typeof vi.fn>) {
+        return info.mock.calls.map(([m]) => String(m)).filter((m) => m.includes(legacyPath));
+    }
+
+    it('resolves the default store under OS_HOME, and a bind writes the credential there, 0600', async () => {
+        expect(new ConnectionCredentialStore().path).toBe(homePath);
+        const { rawApp, reader } = await boot();
+        await bind(rawApp);
+        expect(new ConnectionCredentialStore(homePath).read()?.runtimeToken).toBe('oscc_minted');
+        expect(statSync(homePath).mode & 0o777).toBe(0o600);
+        expect(existsSync(legacyPath)).toBe(false);
+        expect(reader.read()?.runtimeToken).toBe('oscc_minted');
+    });
+
+    it('moves the working-directory file an earlier release wrote, once: 0600, one log line, nothing left behind', async () => {
+        const bytes = writeLegacy('oscc_legacy');
+        const first = await boot();
+        expect(readFileSync(homePath, 'utf8')).toBe(bytes);
+        expect(statSync(homePath).mode & 0o777).toBe(0o600);
+        expect(existsSync(legacyPath)).toBe(false);
+        expect(first.reader.read()?.runtimeToken).toBe('oscc_legacy');
+        const lines = movedLines(first.info);
+        expect(lines).toHaveLength(1);
+        expect(lines[0]).toContain(homePath);
+        expect(lines[0]).not.toContain('oscc_legacy');
+        expect(first.error).not.toHaveBeenCalled();
+
+        // The next boot has nothing to move and says nothing about it.
+        const second = await boot();
+        expect(movedLines(second.info)).toHaveLength(0);
+        expect(readFileSync(homePath, 'utf8')).toBe(bytes);
+        expect(second.reader.read()?.runtimeToken).toBe('oscc_legacy');
+    });
+
+    it('keeps the OS_HOME file when both exist, and leaves the working-directory file untouched', async () => {
+        const legacyBytes = writeLegacy('oscc_legacy');
+        new ConnectionCredentialStore(homePath).write({ runtimeToken: 'oscc_home', runtimeId: 'rt-home' });
+        const homeBytes = readFileSync(homePath, 'utf8');
+        const { info, reader } = await boot();
+        expect(reader.read()?.runtimeToken).toBe('oscc_home');
+        expect(readFileSync(homePath, 'utf8')).toBe(homeBytes);
+        expect(readFileSync(legacyPath, 'utf8')).toBe(legacyBytes);
+        expect(statSync(legacyPath).mode & 0o777).toBe(0o600);
+        expect(movedLines(info)).toHaveLength(0);
+    });
+
+    it('control: with OS_HOME unset the file stays where it always was, and nothing moves', async () => {
+        vi.stubEnv('OS_HOME', undefined);
+        expect(new ConnectionCredentialStore().path).toBe(legacyPath);
+        const bytes = writeLegacy('oscc_legacy');
+        const { info, reader } = await boot();
+        expect(readFileSync(legacyPath, 'utf8')).toBe(bytes);
+        expect(existsSync(homePath)).toBe(false);
+        expect(reader.read()?.runtimeToken).toBe('oscc_legacy');
+        expect(movedLines(info)).toHaveLength(0);
+    });
+
+    it('`os dev --fresh`: the credential stays inside the ephemeral home, and the project file is neither moved nor read', async () => {
+        vi.stubEnv('OS_INTERNAL_FRESH_HOME', home);
+        const bytes = writeLegacy('oscc_legacy');
+        expect(new ConnectionCredentialStore().path).toBe(homePath);
+        const { rawApp, info, reader } = await boot();
+        expect(reader.read()).toBeNull();
+        expect(existsSync(homePath)).toBe(false);
+        expect(movedLines(info)).toHaveLength(0);
+        await bind(rawApp);
+        expect(new ConnectionCredentialStore(homePath).read()?.runtimeToken).toBe('oscc_minted');
+        expect(readFileSync(legacyPath, 'utf8')).toBe(bytes);
+    });
+
+    it('an explicit `credentialPath` keeps its precedence over OS_HOME, and moves nothing into it', async () => {
+        const explicit = join(dir, 'srv', 'cloud-connection.json');
+        const bytes = writeLegacy('oscc_legacy');
+        const { rawApp, info } = await boot({ credentialPath: explicit });
+        expect(existsSync(explicit)).toBe(false);
+        expect(movedLines(info)).toHaveLength(0);
+        await bind(rawApp);
+        expect(new ConnectionCredentialStore(explicit).read()?.runtimeToken).toBe('oscc_minted');
+        expect(existsSync(homePath)).toBe(false);
+        expect(readFileSync(legacyPath, 'utf8')).toBe(bytes);
     });
 });
