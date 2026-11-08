@@ -17,9 +17,11 @@
  *  - **The MCP door reads it on every request** ({@link mcpConsentAdmits},
  *    called by `verifyMcpAccessToken`). A token whose consent is gone, or
  *    whose consent was created after the token was issued (revoked, then
- *    granted again), verifies as no principal. A store error refuses too.
- *    `@objectstack/spec` `IAuthService.verifyMcpAccessToken` already says
- *    this: a falsy value when the token is revoked, and callers fail CLOSED.
+ *    granted again), verifies as no principal, and so does a token whose
+ *    client is disabled (objectstack-ai/cloud#3820, card 2). A store error
+ *    refuses too. `@objectstack/spec` `IAuthService.verifyMcpAccessToken`
+ *    already says this: a falsy value when the token is revoked, and callers
+ *    fail CLOSED.
  *  - **`/oauth2/revoke` deletes it** ({@link answerMcpTokenRevocation}) and
  *    revokes the grant's refresh family: the client's refresh tokens for that
  *    user, except those minted under another organization
@@ -196,29 +198,51 @@ async function grantRowsOf(
 const consentsOf = (store: OAuthGrantStore, grant: McpGrantKey) =>
   grantRowsOf(store, 'oauthConsent', grant, isConsentFor);
 
-/** Whether the client is a server-only `skip_consent` client: one that never has a consent row. */
-async function isSkipConsentClient(store: OAuthGrantStore, clientId: string): Promise<boolean> {
-  const client = (await store.findOne({
+/** The client row as the adapter answers it (the provider's field names), or `null` when there is none. */
+async function clientOf(
+  store: OAuthGrantStore,
+  clientId: string,
+): Promise<{ skipConsent?: unknown; disabled?: unknown } | null> {
+  return (await store.findOne({
     model: 'oauthClient',
     where: [{ field: 'clientId', value: clientId }],
-  })) as { skipConsent?: unknown } | null;
-  return client?.skipConsent === true;
+  })) as { skipConsent?: unknown; disabled?: unknown } | null;
+}
+
+/** Whether the client is a server-only `skip_consent` client: one that never has a consent row. */
+async function isSkipConsentClient(store: OAuthGrantStore, clientId: string): Promise<boolean> {
+  return (await clientOf(store, clientId))?.skipConsent === true;
 }
 
 /**
- * The consent read the MCP door makes on every request: does the grant a
+ * The grant read the MCP door makes on every request: does the grant a
  * verified token was minted under still stand?
  *
- * Admits when the consent for (`azp`, `sub`, organization) exists and was
- * created no later than the token was issued (compared in whole seconds, the
- * unit of `iat`). Refuses when it is missing, when it is newer than the token
- * (revoked and granted again: the old token belongs to the old grant), when
- * `iat` or the row's `createdAt` cannot be read, and when there is no store.
- * A store error propagates, and the verifier answers it as a refusal.
+ * First the client (objectstack-ai/cloud#3820, card 2): a token whose client
+ * is disabled (`sys_oauth_application.disabled`, the Disable action and
+ * `POST /auth/admin/oauth2/toggle-disabled`), or whose client row is gone, is
+ * refused. The provider already refuses a disabled client a new token
+ * (`invalid_client` at the token endpoint, `client_disabled` at authorize)
+ * and answers its tokens inactive at introspection, by the same truthy test
+ * on the same column. Only this door read none of it, so a token minted
+ * before the disable was served until it expired, up to the provider's
+ * 3600 s access-token life. Disabling pauses the grant; it does not end it:
+ * the consent and the refresh family stay, so once the client is enabled
+ * again the same token and its refresh are served again. Ending the grant is
+ * the withdraw (`authorized-clients-withdraw.ts`) or `/oauth2/revoke`.
  *
- * One indexed read for a client that consents. Only when that read finds no
- * consent is the client read, so that a server-only `skip_consent` client,
- * which has no consent row at all, is admitted (ruling A, step 5).
+ * Then the consent: admits when the consent for (`azp`, `sub`,
+ * organization) exists and was created no later than the token was issued
+ * (compared in whole seconds, the unit of `iat`). Refuses when it is missing,
+ * when it is newer than the token (revoked and granted again: the old token
+ * belongs to the old grant), when `iat` or the row's `createdAt` cannot be
+ * read, and when there is no store. A server-only `skip_consent` client,
+ * which has no consent row at all, is admitted without one (ruling A,
+ * step 5), read off the client row already in hand. A store error
+ * propagates, and the verifier answers it as a refusal.
+ *
+ * Two indexed reads per call: the client by its unique `client_id`, and the
+ * consent by (`client_id`, `user_id`).
  */
 export async function mcpConsentAdmits(
   store: OAuthGrantStore | undefined,
@@ -226,8 +250,10 @@ export async function mcpConsentAdmits(
   issuedAt: number | undefined,
 ): Promise<boolean> {
   if (!store) return false;
+  const client = await clientOf(store, grant.clientId);
+  if (!client || client.disabled) return false;
   const [consent] = await consentsOf(store, grant);
-  if (!consent) return isSkipConsentClient(store, grant.clientId);
+  if (!consent) return client.skipConsent === true;
   if (typeof issuedAt !== 'number' || !Number.isFinite(issuedAt)) return false;
   const createdAtMs =
     consent.createdAt instanceof Date || typeof consent.createdAt === 'string' || typeof consent.createdAt === 'number'
