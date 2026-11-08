@@ -59,6 +59,12 @@ type Handler = (c: any) => Promise<any>;
 const ROUTE = '/api/v1/marketplace/install-local';
 const APP_ID = 'com.example.crmlite';
 const OBJECTS = ['crmlite_account', 'crmlite_contact'];
+/**
+ * [#30808] The door's own uninstall cleanup — the record of the unmanaged
+ * copies it made — runs on every uninstall and removes nothing for a package
+ * that is no copy: a successful outcome, never a failure.
+ */
+const COPY_RECORD_CLEANUP = { name: 'install-local:unmanaged-copy-record', success: true, removed: 0 };
 const APP = 'crmlite_app';
 const PERMISSION_SET = 'crmlite_user';
 
@@ -266,7 +272,7 @@ describe('#24070: an install-local uninstall withdraws the package from every me
 
         expect(res.status, JSON.stringify(res.payload)).toBe(200);
         // Nothing failed: no withdrawal outcome rides on the response.
-        expect(res.payload.data.cleanups).toEqual([]);
+        expect(res.payload.data.cleanups).toEqual([COPY_RECORD_CLEANUP]);
         expect(await readMeta(h.protocol)).toEqual(WITHDRAWN);
         for (const name of OBJECTS) expect(await h.copyOf(name)).toBeUndefined();
         expect(h.warnings()).toEqual([]);
@@ -281,7 +287,7 @@ describe('#24070: an install-local uninstall withdraws the package from every me
         const res = await h.uninstall();
 
         expect(res.status, JSON.stringify(res.payload)).toBe(200);
-        expect(res.payload.data.cleanups).toEqual([]);
+        expect(res.payload.data.cleanups).toEqual([COPY_RECORD_CLEANUP]);
         expect(await readMeta(h.protocol)).toEqual(WITHDRAWN);
         expect(h.warnings()).toEqual([]);
     });
@@ -300,7 +306,7 @@ describe('#24070: an install-local uninstall withdraws the package from every me
         const res = await h.uninstall();
 
         expect(res.status, JSON.stringify(res.payload)).toBe(200);
-        expect(res.payload.data.cleanups).toEqual([]);
+        expect(res.payload.data.cleanups).toEqual([COPY_RECORD_CLEANUP]);
         expect(await h.copyOf(OBJECTS[0])).toEqual(authored);
         expect(await h.copyOf(OBJECTS[1])).toBeUndefined();
     });
@@ -320,7 +326,7 @@ describe('#24070: an install-local uninstall withdraws the package from every me
             success: false,
             removed: 0,
             error: expect.any(String),
-        }]);
+        }, COPY_RECORD_CLEANUP]);
         // The cause goes to the operator log, never onto the wire.
         expect(JSON.stringify(res.payload)).not.toContain('read-only');
         expect(runCleanups).toHaveBeenCalledTimes(1);
@@ -363,7 +369,7 @@ describe('#24182: an install-local uninstall of an extender restores the owner\'
         const res = await h.uninstall(EXTENDER_ID);
 
         expect(res.status, JSON.stringify(res.payload)).toBe(200);
-        expect(res.payload.data.cleanups).toEqual([]);
+        expect(res.payload.data.cleanups).toEqual([COPY_RECORD_CLEANUP]);
         const fields = await servedFields(h.protocol, OBJECTS[0]);
         expect(fields).not.toContain('ext_score');
         expect(fields).toEqual(Object.keys(h.ql.registry.getObject(OBJECTS[0])!.fields ?? {}));
