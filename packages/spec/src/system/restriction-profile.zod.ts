@@ -131,7 +131,8 @@ export const RestrictionProfileSchema = lazySchema(() => strictObject(
      * `devPlugins` is not judged by `allowCode`: it is loaded only by a local
      * development boot, and `os build` leaves it out of the artifact a target
      * installs, so it never reaches a target; `UNMANAGED_INSTALL_KEY_DISPOSITIONS`
-     * still classifies it as `code` for an unmanaged install. A `script` flow node is also subject to this rule (see
+     * still classifies it as `code` for an unmanaged install.
+     * A `script` flow node is also subject to this rule (see
      * `allowedFlowNodeTypes`).
      */
     allowCode: z

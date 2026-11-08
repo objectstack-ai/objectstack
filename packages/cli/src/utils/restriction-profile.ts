@@ -31,7 +31,8 @@
  *    (`@objectstack/spec/kernel`, disposition `code`), the table
  *    `defineStack`'s unmanaged-install refusal and the install door's planner
  *    already share; `hooks` and `jobs` are collections, so they are named
- *    here, as the profile's own docblock names them. A key that carries nothing (`functions: {}`, `plugins: []`) refuses nothing — the
+ *    here, as the profile's own docblock names them. A key that carries
+ *    nothing (`functions: {}`, `plugins: []`) refuses nothing — the
  *    same `unmanagedInstallValueCarries` test that table's readers apply.
  *    `devPlugins` is not read: `os build` leaves it out of the artifact, so it
  *    never reaches a target (`NEVER_REACHES_TARGET` below).
@@ -269,7 +270,7 @@ export function judgeRestrictionProfile(
               message: `An object lifecycle hook's \`body\` is sandboxed JavaScript, and ${SANDBOX_OFF}.`,
             });
           }
-        } else if (language === undefined && isBag(hook) && hook.handler !== undefined && !profile.allowCode) {
+        } else if (language === undefined && isBag(hook) && hook.handler !== undefined && hook.handler !== '' && !profile.allowCode) {
           // A handler may still be an inline function before `os build`, so presence is the test.
           rows.push({
             rule: 'allowCode',
