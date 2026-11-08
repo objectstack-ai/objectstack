@@ -219,21 +219,10 @@ export interface BaseFieldMetadata {
   unique?: boolean;
 }
 
-/**
- * Visibility condition type.
- *
- * @deprecated No member declares it since objectui#12242: it typed the retired
- * `BaseFieldMetadata.visible_on`, and no reader ever drew this object shape as
- * a gate. A field's visibility is `BaseFieldMetadata.visibleWhen`, a CEL
- * predicate.
- */
-export type VisibilityCondition = {
-  field: string;
-  operator?: '=' | '!=' | '>' | '>=' | '<' | '<=' | 'in';
-  value?: any;
-  and?: VisibilityCondition[];
-  or?: VisibilityCondition[];
-};
+// `VisibilityCondition` is retired (objectstack#25921, batch 13): it typed the
+// `BaseFieldMetadata.visible_on` key objectui#12242 retired, and nothing in this
+// workspace or in hotcrm read it. A field's visibility is
+// `BaseFieldMetadata.visibleWhen`, a CEL predicate.
 
 /**
  * Validation function type.
@@ -1419,22 +1408,12 @@ export interface AddressFieldMetadata extends BaseFieldMetadata {
   type: 'address';
 }
 
-/**
- * `geolocation` field metadata — OUT of the {@link FieldMetadata} union since
- * objectui#12242 (ruling A). `geolocation` is not a `@objectstack/spec`
- * `FieldType`: `FieldSchema` refuses it at `type` with `invalid_value`, so no
- * published object can declare it, and the authoring union no longer offers
- * it. The spec's map-point field type is `location`
- * ({@link LocationFieldMetadata}), which renders a different widget.
- *
- * The `field:geolocation` widget itself stays registered in
- * `@object-ui/fields`; only the authoring face stops offering the type value.
- *
- * @deprecated Not a spec field type, and no longer a member of `FieldMetadata`.
- */
-export interface GeolocationFieldMetadata extends BaseFieldMetadata {
-  type: 'geolocation';
-}
+// `GeolocationFieldMetadata` is retired (objectstack#25921, batch 13). It left
+// the `FieldMetadata` union in objectui#12242, because `geolocation` is not a
+// `@objectstack/spec` `FieldType` (`FieldSchema` refuses it at `type`), and
+// nothing in this workspace or in hotcrm read it after that. The spec's
+// map-point field type is `location` (`LocationFieldMetadata`). The
+// `field:geolocation` widget itself stays registered in `@object-ui/fields`.
 
 export interface SliderFieldMetadata extends BaseFieldMetadata {
   type: 'slider';
@@ -1504,8 +1483,9 @@ export type FieldMetadata =
   | SignatureFieldMetadata
   | QRCodeFieldMetadata
   | AddressFieldMetadata
-  // ⛔ No `GeolocationFieldMetadata` (objectui#12242): `geolocation` is not a
-  // spec `FieldType`, so a published object cannot declare it.
+  // ⛔ No `geolocation` member (objectui#12242): it is not a spec `FieldType`,
+  // so a published object cannot declare it. Its interface is retired too
+  // (objectstack#25921, batch 13).
   | SliderFieldMetadata
   | RatingFieldMetadata
   | MasterDetailFieldMetadata;
