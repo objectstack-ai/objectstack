@@ -2865,7 +2865,7 @@ const es = {
         twoFactorTooManyAttempts: "Demasiados códigos incorrectos. Vuelva a iniciar sesión con su contraseña.",
         twoFactorExpired: "Este inicio de sesión ha caducado. Vuelva a iniciar sesión con su contraseña.",
         twoFactorLocked: "Demasiados intentos fallidos. Su cuenta está bloqueada temporalmente. Inténtelo más tarde.",
-        invalidCredentials: "Correo o contraseña inválidos. Inténtelo de nuevo.",
+        invalidCredentials: "Correo o contraseña inválidos. Tras varios intentos fallidos, el inicio de sesión se pausa durante un tiempo. ¿Olvidaste tu contraseña? Restablécela para iniciar sesión de inmediato.",
         emailNotVerified: "Verifique su correo electrónico antes de iniciar sesión.",
       },
       // objectui#3546 slice three — phone/OTP sign-in. `{seconds}` is LoginForm's own

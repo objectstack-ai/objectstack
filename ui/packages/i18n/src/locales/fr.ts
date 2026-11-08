@@ -2861,7 +2861,7 @@ const fr = {
         twoFactorTooManyAttempts: "Trop de codes incorrects. Reconnectez-vous avec votre mot de passe.",
         twoFactorExpired: "Cette connexion a expiré. Reconnectez-vous avec votre mot de passe.",
         twoFactorLocked: "Trop de tentatives échouées. Votre compte est temporairement verrouillé. Réessayez plus tard.",
-        invalidCredentials: "E-mail ou mot de passe invalide. Veuillez réessayer.",
+        invalidCredentials: "E-mail ou mot de passe invalide. Après plusieurs échecs, la connexion est suspendue pendant un moment. Mot de passe oublié ? Réinitialisez-le pour vous connecter immédiatement.",
         emailNotVerified: "Veuillez vérifier votre adresse e-mail avant de vous connecter.",
       },
       // objectui#3546 slice three — phone/OTP sign-in. `{seconds}` is LoginForm's own

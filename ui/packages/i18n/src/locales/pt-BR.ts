@@ -2860,7 +2860,7 @@ const pt = {
         twoFactorTooManyAttempts: "Muitos códigos incorretos. Faça login novamente com sua senha.",
         twoFactorExpired: "Este login expirou. Faça login novamente com sua senha.",
         twoFactorLocked: "Muitas tentativas malsucedidas. Sua conta está temporariamente bloqueada. Tente novamente mais tarde.",
-        invalidCredentials: "E-mail ou senha inválidos. Por favor, tente novamente.",
+        invalidCredentials: "E-mail ou senha inválidos. Após várias tentativas sem sucesso, o login fica pausado por um tempo. Esqueceu a senha? Redefina-a para entrar imediatamente.",
         emailNotVerified: "Por favor, verifique seu e-mail antes de fazer login.",
       },
       // objectui#3546 slice three — phone/OTP sign-in. `{seconds}` is LoginForm's own

@@ -2800,7 +2800,7 @@ const de = {
         twoFactorTooManyAttempts: "Zu viele falsche Codes. Melden Sie sich erneut mit Ihrem Passwort an.",
         twoFactorExpired: "Diese Anmeldung ist abgelaufen. Melden Sie sich erneut mit Ihrem Passwort an.",
         twoFactorLocked: "Zu viele fehlgeschlagene Versuche. Ihr Konto ist vorübergehend gesperrt. Versuchen Sie es später erneut.",
-        invalidCredentials: "Ungültige E-Mail oder Passwort. Bitte erneut versuchen.",
+        invalidCredentials: "Ungültige E-Mail oder Passwort. Nach mehreren fehlgeschlagenen Versuchen wird die Anmeldung für eine Weile pausiert. Passwort vergessen? Setzen Sie es zurück, um sich sofort anzumelden.",
         emailNotVerified: "Bitte bestätigen Sie Ihre E-Mail-Adresse, bevor Sie sich anmelden.",
       },
       // objectui#3546 slice three — phone/OTP sign-in. `{seconds}` is LoginForm's own
