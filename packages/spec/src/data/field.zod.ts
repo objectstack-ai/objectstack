@@ -2603,9 +2603,14 @@ export const FieldSchema = lazySchema(() => {
    * compatibility between the old and the new field is NOT judged here: it
    * depends on the installed version, so the upgrade plan judges it.
    *
-   * Read only at package upgrade (the upgrade plan and the rename execution);
-   * no record read, write or query reads it. Declared ahead of those readers
-   * — `planned` in `liveness/field.json`.
+   * Read only by the schema sync and the install-local door; no record read,
+   * write or query reads it. The SQL driver's sync renames the old column to
+   * this key (`carryDeclaredRenames`, before the additive `ADD COLUMN`), so
+   * every path that syncs a schema carries it: a boot on the new artifact,
+   * `os migrate apply`, and `/marketplace/install-local`, which carries before
+   * it registers the new version and puts the column back if that fails. A
+   * rename it cannot carry is refused before any write, naming the field, the
+   * old key and the reason. `live` in `liveness/field.json`.
    */
   renamedFrom: z.array(
     z.string().regex(/^[a-z_][a-z0-9_]*$/, {
@@ -2615,8 +2620,8 @@ export const FieldSchema = lazySchema(() => {
     'Earlier keys of THIS field, written in the field-key grammar (lowercase snake_case), e.g. `renamedFrom: [\'company\']` on a field now keyed `account_name`. '
     + 'On a package upgrade from a version that has one of these keys and not this one, the platform carries that column\'s data to this field instead of adding an empty column. '
     + 'A field renamed twice lists both earlier keys. Each entry once; never this field\'s own key; never a key another field of the same object still declares (that name is still in use); never an old key another field of the same object also claims. '
-    + 'Read only at package upgrade: no record read, write or query reads it, and the type of the old column is judged by the upgrade plan, not here. '
-    + 'Declared ahead of the upgrade step that carries the data: until that step ships, no upgrade carries a column on this declaration.',
+    + 'Read only by the schema sync and the package upgrade: no record read, write or query reads it, and the type of the old column is judged when the column is carried, not here. '
+    + 'The schema sync (boot, `os migrate apply`, `/marketplace/install-local`) renames the old column to this key before it adds any column, and refuses before any write, naming the field, the old key and the reason, when the old key is a platform column or still a live field, when both columns or several old columns exist, when the old column would narrow under this type, when an index cannot follow, or when the driver renames no column.',
   ),
 
   // ADR-0010 — runtime protection envelope (internal — set by the loader).
