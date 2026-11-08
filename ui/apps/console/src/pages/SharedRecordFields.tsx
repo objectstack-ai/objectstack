@@ -25,11 +25,13 @@
  *   string through the console's one date-display path, a number through its
  *   one number-display path, a boolean as Yes / No (the detail view's
  *   read-only word), and an array or object as short text — never raw JSON.
- * - A lookup or master-detail value is the stored id of ANOTHER record, and
- *   neither that id nor the target's name is anything the visitor should read:
- *   a filled one shows a neutral, localized "Linked record" and an empty one
- *   the empty face. Which field is one is read from the type the projection
- *   serves, never guessed from the value's shape; nothing reads the target.
+ * - A lookup, master-detail or user value is the stored id of ANOTHER record
+ *   (a user field's is a `sys_user` id), and neither that id nor the target's
+ *   name is anything the visitor should read: a filled one shows a neutral,
+ *   localized "Linked record" ("Linked user" for a user field) and an empty
+ *   one the empty face. Which field is one is read from the type the
+ *   projection serves, never guessed from the value's shape; nothing reads the
+ *   target.
  *
  * System fields are shown, not hidden: the record detail view's notion of a
  * framework-managed column (`isSystemManagedField`, `@object-ui/types`) only
@@ -117,12 +119,20 @@ const NO_FETCH_CELL_RENDERERS: ReadonlySet<React.FC<CellRendererProps>> = new Se
 
 /**
  * The field types whose value is the stored id of another record, as the
- * projection serves `type`. The value never reaches the page as text.
+ * projection serves `type`; a `user` field's is a `sys_user` id. The value
+ * never reaches the page as text.
  */
-const RECORD_REFERENCE_TYPES: ReadonlySet<string> = new Set(['lookup', 'master_detail']);
+const RECORD_REFERENCE_TYPES: ReadonlySet<string> = new Set(['lookup', 'master_detail', 'user']);
 
 function isRecordReference(field: SharedFieldDisplay | undefined): boolean {
   return !!field?.type && RECORD_REFERENCE_TYPES.has(field.type);
+}
+
+/** The neutral face of a filled reference: a person for a user field, a record otherwise. */
+function referencePlaceholder(field: SharedFieldDisplay | undefined, t: Translate): string {
+  return field?.type === 'user'
+    ? t('sharedRecord.linkedUser', { defaultValue: 'Linked user' })
+    : t('sharedRecord.linkedRecord', { defaultValue: 'Linked record' });
 }
 
 /** A value with nothing in it: no id was stored, so there is no link to name. */
@@ -168,9 +178,7 @@ export function SharedRecordFields({ record, fields }: SharedRecordFieldsProps) 
               isEmptyValue(record[key]) ? (
                 EMPTY
               ) : (
-                <span className="text-muted-foreground">
-                  {t('sharedRecord.linkedRecord', { defaultValue: 'Linked record' })}
-                </span>
+                <span className="text-muted-foreground">{referencePlaceholder(field, t)}</span>
               )
             ) : Renderer ? (
               <Renderer

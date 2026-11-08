@@ -3998,6 +3998,7 @@ const zh = {
     sharedObject: '分享的 {{object}}',
     redactedFields: '部分字段已被所有者隐藏：{{fields}}',
     linkedRecord: '已关联记录',
+    linkedUser: '已关联用户',
   },
   publicForm: {
     submit: '提交',

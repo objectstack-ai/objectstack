@@ -3998,6 +3998,7 @@ const zhHant = {
     sharedObject: '分享的 {{object}}',
     redactedFields: '部分欄位已被所有者隱藏：{{fields}}',
     linkedRecord: '已關聯記錄',
+    linkedUser: '已關聯使用者',
   },
   publicForm: {
     submit: '提交',
