@@ -111,6 +111,13 @@ export interface SecurityRouteHost {
 }
 
 /**
+ * What the `security` provider answers, as both bodies have always typed the
+ * service they read: the server's resolver hands back that same answer, or
+ * `undefined`, or rejects.
+ */
+type SecurityProviderAnswer = ReturnType<NonNullable<RestServer['securityServiceProvider']>>;
+
+/**
  * The explain request keys whose explicit empty string the door refuses
  * `400 VALIDATION_FAILED` before any evaluation, each with the remedy its
  * refusal names. The schema's `z.string()` admits "", so the line is drawn
@@ -144,8 +151,9 @@ export function registerSecurityExplainEndpoints(this: SecurityExplainRouteHost,
     // security service cannot be resolved refuses rather than proceeds. A
     // service that is not registered answers `undefined`, each handler's `501`
     // below; any other rejection is `AuthzStoreUnavailableError`, answered by
-    // {@link respondUnresolvable} in each handler's `catch`.
-    const resolveService = (environmentId: string | undefined, req: any) =>
+    // {@link respondUnresolvable} in each handler's `catch`. Typed as the
+    // provider's own answer, which is what this body has always read.
+    const resolveService = (environmentId: string | undefined, req: any): SecurityProviderAnswer =>
         this.resolveSecurityService(environmentId, req);
 
     /**
@@ -574,8 +582,8 @@ export function registerSecurityEndpoints(this: SecurityRouteHost, basePath: str
     // rather than proceeds. Not registered (or without the suggestion verbs) →
     // `undefined`, the family's `501`; any other rejection is
     // `AuthzStoreUnavailableError`, which `handleError` answers `503`.
-    const resolveService = async (environmentId: string | undefined, req: any) => {
-        const svc = await this.resolveSecurityService(environmentId, req);
+    const resolveService = async (environmentId: string | undefined, req: any): SecurityProviderAnswer => {
+        const svc: Awaited<SecurityProviderAnswer> = await this.resolveSecurityService(environmentId, req);
         return svc && typeof svc.listAudienceBindingSuggestions === 'function' ? svc : undefined;
     };
     /**
