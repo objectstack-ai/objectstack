@@ -651,14 +651,14 @@ describe('install-local — an unmanaged copy\'s sample data, asked for with `se
      * registers the copied objects, writes each dataset the door asks for as
      * a `seed` item of the new base (the verb's own pins live in
      * `@objectstack/metadata-protocol`'s `package-unmanaged-install.test.ts`),
-     * and serves them back through `getMetaItems`. `tables` and `seedItems`
-     * outlive a mount, so a second mount is a restart over the same database.
+     * (a `sys_metadata` row of the base, as the store holds it), and serves
+     * each back through the by-name `getMetaItem`. `tables` outlives a mount,
+     * so a second mount is a restart over the same database.
      */
     function world() {
         const tables: Record<string, Row[]> = {};
         const objects = new Map<string, any>();
         const packages = new Map<string, { manifest: Record<string, unknown> }>();
-        const seedItems = new Map<string, Record<string, unknown>>();
         const writes: string[] = [];
         let nextId = 0;
         const known = (object: string) => {
@@ -666,8 +666,10 @@ describe('install-local — an unmanaged copy\'s sample data, asked for with `se
             return (tables[object] ??= []);
         };
         // The platform tables the loader probes (`sys_organization`, the landed-key
-        // ledger) hold no row here; every other unknown object is refused.
-        const readable = (object: string) => (object.startsWith('sys_') && !objects.has(object) ? [] : known(object));
+        // ledger) hold no row here, `sys_metadata` holds the seed receipt; every
+        // other unknown object is refused.
+        const readable = (object: string) => (object.startsWith('sys_') && !objects.has(object) ? (tables[object] ?? []) : known(object));
+        const seedRows = () => (tables.sys_metadata ?? []).filter((row) => row.type === 'seed');
         const matches = (row: Row, where: Record<string, unknown>) => Object.entries(where).every(([k, v]) => {
             if (k.startsWith('$')) throw new Error(`engine double: combinator '${k}' is not implemented`);
             if (v === null) return row[k] == null;
@@ -738,18 +740,19 @@ describe('install-local — an unmanaged copy\'s sample data, asked for with `se
             if (request.seedData === true) {
                 for (const d of source.data ?? []) {
                     const name = `${d.object}_seed`;
-                    seedItems.set(name, { ...d, _packageId: targetPackageId });
+                    (tables.sys_metadata ??= []).push({
+                        id: `m${++nextId}`, type: 'seed', name, package_id: targetPackageId, state: 'active', metadata: { ...d },
+                    } as Row);
                     copied.push({ type: 'seed', name });
                 }
             }
             return { sourcePackageId: source.id, targetPackageId, namespace: source.namespace, copiedCount: copied.length, copied, strippedLocks: [] };
         });
-        const getMetaItems = vi.fn(async ({ type, packageId }: { type: string; packageId?: string }) => ({
-            type,
-            items: type !== 'seed' ? [] : [...seedItems.values()]
-                .filter((b) => !packageId || b._packageId === packageId)
-                .map((b) => ({ ...b, _diagnostics: { valid: true } })),
-        }));
+        const getMetaItem = vi.fn(async ({ type, name, packageId }: { type: string; name: string; packageId?: string }) => {
+            const row: any = (tables.sys_metadata ?? []).find((r) => r.type === type && r.name === name && (!packageId || r.package_id === packageId));
+            if (!row) throw Object.assign(new Error(`${type} '${name}' not found`), { code: 'NOT_FOUND', status: 404 });
+            return { type, name, item: { ...row.metadata, _packageId: row.package_id }, lock: 'none', editable: true };
+        });
 
         async function boot() {
             const routes = new Map<string, Handler>();
@@ -765,7 +768,7 @@ describe('install-local — an unmanaged copy\'s sample data, asked for with `se
                 auth: installerAuthService(INSTALLER),
                 objectql: withInstallerGrants(engine, INSTALLER),
                 metadata: { getObject: async (name: string) => objects.get(name) },
-                protocol: { importUnmanagedPackage, getMetaItems },
+                protocol: { importUnmanagedPackage, getMetaItem },
             };
             const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
             const ctx = {
@@ -791,7 +794,7 @@ describe('install-local — an unmanaged copy\'s sample data, asked for with `se
                 logger,
             };
         }
-        return { tables, writes, seedItems, packages, importUnmanagedPackage, getMetaItems, boot };
+        return { tables, writes, seedRows, packages, importUnmanagedPackage, getMetaItem, boot };
     }
 
     it('off by default: the import is not asked for the sample data, no row lands, and the answer says it was skipped', async () => {
@@ -804,7 +807,7 @@ describe('install-local — an unmanaged copy\'s sample data, asked for with `se
             mode: 'skipped',
             reason: 'an unmanaged install copies metadata, not data: the package\'s sample data was not loaded',
         });
-        expect(w.seedItems.size).toBe(0);
+        expect(w.seedRows()).toEqual([]);
         expect(w.writes).toEqual([]);
     });
 
@@ -894,7 +897,7 @@ describe('install-local — an unmanaged copy\'s sample data, asked for with `se
         const h = await w.boot();
         expect((await h.purge('com.example.nothing')).status).toBe(404);
         await h.install({ manifest: seededCrm(), installMode: 'unmanaged', seedSampleData: true });
-        w.getMetaItems.mockRejectedValueOnce(new Error('sys_metadata is unreachable'));
+        w.getMetaItem.mockRejectedValueOnce(new Error('sys_metadata is unreachable'));
         const before = w.writes.length;
         const res = await h.purge('com.example.crm-copy');
         expect(res.status).toBe(503);

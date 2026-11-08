@@ -859,13 +859,24 @@ type UnmanagedImporter = {
 };
 
 /**
- * [#30808] The protocol's list read, asked for an unmanaged copy's seed
- * receipt — typed from the producer's own method, asked as a capability
- * question at the call site, as {@link UnmanagedImporter} is.
+ * [#30808] The protocol's by-name read, asked for each item of an unmanaged
+ * copy's seed receipt — typed from the producer's own method, asked as a
+ * capability question at the call site, as {@link UnmanagedImporter} is.
+ *
+ * Not the list read: a `seed` body declares no `name` (`SeedSchema` is
+ * closed and has none), and the list keys every stored item by its body's
+ * `name`, so `getMetaItems({ type: 'seed' })` serves no stored seed item at
+ * all. The by-name read serves each one.
  */
 type UnmanagedCopySeedReader = {
-    getMetaItems?: ObjectStackProtocolImplementation['getMetaItems'];
+    getMetaItem?: ObjectStackProtocolImplementation['getMetaItem'];
 };
+
+/**
+ * [#30808] The store read that names the seed items an unmanaged copy's base
+ * holds, for a purge, which has no import answer to name them from.
+ */
+type UnmanagedCopySeedNameStore = Pick<IObjectQLEngine, 'find'>;
 
 /**
  * [#30808] The metadata type an unmanaged copy's seed receipt is stored as:
@@ -4717,40 +4728,63 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * holds in the environment ledger — what the import wrote when the install
      * asked for the sample data ({@link installUnmanaged}) — each projected to
      * the dataset it declares (the members `SeedSchema` declares, so the
-     * served envelope's `_packageId` / `_diagnostics` never reach the loader).
+     * served envelope's keys never reach the loader).
      *
-     * Read through the protocol's own list, scoped to the base. `datasets` is
-     * empty when the base holds no seed item; `failure` says why the receipt
-     * could not be read at all, never folded into "no sample data".
+     * `names` are the receipt's item names: the import's own answer on an
+     * install, or {@link unmanagedCopySeedNames} on a purge. Each body is read
+     * through the protocol's by-name read, scoped to the base. `failure` says
+     * why the receipt could not be read whole — an item that is not served, or
+     * not a dataset, fails it — and is never folded into "no sample data".
      */
     private readUnmanagedCopySeedReceipt = async (
         ctx: PluginContext,
         packageId: string,
+        names: readonly string[],
     ): Promise<{ datasets: PurgeSeedDataset[]; failure?: undefined } | { datasets?: undefined; failure: string }> => {
         let protocol: UnmanagedCopySeedReader | undefined;
         try { protocol = ctx.getService<UnmanagedCopySeedReader>('protocol'); } catch { /* no protocol service */ }
-        if (!protocol || typeof protocol.getMetaItems !== 'function') {
+        if (!protocol || typeof protocol.getMetaItem !== 'function') {
             return { failure: 'the metadata protocol is not available on this runtime' };
         }
-        let answer: unknown;
-        try {
-            answer = await protocol.getMetaItems({ type: UNMANAGED_COPY_SEED_TYPE, packageId });
-        } catch (err: any) {
-            return { failure: `the base's seed items could not be read: ${err?.message ?? err}` };
-        }
-        const listed: unknown[] = Array.isArray((answer as { items?: unknown } | null)?.items)
-            ? (answer as { items: unknown[] }).items
-            : [];
         const datasets: PurgeSeedDataset[] = [];
-        for (const entry of listed) {
-            const body = isPlainObject((entry as { item?: unknown } | null)?.item) ? (entry as { item: unknown }).item : entry;
-            if (!isPlainObject(body)) continue;
-            // Scoped to the base: an entry another package holds is never its receipt.
-            if (typeof body._packageId === 'string' && body._packageId !== packageId) continue;
-            const dataset = seedDatasetOfReceiptItem(body);
-            if (dataset) datasets.push(dataset);
+        for (const name of names) {
+            let answer: unknown;
+            try {
+                answer = await protocol.getMetaItem({ type: UNMANAGED_COPY_SEED_TYPE, name, packageId });
+            } catch (err: any) {
+                return { failure: `the seed item '${name}' of the base '${packageId}' could not be read: ${err?.message ?? err}` };
+            }
+            const dataset = seedDatasetOfReceiptItem((answer as { item?: unknown } | null)?.item);
+            if (!dataset) return { failure: `the base '${packageId}' serves no dataset under the seed item '${name}'` };
+            datasets.push(dataset);
         }
         return { datasets };
+    };
+
+    /**
+     * [#30808] The names of the `seed` items an unmanaged copy's base holds —
+     * its active rows in the environment's metadata store, read as the system
+     * (the purge door already authorized the caller). Only the names: each
+     * body is read through the protocol ({@link readUnmanagedCopySeedReceipt}).
+     */
+    private unmanagedCopySeedNames = async (
+        ctx: PluginContext,
+        packageId: string,
+    ): Promise<{ names: string[]; failure?: undefined } | { names?: undefined; failure: string }> => {
+        let store: UnmanagedCopySeedNameStore | undefined;
+        try { store = ctx.getService<UnmanagedCopySeedNameStore>('objectql'); } catch { /* no data engine */ }
+        if (!store || typeof store.find !== 'function') return { failure: 'the data engine is not available on this runtime' };
+        try {
+            const rows = await store.find('sys_metadata', {
+                where: { type: UNMANAGED_COPY_SEED_TYPE, package_id: packageId, state: 'active' },
+                fields: ['name'],
+                context: { isSystem: true },
+            });
+            const list: unknown[] = Array.isArray(rows) ? rows : Array.isArray((rows as any)?.records) ? (rows as any).records : [];
+            return { names: [...new Set(list.map((row: any) => row?.name).filter((n): n is string => typeof n === 'string'))] };
+        } catch (err: any) {
+            return { failure: `the base's seed items could not be listed: ${err?.message ?? err}` };
+        }
     };
 
     /**
@@ -4776,12 +4810,11 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
     ): Promise<{ mode: 'inline' | 'skipped' | 'refused'; inserted?: number; updated?: number; skipped?: number; errors?: number; reason?: string; errorSample?: string }> => {
         const { manifest, targetPackageId, copied, userId } = args;
         const appId = String(manifest?.id ?? targetPackageId);
-        const receiptCount = copied.filter((item) => item.type === UNMANAGED_COPY_SEED_TYPE).length;
-        if (receiptCount === 0) return { mode: 'skipped', reason: 'no-datasets' };
-        const receipt = await this.readUnmanagedCopySeedReceipt(ctx, targetPackageId);
-        if (receipt.failure !== undefined || receipt.datasets.length !== receiptCount) {
-            const reason = receipt.failure
-                ?? `the base '${targetPackageId}' serves ${receipt.datasets.length} of the ${receiptCount} seed item(s) the copy wrote`;
+        const receiptNames = copied.filter((item) => item.type === UNMANAGED_COPY_SEED_TYPE).map((item) => item.name);
+        if (receiptNames.length === 0) return { mode: 'skipped', reason: 'no-datasets' };
+        const receipt = await this.readUnmanagedCopySeedReceipt(ctx, targetPackageId, receiptNames);
+        if (receipt.failure !== undefined) {
+            const reason = receipt.failure;
             ctx.logger?.warn?.(`[MarketplaceInstallLocal] ${appId}: the unmanaged copy's sample data was not loaded — ${reason}`);
             return { mode: 'skipped', reason: `seed-receipt-unread: ${reason}` };
         }
@@ -5442,7 +5475,9 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         let ql: NamespaceHoldingEngine | undefined;
         try { ql = ctx.getService<NamespaceHoldingEngine>('objectql'); } catch { return null; /* no data engine — no base */ }
         if (!ql?.registry?.getPackage?.(packageId) || !isWritablePackage(ql, packageId)) return null;
-        const receipt = await this.readUnmanagedCopySeedReceipt(ctx, packageId);
+        const listed = await this.unmanagedCopySeedNames(ctx, packageId);
+        if (listed.failure !== undefined) return { failure: listed.failure };
+        const receipt = await this.readUnmanagedCopySeedReceipt(ctx, packageId, listed.names);
         return receipt.failure !== undefined ? { failure: receipt.failure } : { datasets: receipt.datasets };
     };
 
