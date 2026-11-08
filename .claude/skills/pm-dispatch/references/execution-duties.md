@@ -67,9 +67,9 @@
 
 - 归属 = session ID,⛔ 不认作者字段;`Account:` 派生自 assignee,不等即半态、持卡席下笔补正。
 - 卡 assignee 归 PM,dev 恒不写;PR 派认领账号,交棒同笔改;在飞 PR = `head:claude/` 正文点名本卡。
-- 部分落地(PR 带 `Refs #N (item k)`,⛔ 不 `Fixes`)即释放:合入同笔回 `pm:queue` + 清 assignee。
+- 部分落地(PR 带 `Refs #N (item k)`,⛔ 不 `Fixes`)即一笔释放:`Release:`+回 `pm:queue`+清 assignee。
 - `Release:` 行点名已落与余项;余项整落 `ui/**` 外他席树 ⇒ 点名其改标,拆分加 `pm:retriage`。
-- 派发前按序执行原子对:① Assign @me,并把 `pm:dispatched` 与摘 `pm:queue` 放进同一次标签写入。
+- 派发原子对一笔 `label-write`:① `--assign` @me 加 `pm:dispatched` 摘 `pm:queue`,`--comment-file` 带②。
 - step ① 之后获得 assignee 的直接弃出本批。
 - ② 认领评论照抄 SKILL.md 模板:`Branch:`、`Clause-②:`、`Metadata-protocol:` 各占一行且行首。
 - 条款②入队闸门只读认领评论且只读行首键:句中提及与另发评论皆读不到,卡即不可读。
