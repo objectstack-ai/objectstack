@@ -4592,6 +4592,7 @@ const en = {
     noMessages: 'This conversation has no messages yet.',
     sharedObject: 'Shared {{object}}',
     redactedFields: 'Some fields are hidden by the owner: {{fields}}',
+    linkedRecord: 'Linked record',
   },
   publicForm: {
     submit: 'Submit',
