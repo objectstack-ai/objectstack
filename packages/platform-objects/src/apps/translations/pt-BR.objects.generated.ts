@@ -2659,14 +2659,15 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
       },
       source_kind: {
         label: "Tipo de origem",
-        help: "O que envia o grupo: uma conexão SCIM.",
+        help: "O que envia o grupo: uma conexão SCIM ou um provedor SSO no login.",
         options: {
-          scim: "Conexão SCIM"
+          scim: "Conexão SCIM",
+          sso: "Provedor SSO"
         }
       },
       source_id: {
         label: "ID de origem",
-        help: "O ID da conexão SCIM pela qual o grupo chega, por exemplo \"okta-prod\"."
+        help: "O ID da conexão SCIM ou do provedor SSO pelo qual o grupo chega, por exemplo \"okta-prod\"."
       },
       group_external_id: {
         label: "ID externo do grupo",
@@ -2682,7 +2683,7 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
       },
       organization_id: {
         label: "Organização",
-        help: "A organização em que a concessão é feita: a organização proprietária da conexão SCIM."
+        help: "A organização em que a concessão é feita: a organização proprietária da conexão SCIM ou do provedor SSO."
       },
       created_at: {
         label: "Criado em"

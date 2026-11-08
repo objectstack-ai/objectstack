@@ -2659,14 +2659,15 @@ export const ruObjects: NonNullable<TranslationData['objects']> = {
       },
       source_kind: {
         label: "Тип источника",
-        help: "Что передаёт группу: подключение SCIM.",
+        help: "Что передаёт группу: подключение SCIM или поставщик SSO при входе.",
         options: {
-          scim: "Подключение SCIM"
+          scim: "Подключение SCIM",
+          sso: "Поставщик SSO"
         }
       },
       source_id: {
         label: "ID источника",
-        help: "ID подключения SCIM, через которое приходит группа, например \"okta-prod\"."
+        help: "ID подключения SCIM или поставщика SSO, через которое приходит группа, например \"okta-prod\"."
       },
       group_external_id: {
         label: "Внешний ID группы",
@@ -2682,7 +2683,7 @@ export const ruObjects: NonNullable<TranslationData['objects']> = {
       },
       organization_id: {
         label: "Организация",
-        help: "Организация, в которой выдаётся разрешение: организация, которой принадлежит подключение SCIM."
+        help: "Организация, в которой выдаётся разрешение: организация, которой принадлежит подключение SCIM или поставщик SSO."
       },
       created_at: {
         label: "Создано"

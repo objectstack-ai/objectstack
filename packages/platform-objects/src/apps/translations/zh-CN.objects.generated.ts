@@ -2659,14 +2659,15 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       source_kind: {
         label: "来源类型",
-        help: "推送该组的来源：SCIM 连接。",
+        help: "发送该组的来源：SCIM 连接，或登录时的 SSO 提供方。",
         options: {
-          scim: "SCIM 连接"
+          scim: "SCIM 连接",
+          sso: "SSO 提供方"
         }
       },
       source_id: {
         label: "来源 ID",
-        help: "该组经由的 SCIM 连接 ID，例如 \"okta-prod\"。"
+        help: "该组经由的 SCIM 连接 ID 或 SSO 提供方 ID，例如 \"okta-prod\"。"
       },
       group_external_id: {
         label: "组外部 ID",
@@ -2682,7 +2683,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       organization_id: {
         label: "组织",
-        help: "授权所在的组织：拥有该 SCIM 连接的组织。"
+        help: "授权所在的组织：拥有该 SCIM 连接或 SSO 提供方的组织。"
       },
       created_at: {
         label: "创建时间"

@@ -2659,14 +2659,15 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
       },
       source_kind: {
         label: "來源類型",
-        help: "推送該群組的來源：SCIM 連線。",
+        help: "傳送該群組的來源：SCIM 連線，或登入時的 SSO 提供者。",
         options: {
-          scim: "SCIM 連線"
+          scim: "SCIM 連線",
+          sso: "SSO 提供者"
         }
       },
       source_id: {
         label: "來源 ID",
-        help: "該群組經由的 SCIM 連線 ID，例如 \"okta-prod\"。"
+        help: "該群組經由的 SCIM 連線 ID 或 SSO 提供者 ID，例如 \"okta-prod\"。"
       },
       group_external_id: {
         label: "群組外部 ID",
@@ -2682,7 +2683,7 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
       },
       organization_id: {
         label: "組織",
-        help: "授權所在的組織：擁有該 SCIM 連線的組織。"
+        help: "授權所在的組織：擁有該 SCIM 連線或 SSO 提供者的組織。"
       },
       created_at: {
         label: "建立時間"

@@ -2659,14 +2659,15 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       source_kind: {
         label: "Source Kind",
-        help: "What pushes the group: a SCIM connection.",
+        help: "What sends the group: a SCIM connection, or an SSO provider at sign-in.",
         options: {
-          scim: "SCIM Connection"
+          scim: "SCIM Connection",
+          sso: "SSO Provider"
         }
       },
       source_id: {
         label: "Source ID",
-        help: "The SCIM connection ID the group arrives through, e.g. \"okta-prod\"."
+        help: "The SCIM connection ID or the SSO provider ID the group arrives through, e.g. \"okta-prod\"."
       },
       group_external_id: {
         label: "Group External ID",
@@ -2682,7 +2683,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       organization_id: {
         label: "Organization",
-        help: "The organization the grant is made in: the organization that owns the SCIM connection."
+        help: "The organization the grant is made in: the organization that owns the SCIM connection or the SSO provider."
       },
       created_at: {
         label: "Created At"

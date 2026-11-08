@@ -2659,14 +2659,15 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       source_kind: {
         label: "Tipo de origen",
-        help: "Qué envía el grupo: una conexión SCIM.",
+        help: "Qué envía el grupo: una conexión SCIM o un proveedor SSO al iniciar sesión.",
         options: {
-          scim: "Conexión SCIM"
+          scim: "Conexión SCIM",
+          sso: "Proveedor SSO"
         }
       },
       source_id: {
         label: "ID de origen",
-        help: "El ID de la conexión SCIM por la que llega el grupo, p. ej. \"okta-prod\"."
+        help: "El ID de la conexión SCIM o del proveedor SSO por el que llega el grupo, p. ej. \"okta-prod\"."
       },
       group_external_id: {
         label: "ID externo del grupo",
@@ -2682,7 +2683,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       organization_id: {
         label: "Organización",
-        help: "La organización en la que se concede: la organización propietaria de la conexión SCIM."
+        help: "La organización en la que se concede: la organización propietaria de la conexión SCIM o del proveedor SSO."
       },
       created_at: {
         label: "Creado el"
