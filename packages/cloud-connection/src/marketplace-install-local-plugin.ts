@@ -40,19 +40,19 @@
  *            gives (ADR-0087 D1, #21762), and nothing is registered or written.
  *            The answer's `hotLoaded` says whether the running kernel's
  *            `manifest.register` resolved (#22695). An inline manifest whose
- *            register throws is refused (`PLUGIN_REGISTER_FAILED`, 422); a
- *            cloud-fetched one is still installed (the lenient path) and answers
- *            `200` with `hotLoaded: false` and the register error's message as
- *            `hotLoadError` — in the ledger, loaded at the next restart —
- *            unless the registry refused it because another holder already
- *            holds a name the package claims: its namespace (#31392), a
- *            position, permission set or capability name (held by the
- *            environment catalog, #25366, or by another package or a
- *            built-in, #31392), or a bare name — a flow, a webhook, a
- *            dataset, … (#31296; `bare-name-one-holder.ts` in
- *            `@objectstack/objectql`). No restart clears any of these, so both
- *            branches refuse them (`PLUGIN_REGISTER_FAILED`, 422) and nothing
- *            is registered or written.
+ *            register throws is refused (`PLUGIN_REGISTER_FAILED`, 422), and
+ *            so is a cloud-fetched one whose register the engine REFUSED — a
+ *            throw declaring a 4xx status of its own (#31478): a name another
+ *            holder holds (its namespace, a position, permission set or
+ *            capability name, a bare name; #25366, #31296, #31392), a default
+ *            record page, an object another package owns, a picklist or a
+ *            bound action's object nobody declares, a body its schema refuses.
+ *            No restart heals a refusal, so nothing is registered or written.
+ *            A cloud-fetched register failure that declares no 4xx (the
+ *            runtime's own fault) takes the lenient path: still installed,
+ *            answering `200` with `hotLoaded: false` and the register error's
+ *            message as `hotLoadError` — in the ledger, loaded at the next
+ *            restart.
  *
  *          `installMode: 'managed' | 'unmanaged'` (ADR-0131 D6; absent means
  *          `managed`, the key parsed against `InstallModeSchema`) chooses
@@ -396,11 +396,6 @@ import {
 } from '@objectstack/metadata-protocol';
 import { resolveThrownHttpError } from '@objectstack/types';
 import { unknownQueryParamRefusalMessage } from '@objectstack/rest';
-// [#25366, #31296, #31392] The code the registry's namespace, security-catalog
-// and bare-name refusals share, compared with each class's `name` rather than
-// `instanceof`-tested: the engine keeps the classes unexported so a consumer
-// holding the other build realm's copy cannot misread them.
-import { NAMESPACE_CONFLICT_CODE } from '@objectstack/objectql';
 
 /** What the auth service's in-process session read answers, as `AuthSessionApi` declares it. */
 type SessionRead = Awaited<ReturnType<NonNullable<AuthSessionApi['getSession']>>>;
@@ -415,57 +410,46 @@ const ROUTE_BASE = '/api/v1/marketplace/install-local';
 export const SAMPLE_DATA_COUNT_QUERY_PARAMS: readonly string[] = Object.freeze([]);
 
 /**
- * [#25366, #31296, #31392] The registry's refusals of a name another holder
- * already holds in a deployment-wide namespace, by the `name` each class gives
- * itself (`registry.ts` in `@objectstack/objectql`). The three share
- * {@link NAMESPACE_CONFLICT_CODE}; the engine keeps the classes unexported, so
- * a consumer reads the code plus the name, never `instanceof`.
+ * [#31478] Whether a `manifest.register` failure is the engine REFUSING this
+ * package — a throw that declares a 4xx status of its own
+ * (`resolveThrownHttpError(err).declaredStatus`), never one this door
+ * supplies. Every refusal the registry's package door and the manifest
+ * service's seals raise declares one (`422`, ADR-0112): the held names
+ * (#25366, #31296, #31392), the default record page, a misplaced default page,
+ * an object another package owns, an object name two packages of one
+ * artifact or one shared namespace define, a picklist or a bound action's
+ * object no loaded package declares, a body its schema refuses. Each is judged
+ * before the refused package's own writes stand, and each is a verdict on the
+ * body against this environment, so it is the inline branch's answer on this
+ * branch too. (A multi-package artifact registers its packages one by one: a
+ * member refused after another registered leaves that earlier member in the
+ * running kernel, unledgered, exactly as on the inline branch.) Read by the
+ * declaration, never by a list of classes or codes, so a refusal the engine
+ * gains later is refused here without a change.
  *
- *   - `NamespaceConflictError` — the package's `manifest.namespace` is owned by
- *     another installed package that is not a co-owner of it (ADR-0048 Phase 1);
- *   - `SecurityCatalogNameConflictError` — a position, permission set or
- *     capability name it ships is held by another package, the environment
- *     catalog or a built-in (`security-catalog-namespace.ts`);
- *   - `BareNameConflictError` — an item of a bare-name type (a flow, a webhook,
- *     a dataset, …) is held by another package or the platform
- *     (`bare-name-one-holder.ts`).
+ * No restart heals any of them, so the lenient answer ("loads at the next
+ * restart") would be false. Measured on a real rehydrate (the `kernel:ready`
+ * seals run before it, so a ledger entry is judged as a late artifact):
+ *   - a refusal of the body itself (a misplaced default page, two objects of
+ *     one name in one artifact, a body its schema refuses) meets the same body
+ *     at every boot;
+ *   - a refusal naming a holder (an owned object, a default record page, a
+ *     held name) meets the same holder at every boot;
+ *   - a picklist or bound-action object nobody declares is healed only by
+ *     ANOTHER install that brings it — after which installing this package
+ *     again succeeds at once — and at a restart only when the ledger happens
+ *     to list the bringer first: the rehydrate sorts by declared
+ *     `dependencies`, and the reference this refusal names is one the package
+ *     did not declare. Declared, it is the pre-install dependency check's
+ *     `422` instead.
+ *
+ * What stays lenient is a failure that declares NO 4xx — an undeclared throw,
+ * or a declared 5xx: the runtime's own fault, not a verdict on the package,
+ * which the restart (of this build or a fixed one) can heal.
  */
-const NAME_HELD_ELSEWHERE_REFUSALS: ReadonlySet<string> = new Set([
-    'NamespaceConflictError',
-    'SecurityCatalogNameConflictError',
-    'BareNameConflictError',
-]);
-
-/**
- * [#25366, #31296, #31392] Whether a `manifest.register` failure is one of the
- * registry's refusals of a name another holder already holds
- * ({@link NAME_HELD_ELSEWHERE_REFUSALS}).
- *
- * Each is the ONE pre-write check for its rule: the registry's package door
- * raises it ahead of every mutation it makes, for every door that installs a
- * package, so this door asks it rather than keeping a second reading of who
- * holds a name. Recognised by the error's own brand, never by its types or
- * holders: which types a rule covers and who holds a name are the registry's
- * to decide, so a type a rule gains later is refused here without a change.
- *
- * No restart heals any of them, so the cloud branch's lenient answer ("loads
- * at the next restart") would be false for each:
- *   - an environment-held catalog name is loaded from `sys_metadata` at every
- *     boot, and the next load of the package meets it again;
- *   - a namespace or a catalog name another package holds, and a built-in
- *     catalog name, are judged again at every load, with no seal: the next
- *     boot meets the same holder and refuses the registration again;
- *   - a bare name is the other direction: the ledger entry is rehydrated
- *     BEFORE the cold boot seals the holders, so the boot ADMITS the clash with
- *     one warning (`BARE_NAME_COLD_BOOT_MODE`), and every consumer resolving
- *     the name is served one of the two packages' items by registration order.
- *
- * Under `OS_METADATA_COLLISION=warn` the registry downgrades the namespace gate
- * to a warning and throws nothing, so there is nothing here to recognise.
- */
-function refusesNameHeldElsewhere(err: unknown): boolean {
-    const e = err as { code?: unknown; name?: unknown } | null;
-    return e?.code === NAMESPACE_CONFLICT_CODE && typeof e.name === 'string' && NAME_HELD_ELSEWHERE_REFUSALS.has(e.name);
+function isDeclaredRegisterRefusal(err: unknown): boolean {
+    const declared = resolveThrownHttpError(err).declaredStatus;
+    return declared !== undefined && declared >= 400 && declared < 500;
 }
 
 /**
@@ -2971,8 +2955,8 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             const registerError = String(err?.message ?? err);
             // For offline file imports we treat a register failure as a hard
             // failure (don't persist). Cloud installs historically tolerated
-            // this (the on-disk record survives a restart), so keep that path
-            // lenient for backwards compatibility.
+            // this (the on-disk record survives a restart), so that path stays
+            // lenient for a fault — never for a refusal (#31478, below).
             // [#30885] Whatever the branch, the version that still serves is
             // the installed one: the columns step 2f carried go back to it.
             await reverseInstallDeclaredRenames(carried, reverseFailed);
@@ -2983,30 +2967,30 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                     error: { code: 'PLUGIN_REGISTER_FAILED', message: `Failed to register imported manifest: ${registerError}` },
                 }, 422);
             }
-            // [#25366, #31296, #31392] …EXCEPT the registry's refusals of a
-            // name another holder already holds: the package's namespace, a
-            // position, permission set or capability name, or a bare name (a
-            // flow, a webhook, a dataset, …), held by another package, the
-            // environment catalog or the platform. No restart heals any of them
-            // (see {@link refusesNameHeldElsewhere}), so the lenient answer
-            // ("loads at the next restart") would be false. Measured for the
-            // environment-held catalog name on a real restart: the boot runs,
-            // the rehydrate logs the refusal, and the package is not loaded at
-            // all — its earlier version neither, since the ledger entry that
-            // named it was overwritten. The registry's package door refused
-            // before any of its own writes, and nothing of this door's is
-            // written yet, so the cloud branch refuses exactly as the inline
-            // branch does — `422 PLUGIN_REGISTER_FAILED`, the registry's
-            // sentence naming both holders — and the installer renames and
-            // retries.
-            if (refusesNameHeldElsewhere(err)) {
+            // [#25366, #31296, #31392, #31478] …EXCEPT a refusal: a register
+            // failure that declares a 4xx status of its own is the engine's
+            // verdict on this body against this environment (see
+            // {@link isDeclaredRegisterRefusal}), and no restart heals it, so
+            // the lenient answer ("loads at the next restart") would be false.
+            // Measured on a real restart (#25366, #31478): the rehydrate logs
+            // the same refusal and the package is not loaded at all — its
+            // earlier version neither, since the ledger entry that named it
+            // was overwritten.
+            // The engine refused before any of its own writes stood, and
+            // nothing of this door's is written yet, so the cloud branch
+            // refuses exactly as the inline branch does — `422
+            // PLUGIN_REGISTER_FAILED` with the engine's sentence — and the
+            // installer corrects the body or the environment and retries.
+            if (isDeclaredRegisterRefusal(err)) {
                 return c.json({
                     success: false,
                     error: { code: 'PLUGIN_REGISTER_FAILED', message: `Package '${manifestId}' cannot be installed: ${registerError}` },
                 }, 422);
             }
-            // [#22695] The lenient path stays lenient — whether it should is a
-            // separate decision, ⛔ not made here. What changes is that the
+            // [#22695, #31478] The lenient path is what remains: a register
+            // failure that declares no 4xx — an undeclared throw or a declared
+            // 5xx, the runtime's own fault rather than a verdict on the
+            // package — is ledgered and loads at the next restart, and the
             // caller is TOLD: the answer carries `hotLoaded: false` and this
             // message, so a reader can say "installed, loads at the next
             // restart" instead of a false success.
