@@ -156,6 +156,7 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { isEntrypoint } from './invoked-as.mjs';
+import { stripComments } from './js-comment-mask.mjs';
 import {
   nestedPrefix,
   parseWorkspaceGlobs,
@@ -440,15 +441,11 @@ const libraryOf = (spec) => (spec.startsWith('@') ? spec.split('/').slice(0, 2).
  * @param {string} rawSource
  */
 export function libraryReadsDisk(rawSource) {
-  // Comments name libraries nothing runs -- a JSDoc `{import('eslint').Rule}`,
-  // a CSS `@import 'tailwindcss'` in prose. Dropped: a `/* ... */` closed on
-  // its own line, and whole `//`, `/*` or `*` lines that close no block. A
-  // line that closes a block keeps whatever follows it.
-  const source = rawSource
-    .split('\n')
-    .map((line) => line.replace(/\/\*.*?\*\//g, ' '))
-    .filter((line) => !/^\s*(?:\/\/|\/\*|\*)/.test(line) || (/^\s*(?:\/\*|\*)/.test(line) && line.includes('*/')))
-    .join('\n');
+  // Comments only add specifiers, so a source naming no library anywhere is
+  // answered before it is tokenised. A comment names a library nothing runs:
+  // a JSDoc `{import('eslint').Rule}`, a CSS `@import 'tailwindcss'` in prose.
+  if (!moduleSpecifiers(rawSource).specifiers.some((sp) => LIBRARY_DISK_READERS.has(libraryOf(sp)))) return false;
+  const source = stripComments(rawSource);
   const libs = moduleSpecifiers(source).specifiers.filter((sp) => LIBRARY_DISK_READERS.has(libraryOf(sp)));
   if (libs.length === 0) return false;
   const importRe = /\bimport\s+(type\s+)?([^'";]*?)\s+from\s+['"]([^'"]+)['"]/g;

@@ -109,7 +109,7 @@ function workspace() {
     'scripts/__tests__/entry.test.ts': "import '../invoked-as.mjs';\n",
     'scripts/__tests__/own-dir.test.ts': reader("readFileSync(join(HERE, '..', 'helper.mjs'), 'utf8')"),
     'scripts/__tests__/spawns.test.ts': "import { spawnSync } from 'node:child_process';\nspawnSync('node', ['x.mjs']);\n",
-    'scripts/__tests__/walks.test.ts': "import { readdirSync } from 'node:fs';\nreaddirSync(process.cwd());\n",
+    'scripts/__tests__/walks.test.ts': "import { opendirSync } from 'node:fs';\nfor (const e of opendirSync(process.cwd())) void e;\n",
     'eslint-rules/rule.js': 'export default { create: () => ({}) };\n',
     'eslint-rules/rule.test.js': "import { RuleTester } from 'eslint';\nimport rule from './rule.js';\nexport { RuleTester, rule };\n",
     'tools/helper.mjs': 'export const t = 1;\n',
