@@ -5484,6 +5484,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'identity port, computed keys and exported names (fourth pass, #30020)': 23,
   'hand-series host slots (fifth pass, #30020)': 17,
   'constructor and definite-assignment wiring (fourth pass, #30020 R8)': 17,
+  'scoped members, instance identity port and symbol keys (second pass, #30020 S1)': 25,
 });
 const SELF_TEST_BATTERY_FLOOR = 5;
 
@@ -5759,6 +5760,35 @@ export class ScopedContext {
   get user() { return this.ctx.user; }
 }
 `;
+}
+
+/**
+ * `scopedFixtureSource` with two more scoped methods the second pass keeps: a
+ * symbol-keyed one (`[SEED_KEY]`, `not-identifier-name`) that hands the
+ * instance on and reads an import nothing else reads, and one keyed by a
+ * lower-case binding R9 does not take. `facadeField` declares a `facade`
+ * member on `ScopedContext` (the identity port would shadow it).
+ */
+function scopedMembersFixtureSource({ facadeField = false } = {}) {
+  const base = scopedFixtureSource();
+  return base
+    .replace("import { onlyScopedReads } from './scoped-only.js';\n",
+      "import { onlyScopedReads } from './scoped-only.js';\nimport { SEED_KEY, lowerKey } from './keys.js';\nimport { onlySeedReads } from './seed-only.js';\n")
+    .replace('  private flag = false;\n', `  private flag = false;\n${facadeField ? '\n  private facade = 0;\n' : ''}`)
+    .replace('  get user() { return this.ctx.user; }\n', [
+      '  /** A symbol-keyed method: its docblock stays on the class. */',
+      '  async [SEED_KEY](): Promise<ScopedContext> {',
+      '    if (!this.ctx.user) return this;',
+      '    return this.derive({ ...this.ctx, user: await onlySeedReads(this.ctx.user) });',
+      '  }',
+      '',
+      '  [lowerKey](): number {',
+      '    return 1;',
+      '  }',
+      '',
+      '  get user() { return this.ctx.user; }',
+      '',
+    ].join('\n'));
 }
 
 function handFixtureEngine() {
@@ -6639,6 +6669,79 @@ async function selfTest() {
     check('a stub whose slots all forward refuses', /no computing slot/.test(refusalOf(() => planHandSlots(tm, input, mods, ['gammaOnly']))));
     check('a slot holding a template that spans lines refuses', /spanning lines/.test(refusalOf(() => planHandSlots(tm, input, mods, ['gammaTpl']))));
     check('a method that is not a hand stub refuses', refused(() => planHandSlots(tm, `${input.replace('    // The body lives in `engine-gamma.ts` (see `GammaHost`).\n    const readN', '    const readN')}`, mods, ['gammaServe'])));
+  }
+
+  open('scoped members, instance identity port and symbol keys (second pass, #30020 S1)');
+  {
+    const classes = FIXTURE_SCOPED_CLASSES;
+    const source = scopedMembersFixtureSource();
+    const firstPlan = planScoped(tm, source, { classes });
+    const why = (name) => (firstPlan.targets[1].records.find((r) => r.name === name)?.reasons ?? ['<absent>']).join('; ');
+    check('the second pass keeps a body handing the instance on (bare-this) and a symbol-keyed one (not-identifier-name)',
+      why('handsSelf').startsWith('bare-this') && why('[SEED_KEY]').startsWith('not-identifier-name'), `${why('handsSelf')} | ${why('[SEED_KEY]')}`);
+    const split = generateScoped(tm, source, firstPlan);
+    const input = split.host;
+    const mods = split.modules;
+    const names = ['ScopedContext#[SEED_KEY]', 'ScopedContext#handsSelf'];
+    const planned = planScopedMembers(tm, input, mods, names, { classes });
+    check('the plan takes both into the class\'s written module, in class order, the symbol key under its facet name',
+      planned.records.map((r) => `${r.name}>${r.facetName}`).join() === 'handsSelf>handsSelf,[SEED_KEY]>seedKey' &&
+      [...planned.modules.keys()].join() === 'engine-scoped-context.ts', planned.records.map((r) => `${r.name}>${r.facetName}`).join());
+    const out = generateScopedMembers(tm, input, mods, planned);
+    const again = generateScopedMembers(tm, input, mods, planScopedMembers(tm, input, mods, names, { classes }));
+    const head = new Map([...mods, ...out.modules]);
+    const v = verifyScopedMembers(tm, input, out.host, mods, head, { classes });
+    check('the moves prove against their base (undo rebuilds engine.ts and every scoped module byte for byte)',
+      v.failures.length === 0 && v.moved.join() === 'ScopedContext#handsSelf,ScopedContext#[SEED_KEY]', [...v.failures, v.moved.join()].join(' | '));
+    check('two runs on one input write byte-identical trees',
+      treeHash(new Map([['h', out.host], ...out.modules])) === treeHash(new Map([['h', again.host], ...again.modules])));
+    const ctxMod = out.modules.get('engine-scoped-context.ts') ?? '';
+    check('the symbol-keyed stub keeps its key and docblock, drops `async`, and calls the camelCase facet member',
+      out.host.includes(`  /** A symbol-keyed method: its docblock stays on the class. */\n  [SEED_KEY](): Promise<ScopedContext> {\n    // ${SCOPED_MARK} The body moved to \`engine-scoped-context.ts\` (see \`ScopedContextHost\`).\n    return ScopedContextFacet.seedKey.call(scopedContextHost.of(this));\n  }`),
+      out.host.slice(out.host.indexOf('[SEED_KEY]('), out.host.indexOf('[SEED_KEY](') + 300));
+    check('each bare `this` a body handed on reads `this.facade` in the facet member',
+      ctxMod.includes("  static handsSelf(this: Pick<ScopedContextHost, 'facade'>): ScopedContext {\n    void count;\n    return this.facade;\n  }") &&
+      ctxMod.includes("  static async seedKey(this: Pick<ScopedContextHost, 'ctx' | 'derive' | 'facade'>): Promise<ScopedContext> {\n    if (!this.ctx.user) return this.facade;"),
+      ctxMod.slice(ctxMod.indexOf('static handsSelf'), ctxMod.indexOf('static handsSelf') + 200));
+    check('the symbol-keyed facet member carries the placeholder naming the method by its key',
+      ctxMod.includes('  /** The body of `ScopedContext#[SEED_KEY]`; the method\'s docblock there is its contract. */\n  static async seedKey('));
+    check('the host interface gains the identity port, typed as the class, under its own docblock',
+      ctxMod.includes(`${SCOPED_FACADE_DOC}\n  readonly facade: ScopedContext;`));
+    check('the install block fills the identity port with the instance itself, in name order',
+      out.host.includes('      get engine() { return instance.engine; },\n      facade: instance,\n      get flag() {'), out.host.slice(out.host.indexOf('scopedContextHost.install')));
+    check('the header lists the moved names among the others, in class order',
+      ctxMod.includes(" * methods `readFlag`, `object`, `sudo`, `handsSelf`, `[SEED_KEY]` moved out of\n"),
+      ctxMod.slice(0, 600));
+    check('the imports only moved bodies read leave engine.ts, land in the module, and the proof names them',
+      out.pruned.join() === 'count,onlySeedReads' && v.pruned.join() === 'count,onlySeedReads' && ctxMod.includes("import { onlySeedReads } from './seed-only.js';") &&
+      !out.host.includes('./seed-only.js'), `${out.pruned} | ${v.pruned}`);
+    check('the symbol key itself stays imported in engine.ts (the stub keeps the key)', out.host.includes("import { SEED_KEY, lowerKey } from './keys.js';"));
+    // A hand's words after the header sentence (from the next line on) are kept as they stand.
+    const tailed = new Map([...mods, ['engine-scoped-context.ts', (mods.get('engine-scoped-context.ts') ?? '').replace(' (its second pass).\n', ' (its second pass).\n * A hand wrote this line after the sentence, wrapped its own way.\n')]]);
+    const tOut = generateScopedMembers(tm, input, tailed, planScopedMembers(tm, input, tailed, names, { classes }));
+    const tv = verifyScopedMembers(tm, input, tOut.host, tailed, new Map([...tailed, ...tOut.modules]), { classes });
+    check('a hand-written tail after the header sentence is kept, and the moves still prove',
+      tv.failures.length === 0 && (tOut.modules.get('engine-scoped-context.ts') ?? '').includes('(its second pass).\n * A hand wrote this line after the sentence, wrapped its own way.\n'), tv.failures.join(' | '));
+    const fails = (host, edited) => verifyScopedMembers(tm, input, host, mods, new Map([...head, ...edited]), { classes }).failures.length > 0;
+    check('one edited character in a moved body fails', fails(out.host, [['engine-scoped-context.ts', ctxMod.replace('user: await onlySeedReads(this.ctx.user)', 'user: await onlySeedReads(this.ctx.user!)')]]));
+    check('a `this.facade` read back as a bare `this` in the facet fails', fails(out.host, [['engine-scoped-context.ts', ctxMod.replace('    return this.facade;\n', '    return this as any;\n')]]));
+    check('an install block without the identity port fails', fails(out.host.replace('      facade: instance,\n', ''), []));
+    check('a header that does not list a moved name fails', fails(out.host, [['engine-scoped-context.ts', ctxMod.replace('`handsSelf`, ', '')]]));
+    check('a host interface member no Pick names fails', fails(out.host, [['engine-scoped-context.ts', ctxMod.replace('  readonly facade: ScopedContext;\n', '  readonly facade: ScopedContext;\n  readonly user: ScopedContext[\'user\'];\n')]]));
+    check('an import nothing in the module reads fails', fails(out.host, [['engine-scoped-context.ts', ctxMod.replace("import { onlySeedReads } from './seed-only.js';", "import { onlySeedReads, unread } from './seed-only.js';")]]));
+    check('a stub calling another facet member fails', fails(out.host.replace('ScopedContextFacet.seedKey.call(', 'ScopedContextFacet.handsSelf.call('), []));
+    check('a head that moved nothing fails', verifyScopedMembers(tm, input, input, mods, mods, { classes }).failures.some((f) => f.startsWith('nothing moved')));
+    check('a body writing another instance\'s private member refuses (foreign-private)',
+      /foreign-private/.test(refusalOf(() => planScopedMembers(tm, input, mods, ['ScopedContext#derive'], { classes }))));
+    check('a key R9 does not take refuses (not-identifier-name), as does an unqualified name and a method already a stub',
+      /not-identifier-name/.test(refusalOf(() => planScopedMembers(tm, input, mods, ['ScopedContext#[lowerKey]'], { classes }))) &&
+      /spell each as Class#member/.test(refusalOf(() => planScopedMembers(tm, input, mods, ['handsSelf'], { classes }))) &&
+      /already moved/.test(refusalOf(() => planScopedMembers(tm, input, mods, ['ScopedContext#sudo'], { classes }))));
+    const withFacade = scopedMembersFixtureSource({ facadeField: true });
+    const fSplit = generateScoped(tm, withFacade, planScoped(tm, withFacade, { classes }));
+    check('a class that declares a member named `facade` refuses a body handing the instance on (facade-taken)',
+      /facade-taken/.test(refusalOf(() => planScopedMembers(tm, fSplit.host, fSplit.modules, ['ScopedContext#handsSelf'], { classes }))));
+    check('a class that is not a scoped class refuses', /is not a scoped class/.test(refusalOf(() => planScopedMembers(tm, input, mods, ['ObjectQL#run'], { classes }))));
   }
 
   const declared = Object.keys(SELF_TEST_BATTERIES);
