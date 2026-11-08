@@ -4,7 +4,7 @@
 
 fix(objectql): a refused member of a multi-package artifact leaves no member of it registered (#31564)
 
-Clause-②: no
+Clause-②: yes (widening) — adds one public method, `SchemaRegistry.recordRestoreOnRefusal`, and refuses nothing that registers today.
 Metadata-protocol: none
 
 The engine's `manifest` service registered an artifact's packages one by one, and each package put back only what it had written itself when it was refused. When a later member was refused, the members registered before it stayed in the running kernel (package records, objects, apps, navigation contributions, kinds, datasource definitions), while the marketplace install door answered `422 PLUGIN_REGISTER_FAILED` and ledgered nothing, so a restart dropped them again.
