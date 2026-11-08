@@ -147,6 +147,28 @@ export interface InstalledPluginRefusal {
   version: string;
   error: InstalledPluginRefusalCode;
   message: string;
+  /**
+   * What the plugin declares in `providesServices` (ADR-0116), for a plugin
+   * refused after its entry module was imported, when that could be read: `[]`
+   * when it declares none. Absent when it was refused before its import, or the
+   * declaration could not be read. `os serve` judges a refusal by it.
+   */
+  declaredServices?: string[];
+}
+
+/**
+ * What an imported plugin declares in `providesServices` (ADR-0116): its string
+ * entries, `[]` when it declares none (or is not an object), `undefined` when
+ * reading the declaration throws.
+ */
+function readDeclaredServices(plugin: unknown): string[] | undefined {
+  if (!plugin || (typeof plugin !== 'object' && typeof plugin !== 'function')) return [];
+  try {
+    const provides = (plugin as { providesServices?: unknown }).providesServices;
+    return Array.isArray(provides) ? provides.filter((s): s is string => typeof s === 'string') : [];
+  } catch {
+    return undefined;
+  }
 }
 
 /** An installed plugin every check passed: what loading it would import. */
@@ -509,6 +531,12 @@ export async function verifyInstalledPlugins(input: VerifyInstalledPluginsInput)
 export interface LoadedInstalledPlugin {
   record: PluginInstallationRecord;
   plugin: unknown;
+  /**
+   * What the plugin declares in `providesServices` (ADR-0116), read as it was
+   * imported: `[]` when it declares none, absent when it could not be read.
+   * The host carries it onto a refusal it raises for this plugin.
+   */
+  declaredServices?: string[];
 }
 
 export interface InstalledPluginsLoad {
@@ -721,10 +749,12 @@ export async function loadInstalledPlugins(input: LoadInstalledPluginsInput): Pr
       refusal = { id: record.id, version: record.version, error: 'not_a_plugin', message: `reading what ${item.entry} exports threw: ${thrownMessage(error)}` };
     }
     if (refusal) {
-      out.refused.push(refusal);
+      const declaredServices = readDeclaredServices(plugin);
+      out.refused.push(declaredServices === undefined ? refusal : { ...refusal, declaredServices });
       continue;
     }
-    out.loaded.push({ record, plugin });
+    const declaredServices = readDeclaredServices(plugin);
+    out.loaded.push(declaredServices === undefined ? { record, plugin } : { record, plugin, declaredServices });
   }
   return out;
 }

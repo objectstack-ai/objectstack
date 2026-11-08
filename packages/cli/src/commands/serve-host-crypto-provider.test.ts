@@ -66,6 +66,7 @@ import {
   refuseTwoCryptoProviderPlugins,
   refuseUnloadedCryptoProviderPlugins,
   refuseSetAsideCryptoProviderPlugins,
+  refuseRefusedInstalledCryptoProviderPlugins,
 } from './serve.js';
 
 // [#10126] Pay the first load of what `serve.ts` reaches through dynamic
@@ -519,6 +520,63 @@ describe('a plugins entry that did not load refuses the boot unless it is ruled 
   });
 });
 
+describe('an installed plugin refused at boot refuses the boot unless it is ruled out as the crypto provider', () => {
+  type Refused = Parameters<typeof refuseRefusedInstalledCryptoProviderPlugins>[0][number];
+  const refusalOf = (refused: Refused[]): Error | undefined => {
+    try { refuseRefusedInstalledCryptoProviderPlugins(refused); }
+    catch (err) { return err as Error; }
+    return undefined;
+  };
+  const refused = (id: string, error: Refused['error'], declaredServices?: string[]): Refused =>
+    ({ id, version: '1.0.0', error, message: 'x', ...(declaredServices ? { declaredServices } : {}) });
+
+  it('a plugin refused before its import says nothing it provides, and is refused, named with its reason and the way to boot without it', () => {
+    for (const error of ['tree_changed', 'signature_invalid', 'signature_key_revoked', 'artifact_changed', 'manifest_invalid', 'entry_missing', 'import_failed'] as const) {
+      const refusal = refusalOf([refused('com.acme.kms', error)]);
+      expect(refusal, error).toBeInstanceOf(HostCryptoProviderRefusal);
+      expect(refusal!.message).toContain(`installed plugin com.acme.kms@1.0.0 was refused (${error})`);
+      expect(refusal!.message).toContain(`'${CRYPTO_PROVIDER_SERVICE}'`);
+      expect(refusal!.message).toContain('os plugin disable com.acme.kms');
+    }
+  });
+
+  it('a plugin refused after its import is judged by what it declares: the provider is refused, other services or none are ruled out', () => {
+    for (const error of ['not_a_plugin', 'signature_conflict', 'plugin_name_taken', 'kernel_refused'] as const) {
+      expect(refusalOf([refused('com.acme.kms', error, [CRYPTO_PROVIDER_SERVICE])]), error).toBeInstanceOf(HostCryptoProviderRefusal);
+      expect(refusalOf([refused('com.acme.widgets', error, ['widgets'])]), error).toBeUndefined();
+      expect(refusalOf([refused('com.acme.plain', error, [])]), error).toBeUndefined();
+      // Imported, but its declaration could not be read: nothing rules it out.
+      expect(refusalOf([refused('com.acme.unread', error)]), error).toBeInstanceOf(HostCryptoProviderRefusal);
+    }
+  });
+
+  it('CONTROL: a tier this host does not run in process is ruled out; no refusal is not refused', () => {
+    expect(refusalOf([refused('com.acme.sandboxed', 'runtime_not_dispatched'), refused('com.acme.untiered', 'runtime_undeclared')])).toBeUndefined();
+    expect(refusalOf([])).toBeUndefined();
+  });
+
+  it('the loader failing outright is refused, with no plugin to disable', () => {
+    const refusal = refusalOf([{ id: '*', version: '*', error: 'loader_failed', message: 'x' }]);
+    expect(refusal).toBeInstanceOf(HostCryptoProviderRefusal);
+    expect(refusal!.message).toContain('the installed plugins could not be read (loader_failed)');
+    expect(refusal!.message).not.toContain('os plugin disable');
+  });
+
+  it('every refused plugin is named, and the ruled-out ones are not', () => {
+    const refusal = refusalOf([
+      refused('com.acme.one', 'tree_changed'),
+      refused('com.acme.widgets', 'kernel_refused', ['widgets']),
+      refused('com.acme.sandboxed', 'runtime_not_dispatched'),
+      refused('com.acme.two', 'signature_key_untrusted'),
+    ]);
+    expect(refusal!.message).toContain('com.acme.one@1.0.0 was refused (tree_changed)');
+    expect(refusal!.message).toContain('com.acme.two@1.0.0 was refused (signature_key_untrusted)');
+    expect(refusal!.message).toContain('os plugin disable com.acme.one, os plugin disable com.acme.two');
+    expect(refusal!.message).not.toContain('com.acme.widgets');
+    expect(refusal!.message).not.toContain('com.acme.sandboxed');
+  });
+});
+
 describe('a plugins entry the standalone boot sets aside refuses the boot unless it is ruled out as the crypto provider', () => {
   const refusalOf = async (authored: unknown, importSpecifier: (specifier: string) => Promise<unknown>): Promise<Error | undefined> => {
     try { await refuseSetAsideCryptoProviderPlugins(authored, importSpecifier); }
@@ -689,6 +747,15 @@ describe('the wiring inside run()', () => {
     const host = SERVE.indexOf('hostCrypto = createHostCryptoProvider(() => localCryptoProvider.resolve());');
     expect(record).toBeGreaterThan(0);
     expect(check).toBeGreaterThan(record);
+    expect(host).toBeGreaterThan(check);
+  });
+
+  it('refuses a refused installed plugin that may provide the crypto provider right after the installed plugins register, before the host provider is built', () => {
+    const register = SERVE.indexOf('const installedPluginsBoot = await registerInstalledPlugins({ kernel, track: trackPlugin });');
+    const check = SERVE.indexOf('refuseRefusedInstalledCryptoProviderPlugins(installedPluginsBoot?.refused ?? []);');
+    const host = SERVE.indexOf('hostCrypto = createHostCryptoProvider(() => localCryptoProvider.resolve());');
+    expect(register).toBeGreaterThan(0);
+    expect(check).toBeGreaterThan(register);
     expect(host).toBeGreaterThan(check);
   });
 
