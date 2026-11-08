@@ -1160,9 +1160,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       revoked_reason: {
         label: "撤销原因",
-        help: "管理员强制重置密码时撤销了该密钥，则记录此原因。此类密钥只能由平台管理员恢复，其所有者应创建新的密钥。密钥恢复后清除。从 API 密钥列表撤销的密钥此项为空。",
+        help: "密钥被撤销的原因，仅在它决定谁能恢复密钥时记录。管理员强制重置密码：只有平台管理员能恢复该密钥。组织成员资格已结束：所有者已离开组织，任何人都不能恢复该密钥，由组织成员创建新的密钥。密钥恢复后清除。从 API 密钥列表撤销的密钥此项为空。",
         options: {
-          admin_password_reset: "管理员强制重置密码"
+          admin_password_reset: "管理员强制重置密码",
+          organization_membership_ended: "组织成员资格已结束"
         }
       },
       key: {
