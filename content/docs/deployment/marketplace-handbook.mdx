@@ -226,7 +226,13 @@ the detail.
    offers **Add sample data**, then **Re-seed sample data**, and **Purge sample
    data**, which deletes only the records your seed created. Behind them are
    `POST /api/v1/marketplace/install-local/:manifestId/reseed-sample-data` and
-   `…/purge-sample-data`, both requiring `manage_metadata`.
+   `…/purge-sample-data`, both requiring `manage_metadata`. For an unmanaged
+   copy installed with its sample data, call them with the copy's base id: they
+   act on the sample data the copy holds, and the reseed also loads it again
+   after a first load that failed. Uninstalling the copy
+   (`DELETE /api/v1/packages/:baseId`) drops its tables with every row in them;
+   with `?keepData=true` every row stays, sample rows included, and no door
+   tells them apart any more, so purge first if you want them gone.
 7. **Enable and disable.** **Setup → Installed Apps** lists the apps installed
    from the marketplace, each package of a suite as its own row. An admin with
    `manage_metadata` may disable a writable package, and a **module of an
