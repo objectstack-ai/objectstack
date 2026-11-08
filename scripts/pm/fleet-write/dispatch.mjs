@@ -455,16 +455,36 @@
  * read-back reads a pull's edited body `identical`, stored === sent, nothing appended (`platform-readings.md`, the
  * relay `issue_patch` line), and a footer after the trailer leaves a body the second rule above refuses.
  *
+ * ## The kind rule — no pm state added to a pull request, no `pm:awaiting-merge` added to an issue (#31253)
+ *
+ * The rule is `.claude/skills/pm-dispatch/SKILL.md`'s, and its predicate and sentence are `label-write.mjs`'s
+ * (`refuseKindLabels`, its header's section of the same name): this file asks them and ⛔ restates neither. It is asked
+ * of the three adding ops (`RETIRED_LANE_REWRITE_OPS`), case-insensitively as GitHub matches label names, and a refusal
+ * sends NOTHING for the whole file:
+ *
+ *   - `pr_create` / `issue_create` name their own kind, so they are judged on the file as handed, right after the
+ *     lane rewrite and before the session — usage (2), no read;
+ *   - a `labels_add` whose labels the rule governs is judged by READING its target — the same
+ *     `GET /repos/{repo}/issues/{issue}`, in the same place (after the packer, BEFORE the dry-run exit) and with the
+ *     same token and proxy route as the trailer read above — asked by label-write's `readTargetKind`, which needs
+ *     `pull_request` and `html_url` to agree. The wrong kind, or a 200 whose two members name no one kind, is usage
+ *     (2); no answer, or any other status, is PREREQUISITE NOT MET (3): ⛔ an unread kind is never a pass. A
+ *     `labels_add` the rule does not govern reads nothing.
+ *
+ * `labels_remove` is never asked: taking a label off is how a wrong one comes off.
+ *
  * ## Exit codes — capture them BEFORE any pipe
  *
  *   0   the run completed with conclusion `success`, every body it wrote
  *       reads back as the bytes sent, and every run it started is listed.
  *   2   usage, the packed payload refused by the validator, a seat's edit body
- *       carrying no signature line, or a trailer-signed `issue_patch` body whose
- *       target the platform answers is an issue (nothing sent).
+ *       carrying no signature line, a trailer-signed `issue_patch` body whose
+ *       target the platform answers is an issue, or an adding op refused by the
+ *       kind rule (nothing sent).
  *   3   PREREQUISITE NOT MET — no token, no session in dispatch mode, the
  *       dispatch route dead (401/407/0), the run list unreadable, or the target
- *       of a trailer-signed `issue_patch` body unreadable (nothing sent).
+ *       of a trailer-signed `issue_patch` body or of a governed `labels_add`
+ *       unreadable (nothing sent).
  *   4   NOT STORED — the run succeeded and the read-back shows a body the board
  *       does not hold as sent (op, object and first differing byte printed).
  *       Go READ it; ⛔ do not retry.
@@ -486,7 +506,7 @@ import { isEntrypoint } from '../../invoked-as.mjs';
 import { EXIT_PREREQUISITE_NOT_MET, LANE_LABEL_ALIASES, PROXY_FLAG, proxyRearmPlan, proxyRoute, readSignatureLine, SEAT_SIGNATURE_SHAPE, signatureRefusal, signatureRefusalText } from '../check-half-states.mjs';
 // The roster's generator marker, IMPORTED so the one generated body this door exempts is named by its own writer.
 import { ROSTER_MARKER } from '../fleet-roster.mjs';
-import { classifyHttp } from '../label-write.mjs';
+import { KIND_ISSUE, KIND_PULL, KIND_RULE_AWAITING_MERGE_PR_ONLY, KIND_RULE_PATH, KIND_RULE_STATES_ON_ISSUES, classifyHttp, readTargetKind, refuseKindLabels } from '../label-write.mjs';
 import { DEFAULT_BATCH_GAP_MS, DEFAULT_BATCH_THRESHOLD, EXIT_WRITE_PACE_REFUSED, fmtDuration, isWriteMethod, noteResponse, paceWrite, releaseWriteLease } from '../write-pace.mjs';
 import {
   ADVISORY_READ_KEY_TYPE,
@@ -916,7 +936,10 @@ export function retiredLaneRewriteLine({ from, to }) {
   return `label ${from} → ${to} (retired alias)`;
 }
 
-/** The ops whose `labels` PUT a label on a card. ⛔ `labels_remove` is not one: taking a retired label off must name it. */
+/**
+ * The ops whose `labels` PUT a label on a card — the adding doors both label rules here ask (the retired-lane rewrite and
+ * `kindRuleRows`). ⛔ `labels_remove` is not one: taking a retired label off must name it, and a removal is never refused.
+ */
 export const RETIRED_LANE_REWRITE_OPS = Object.freeze(['labels_add', 'issue_create', 'pr_create']);
 
 /** An actions file with every adding label list rewritten; each row names its 1-based action and op. */
@@ -931,6 +954,63 @@ export function rewriteRetiredLaneActions(actions) {
     return { ...a, labels: r.labels };
   });
   return { actions: out, rewrites: rows };
+}
+
+/**
+ * The kind rule at the relay's adding doors (header: "The kind rule"), asked of an actions file. Its predicate and its
+ * sentence are label-write's `refuseKindLabels`, ⛔ never restated here. A create names its own kind — `pr_create` a
+ * pull request, `issue_create` an issue — so it is judged with no read (`refusals`). A `labels_add` names a number
+ * that may be either, so one whose labels the rule governs — `refuseKindLabels` with no kind answers non-null exactly
+ * then — waits for the platform read (`reads`, `readLabelTargetKinds`); any other `labels_add` reads nothing. Pure.
+ *
+ * @returns {{ refusals: { action: number, op: string, refusal: string }[], reads: { action: number, op: string, issue: unknown, labels: string[] }[] }}
+ */
+export function kindRuleRows(actions) {
+  const refusals = [];
+  const reads = [];
+  if (!Array.isArray(actions)) return { refusals, reads };
+  actions.forEach((a, i) => {
+    if (!a || typeof a !== 'object' || !RETIRED_LANE_REWRITE_OPS.includes(a.op) || !Array.isArray(a.labels)) return;
+    const action = i + 1;
+    // Asked inside the call, never at module scope: label-write imports this file, so its constants may not exist yet there.
+    const kind = a.op === 'pr_create' ? KIND_PULL : a.op === 'issue_create' ? KIND_ISSUE : null;
+    if (kind !== null) {
+      const refusal = refuseKindLabels({ kind, add: a.labels, ref: 'its target' });
+      if (refusal !== null) refusals.push({ action, op: a.op, refusal });
+    } else if (refuseKindLabels({ kind: null, add: a.labels }) !== null) {
+      reads.push({ action, op: a.op, issue: a.issue, labels: a.labels });
+    }
+  });
+  return { refusals, reads };
+}
+
+/**
+ * Each governed `labels_add` target's kind, READ: ONE `GET /repos/{repo}/issues/{issue}` per distinct number, its
+ * answer asked by label-write's own `readTargetKind` (`pull_request` and `html_url` must AGREE) and judged by
+ * `refuseKindLabels`. Three verdicts: `pass` (a kind the labels are legal on), `refused` (the wrong kind, or a 200 whose
+ * two members name no one kind — refused rather than guessed, as label-write refuses it), and `unread` (any other
+ * answer, or none — ⛔ never a pass). Reads only, never paced; never throws.
+ *
+ * @returns {Promise<{ action: number, issue: unknown, verdict: 'pass'|'refused'|'unread', kind: string|null, refusal: string|null }[]>}
+ */
+export async function readLabelTargetKinds(reads, { repo, api = DEFAULT_API, fetch, token = '' } = {}) {
+  const seen = new Map();
+  const rows = [];
+  for (const c of reads) {
+    const path = `/repos/${repo}/issues/${c.issue}`;
+    if (!seen.has(c.issue)) seen.set(c.issue, await rest(api, path, {}, { fetch, token }));
+    const r = seen.get(c.issue);
+    const ref = `${repo}#${c.issue}`;
+    if (r.status === 200 && r.json !== null && typeof r.json === 'object' && !Array.isArray(r.json)) {
+      const { kind, why } = readTargetKind(r.json);
+      const refusal = refuseKindLabels({ kind, why, add: c.labels, ref });
+      rows.push({ action: c.action, issue: c.issue, verdict: refusal === null ? 'pass' : 'refused', kind, refusal });
+      continue;
+    }
+    const why = `GET ${path} answered ${r.status === 0 ? `nothing — ${r.detail}` : `HTTP ${r.status}${r.detail ? ` (${r.detail})` : ''}`}`;
+    rows.push({ action: c.action, issue: c.issue, verdict: 'unread', kind: null, refusal: refuseKindLabels({ kind: null, why, add: c.labels, ref }) });
+  }
+  return rows;
 }
 
 export function packRequest({ repo, session, actions, requestId = null, now = Date.now } = {}) {
@@ -2007,6 +2087,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   "the batch gap at the seat: content creation read off the op table; a stroke at or above write-pace's threshold is batched through its last content-creating write and waited for exactly that much longer; a stroke whose pacing the relay job cannot hold is refused before anything is sent, naming the per-op doors; the job's timeout mirrors the workflow's": 13,
   "the signature at the seat's door: a comment_edit or issue_patch body opens with the seat's signature line or the file is usage (2), nothing packed; generated, body-less and the other doors' ops are left alone": 13,
   "the pull request body at the seat's door: an issue_patch body signed only by its LAST-line trailer passes when the platform answers its target is a pull request, before the dry-run exit; an issue, an unread target and a trailer-less body are refused; comment_edit takes no trailer": 19,
+  "the kind rule at the relay's adding doors: a pm state on pr_create or on a labels_add whose target READS as a pull request, and pm:awaiting-merge on issue_create or on a labels_add whose target reads as an issue, are refused before the dry-run exit with label-write's own sentence, case-insensitively and for the whole file; an unread kind is never a pass; labels_remove and an ungoverned labels_add read nothing": 18,
   "the run_rerun_failed stroke at the seat: it packs as ONE action carrying run_id alone and travels in ONE dispatch; beside any other action, or with a key that widens it, it is refused before anything is sent; it creates no content, carries no body and names no workflow, so nothing is read back here — a success run is the executor's confirmation; a run that failed at the relay's fence is exit 5 after ONE dispatch, never re-sent": 6,
   "the hierarchy link at the seat: an epic's children pack as sub_issue_add actions carrying the parent and the child by number alone, beside other issue ops in ONE dispatch; a self-link, an id or a replace_parent is refused before anything is sent; neither row creates content, carries a body or names a workflow, so the stroke is paced at rule ①'s gap and nothing is read back here — a success run is the executor's confirmation; a run that failed at the relay's fence is exit 5 after ONE dispatch, never re-sent": 5,
   "the advisory rows at the seat: a report, a draft, an advisory's collaborators, its versions and its state each pack as ONE action in a stroke of its own and travel in ONE dispatch; beside another action, with a malformed id, package or versions entry, a state the relay names no move to or a key that carries content, refused before anything is sent and never echoing a value; the report and the draft create content but carry no body, so nothing is read back — by construction, said where the read-back is decided — and each one's id comes back as an advisory annotation the seat reads and hands on, as does a publish's; the id rows that never publish read nothing back; a run that failed is exit 5 after ONE dispatch, never re-sent": 17,
@@ -2017,7 +2098,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // hierarchy link seat battery, 24 → 25 with the pull request body battery, 25 → 26 with the advisory rows' seat
 // battery, 26 → 27 with advisory_read's seat battery, 27 → 28 with the retired lane aliases battery: one battery,
 // one row.
-const SELF_TEST_BATTERY_FLOOR = 28;
+const SELF_TEST_BATTERY_FLOOR = 29;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 const batteryCases = new Map();
@@ -3400,6 +3481,94 @@ export async function selfTest() {
       })());
     }
 
+    // ── the kind rule at the relay's adding doors ──────────────────────────
+    battery("the kind rule at the relay's adding doors: a pm state on pr_create or on a labels_add whose target READS as a pull request, and pm:awaiting-merge on issue_create or on a labels_add whose target reads as an issue, are refused before the dry-run exit with label-write's own sentence, case-insensitively and for the whole file; an unread kind is never a pass; labels_remove and an ungoverned labels_add read nothing");
+    {
+      const REPO = 'objectstack-ai/objectstack';
+      const RULE = (text) => typeof text === 'string' && text.includes(KIND_RULE_PATH) && text.includes(KIND_RULE_STATES_ON_ISSUES) && text.includes(KIND_RULE_AWAITING_MERGE_PR_ONLY);
+      const ROWS = (actions) => kindRuleRows(actions);
+      const prState = ROWS([{ op: 'pr_create', title: 't', head: 'h', base: 'main', labels: ['skip-changeset', 'pm:queue'] }]);
+      t('⭐ a pm state in pr_create\'s labels is refused with no read, quoting the rule from label-write\'s constants', [prState.refusals.map((r) => `${r.action}:${r.op}`), prState.reads, RULE(prState.refusals[0]?.refusal), prState.refusals[0]?.refusal.includes('`pm:queue` is a pm card STATE and its target is a pull request')], [['1:pr_create'], [], true, true]);
+      const issueAwaiting = ROWS([{ op: 'issue_create', title: 't', body: 'b', labels: ['pm:awaiting-merge'] }]);
+      t('⭐ pm:awaiting-merge in issue_create\'s labels is refused with no read', [issueAwaiting.refusals.map((r) => `${r.action}:${r.op}`), issueAwaiting.refusals[0]?.refusal.includes('its target is an issue'), [KIND_RULE_PATH, KIND_RULE_AWAITING_MERGE_PR_ONLY].every((q) => issueAwaiting.refusals[0]?.refusal.includes(q))], [['1:issue_create'], true, true]);
+      const mixedCreates = ROWS([{ op: 'pr_create', title: 't', head: 'h', base: 'main', labels: ['Needs-User-Decision'] }, { op: 'issue_create', title: 't', body: 'b', labels: ['PM:Awaiting-Merge'] }]);
+      t('⭐ MIXED CASE at each create is refused like the lower-case name, its spelling named as written', [mixedCreates.refusals.map((r) => `${r.action}:${r.op}`), mixedCreates.refusals[0]?.refusal.includes('`Needs-User-Decision` is `needs-user-decision`'), mixedCreates.refusals[1]?.refusal.includes('`PM:Awaiting-Merge` is `pm:awaiting-merge`')], [['1:pr_create', '2:issue_create'], true, true]);
+      const legal = ROWS([{ op: 'pr_create', title: 't', head: 'h', base: 'main', labels: ['pm:awaiting-merge'] }, { op: 'issue_create', title: 't', body: 'b', labels: ['pm:queue', 'needs-user-decision'] }, { op: 'labels_remove', issue: 7, labels: ['pm:queue', 'pm:awaiting-merge'] }]);
+      t('control: each label on its own kind passes, and ⛔ labels_remove is never a row — a removal is never refused or read', [legal.refusals, legal.reads], [[], []]);
+      const adds = ROWS([{ op: 'labels_add', issue: 7, labels: ['tooling'] }, { op: 'labels_add', issue: 8, labels: ['PM:Queue'] }, { op: 'labels_add', issue: 9, labels: ['pm:awaiting-merge'] }]);
+      t('a labels_add waits for the read only when the rule governs a label it adds — mixed case included; an ungoverned one reads nothing', [adds.refusals, adds.reads.map((r) => `${r.action}:${r.issue}`)], [[], ['2:8', '3:9']]);
+      // The platform, faked at fetch: GET /repos/{repo}/issues/{n} answers from `store`, and every request is recorded.
+      const readFake = (store) => {
+        const seen = [];
+        const fetch = async (url, init) => {
+          const path = new URL(url).pathname;
+          seen.push(`${init?.method ?? 'GET'} ${path}`);
+          const answer = store[path];
+          if (answer === undefined) throw new Error('connect ECONNREFUSED (fixture)');
+          return { status: answer.status, headers: { get: () => null }, json: async () => answer.json };
+        };
+        return { fetch, seen, api: 'https://api.github.test' };
+      };
+      const PULL = (n) => ({ status: 200, json: { number: n, html_url: `https://github.com/${REPO}/pull/${n}`, pull_request: { url: `https://api.github.test/repos/${REPO}/pulls/${n}` } } });
+      const ISSUE = (n) => ({ status: 200, json: { number: n, html_url: `https://github.com/${REPO}/issues/${n}` } });
+      const at = (n) => `/repos/${REPO}/issues/${n}`;
+      const read = async (store, reads) => {
+        const f = readFake(store);
+        return { rows: await readLabelTargetKinds(reads, { repo: REPO, api: f.api, fetch: f.fetch, token: TOKEN }), seen: f.seen };
+      };
+      const kinds = await read({ [at(1)]: PULL(1), [at(2)]: ISSUE(2) }, [{ action: 1, issue: 1, labels: ['pm:dispatched'] }, { action: 2, issue: 1, labels: ['pm:awaiting-merge'] }, { action: 3, issue: 2, labels: ['pm:awaiting-merge'] }, { action: 4, issue: 2, labels: ['pm:queue'] }]);
+      t('the kind is READ by label-write\'s readTargetKind: a state on a PR and awaiting-merge on an issue refused, each on its own kind passing — ONE GET per number', [kinds.rows.map((r) => `${r.action}:${r.verdict}:${r.kind}`), kinds.seen], [['1:refused:pull request', '2:pass:pull request', '3:refused:issue', '4:pass:issue'], [`GET ${at(1)}`, `GET ${at(2)}`]]);
+      const blind = await read({ [at(5)]: { status: 200, json: { number: 5, html_url: `https://github.com/${REPO}/pull/5` } }, [at(6)]: { status: 503, json: { message: 'down' } } }, [{ action: 1, issue: 5, labels: ['pm:queue'] }, { action: 2, issue: 6, labels: ['pm:queue'] }, { action: 3, issue: 7, labels: ['pm:queue'] }]);
+      t('⛔ a 200 whose members disagree is REFUSED rather than guessed; a 503 and no answer are UNREAD — each says why, never a pass', [blind.rows.map((r) => r.verdict), blind.rows[0].refusal.includes('refused rather than guessed'), blind.rows[1].refusal.includes('HTTP 503'), blind.rows[2].refusal.includes('ECONNREFUSED')], [['refused', 'unread', 'unread'], true, true, true]);
+      // The CLI, in process: the read deps stand in for the platform; a send dep records anything that would leave.
+      const cli = async (actions, store, { envExtra = {}, dryRun = true } = {}) => {
+        const file = join(dir, `kind-${paceCase++}.json`);
+        writeFileSync(file, JSON.stringify(actions), 'utf8');
+        const f = readFake(store);
+        const sent = [];
+        const out = [];
+        const err = [];
+        const [log, error] = [console.log, console.error];
+        console.log = (l) => out.push(String(l));
+        console.error = (l) => err.push(String(l));
+        try {
+          const argv = ['--repo', REPO, '--actions-file', file, '--request-id', 'fw-kind-1', ...(dryRun ? ['--dry-run'] : [])];
+          const code = await main(argv, { env: { GITHUB_TOKEN: TOKEN, [SESSION_ENV]: SESSION, ...envExtra }, read: { api: f.api, fetch: f.fetch }, send: { api: 'https://api.github.test', fetch: async (url, init) => { sent.push(`${init?.method ?? 'GET'} ${new URL(url).pathname}`); throw new Error('fixture: nothing may be sent'); } } });
+          return { code, out: out.join('\n'), err: err.join('\n'), seen: f.seen, sent };
+        } finally {
+          [console.log, console.error] = [log, error];
+        }
+      };
+      const PR_ACT = (labels) => ({ op: 'pr_create', title: 't', head: 'h', base: 'main', body: 'Fixes #1', labels });
+      const cliPr = await cli([PR_ACT(['pm:queue'])], {});
+      t('⭐ CLI: pr_create with a state is usage (2) on a DRY RUN, zero reads, no payload, the refusal naming the action', [cliPr.code, cliPr.seen, cliPr.out.includes('"event_type"'), cliPr.err.includes('REFUSED — action 1 (pr_create)')], [EXIT_USAGE, [], false, true], cliPr.err.slice(-300));
+      const cliIssue = await cli([{ op: 'issue_create', title: 't', body: 'b', labels: ['PM:Awaiting-Merge'] }], {});
+      t('⭐ CLI: issue_create with pm:awaiting-merge in MIXED CASE is usage (2), zero reads, no payload', [cliIssue.code, cliIssue.seen, cliIssue.out.includes('"event_type"')], [EXIT_USAGE, [], false], cliIssue.err.slice(-300));
+      const cliAddPull = await cli([{ op: 'labels_add', issue: 1, labels: ['pm:dispatched'] }], { [at(1)]: PULL(1) });
+      t('⭐ CLI: labels_add of a state on a target that READS as a pull request is usage (2), one GET, no payload', [cliAddPull.code, cliAddPull.seen, cliAddPull.out.includes('"event_type"'), cliAddPull.err.includes(`${REPO}#1 is a pull request`)], [EXIT_USAGE, [`GET ${at(1)}`], false, true], cliAddPull.err.slice(-300));
+      const cliAddMixed = await cli([{ op: 'labels_add', issue: 1, labels: ['Needs-User-Decision'] }], { [at(1)]: PULL(1) });
+      t('⭐ CLI: labels_add of `Needs-User-Decision` on a pull request is refused like the lower-case name', [cliAddMixed.code, cliAddMixed.err.includes('`Needs-User-Decision` is `needs-user-decision`')], [EXIT_USAGE, true], cliAddMixed.err.slice(-300));
+      const cliAddIssue = await cli([{ op: 'labels_add', issue: 2, labels: ['pm:awaiting-merge'] }], { [at(2)]: ISSUE(2) });
+      t('⭐ CLI: labels_add of pm:awaiting-merge on a target that reads as an issue is usage (2), no payload', [cliAddIssue.code, cliAddIssue.out.includes('"event_type"'), cliAddIssue.err.includes(`${REPO}#2 is an issue`)], [EXIT_USAGE, false, true], cliAddIssue.err.slice(-300));
+      const cliBlind = await cli([{ op: 'labels_add', issue: 6, labels: ['pm:queue'] }], { [at(6)]: { status: 503, json: { message: 'down' } } });
+      t('⭐ CLI: an UNREADABLE kind on labels_add is PREREQUISITE NOT MET (3), the rule quoted, no payload — never a pass', [cliBlind.code, cliBlind.err.includes('PREREQUISITE NOT MET') && RULE(cliBlind.err), cliBlind.out.includes('"event_type"')], [EXIT_PREREQUISITE, true, false], cliBlind.err.slice(-300));
+      const cliLegal = await cli([{ op: 'labels_add', issue: 2, labels: ['pm:queue'] }], { [at(2)]: ISSUE(2) });
+      t('a state on an issue packs: exit 0, one GET, the payload printed with the labels as written', [cliLegal.code, cliLegal.seen, cliLegal.code === EXIT_OK ? JSON.parse(cliLegal.out).client_payload.actions[0].labels : null], [EXIT_OK, [`GET ${at(2)}`], ['pm:queue']], cliLegal.err.slice(-300));
+      const cliQuiet = await cli([{ op: 'labels_add', issue: 1, labels: ['tooling'] }, { op: 'labels_remove', issue: 1, labels: ['pm:queue', 'Needs-User-Decision'] }], {});
+      t('⛔ a removal is never refused and an ungoverned labels_add reads nothing: exit 0, ZERO reads', [cliQuiet.code, cliQuiet.seen], [EXIT_OK, []], cliQuiet.err.slice(-300));
+      const cliWhole = await cli([{ op: 'comment', issue: 2, body: 'domain:skills#3 · huangyiirene · ' + SESSION + '\nnote' }, { op: 'labels_add', issue: 1, labels: ['pm:blocked'] }], { [at(1)]: PULL(1) }, { dryRun: false });
+      t('⭐ a refusal sends NOTHING for the whole file: a real (non-dry) run with a legal comment beside it is usage (2) with zero requests sent', [cliWhole.code, cliWhole.sent, cliWhole.err.includes('REFUSED — action 2 (labels_add)')], [EXIT_USAGE, [], true], cliWhole.err.slice(-300));
+      const cliNoToken = await cli([{ op: 'labels_add', issue: 1, labels: ['pm:queue'] }], { [at(1)]: PULL(1) }, { envExtra: { GITHUB_TOKEN: '', GH_TOKEN: '' } });
+      t('…and with no token a governed labels_add\'s kind cannot be read: exit 3 before any request', [cliNoToken.code, cliNoToken.seen, cliNoToken.err.includes('(labels_add) adds a label the kind rule allows on only one kind')], [EXIT_PREREQUISITE, [], true]);
+      t('structural: the create refusal runs in main before the session; the labels_add read after the packer and BEFORE the dry-run exit', (() => {
+        const src = readReal(SELF_PATH, 'utf8');
+        const body = src.slice(src.lastIndexOf('export async function main('));
+        const rows = body.indexOf('kindRuleRows(actions)');
+        const read = body.indexOf('readLabelTargetKinds(labelReads');
+        return rows > body.indexOf('rewriteRetiredLaneActions(actions)') && rows < body.indexOf('const session = opts.session') && read > body.indexOf('packRequest(') && read < body.indexOf('if (opts.dryRun)');
+      })());
+    }
+
     // ── the no-run conformance ──────────────────────────────────────────────
     battery('the no-run conformance: every sender — discovered from the source — answers an accepted dispatch with no run, or none completed, UNCONFIRMED (6) after ONE dispatch with ZERO direct writes, under auto and explicit dispatch alike; under direct its write is seen');
     {
@@ -3696,6 +3865,14 @@ export async function main(argv, deps = {}) {
   const lanes = rewriteRetiredLaneActions(actions);
   for (const r of lanes.rewrites) console.error(`fleet-write/dispatch: action ${r.action} (${r.op}): ${retiredLaneRewriteLine(r)}`);
   actions = lanes.actions;
+  // The kind rule at a create, which names its own kind: judged on the file as handed, before the session — a dry run
+  // included — and the whole file refused, nothing sent (header: "The kind rule"). A labels_add waits for its read below.
+  const kindRule = kindRuleRows(actions);
+  if (kindRule.refusals.length > 0) {
+    for (const r of kindRule.refusals) console.error(`fleet-write/dispatch: REFUSED — action ${r.action} (${r.op}): ${r.refusal}`);
+    console.error('fleet-write/dispatch: nothing was sent.');
+    return EXIT_USAGE;
+  }
   // A read's one-time key pair, made HERE, in memory (header, "How the callers"): the public half goes in the action;
   // the private half stays in `armed.keys` and dies with this process. A process re-executed through the proxy below
   // makes its own; this one's is discarded with it.
@@ -3725,17 +3902,24 @@ export async function main(argv, deps = {}) {
   }
   // A trailer-signed issue_patch body passes only on a pull request — READ from the platform, never judged from the
   // body, and before the dry-run exit so a dry run refuses what the send would (header).
+  // The same read, and the same place, decide a governed labels_add's target kind (header: "The kind rule").
   const candidates = pullRequestBodyCandidates(actions);
-  if (candidates.length > 0) {
-    const readToken = env.GITHUB_TOKEN ?? env.GH_TOKEN ?? '';
+  const labelReads = kindRule.reads;
+  const readToken = env.GITHUB_TOKEN ?? env.GH_TOKEN ?? '';
+  if (candidates.length > 0 || labelReads.length > 0) {
     if (!readToken) {
-      console.error(`fleet-write/dispatch: PREREQUISITE NOT MET — action ${candidates[0].action} (issue_patch)'s body is signed by its trailer, which passes only on a pull request, and with no GITHUB_TOKEN / GH_TOKEN in the environment the target cannot be read. Nothing was sent.`);
+      const needs = candidates.length > 0
+        ? `action ${candidates[0].action} (issue_patch)'s body is signed by its trailer, which passes only on a pull request`
+        : `action ${labelReads[0].action} (labels_add) adds a label the kind rule allows on only one kind`;
+      console.error(`fleet-write/dispatch: PREREQUISITE NOT MET — ${needs}, and with no GITHUB_TOKEN / GH_TOKEN in the environment the target cannot be read. Nothing was sent.`);
       return EXIT_PREREQUISITE;
     }
     if (!deps.read) {
       const rearmedForRead = rearmThroughProxy(argv);
       if (rearmedForRead !== null) return rearmedForRead;
     }
+  }
+  if (candidates.length > 0) {
     const targets = await readPullRequestTargets(candidates, { repo: opts.repo, token: readToken, ...(deps.read ?? {}) });
     const issues = targets.filter((r) => r.verdict === 'issue');
     const unread = targets.filter((r) => r.verdict === 'unread');
@@ -3748,6 +3932,18 @@ export async function main(argv, deps = {}) {
       if (unread.length > 0) console.error('  ⛔ An unread target is never a pass: re-run once the read answers, or sign the body on its first line.');
       console.error('fleet-write/dispatch: nothing was sent.');
       return issues.length > 0 ? EXIT_USAGE : EXIT_PREREQUISITE;
+    }
+  }
+  if (labelReads.length > 0) {
+    const kinds = await readLabelTargetKinds(labelReads, { repo: opts.repo, token: readToken, ...(deps.read ?? {}) });
+    for (const r of kinds) {
+      if (r.verdict === 'pass') console.error(`fleet-write/dispatch: action ${r.action} (labels_add) — ${opts.repo}#${r.issue} reads as ${r.kind === KIND_ISSUE ? 'an' : 'a'} ${r.kind}, and its labels are legal there.`);
+      else console.error(`fleet-write/dispatch: ${r.verdict === 'unread' ? 'PREREQUISITE NOT MET' : 'REFUSED'} — action ${r.action} (labels_add): ${r.refusal}`);
+    }
+    const refused = kinds.filter((r) => r.verdict === 'refused');
+    if (refused.length > 0 || kinds.some((r) => r.verdict === 'unread')) {
+      console.error('fleet-write/dispatch: nothing was sent.');
+      return refused.length > 0 ? EXIT_USAGE : EXIT_PREREQUISITE;
     }
   }
   if (opts.dryRun) {
