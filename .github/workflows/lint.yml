@@ -5385,6 +5385,14 @@ jobs:
         continue-on-error: true
         run: pnpm check:skill-top-level-keys
 
+      # Rationale: `scripts/check-skill-links.mjs` header (#31115). Same job, no
+      # paths filter: a section moved between skill files breaks the links INTO
+      # it from files the move never touched.
+      - name: Check every relative link and anchor in the published skills resolves
+        id: check-every-relative-link-and-anchor-in
+        continue-on-error: true
+        run: pnpm check:skill-links
+
       # Rationale: `scripts/check-agent-model-declared.mjs` header (#6803, #6686).
       - name: Check every agent definition declares a model
         id: check-every-agent-definition-declares
