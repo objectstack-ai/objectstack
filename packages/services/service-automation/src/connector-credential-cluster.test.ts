@@ -339,10 +339,22 @@ describe('resyncConnectorCredentialPubSub() — a credential write whose signal 
     });
 
     it('CONTROL — no transport attached (single node): the resync reconciles nothing', async () => {
+        // The same lost-correction shape as above, with no transport on either
+        // replica: B's resync is inert, so B keeps its refused instance (it
+        // converges on its own reload or restart, as before this change).
         const ql = await sharedDatabase();
+        const a = await replica(ql, 'node-a', undefined);
         const b = await replica(ql, 'node-b', undefined);
+        b.provider.state.reject = true;
+        await b.engine.setConnectorCredential({ ref: REF, value: DUMMY_VALUE, context: ADMIN });
+        expect(b.held()).toContain('refused');
+
+        b.provider.state.reject = false;
+        await a.engine.setConnectorCredential({ ref: REF, value: DUMMY_VALUE_2, context: ADMIN });
         const before = b.provider.state.materialized.length;
         await b.engine.resyncConnectorCredentialPubSub();
+        for (let i = 0; i < 5; i++) await flush();
+        expect(b.held()).toContain('refused');
         expect(b.provider.state.materialized).toHaveLength(before);
     });
 });
