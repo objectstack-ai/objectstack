@@ -315,7 +315,12 @@ import { ConnectionCredentialStore } from './connection-credential-store.js';
 import { readJsonRequestBody } from './request-json-body.js';
 import { MARKETPLACE_INSTALLED_UI_BUNDLE } from './marketplace-ui.js';
 import { countSeedRows, matchSeedRows, purgeSeedRows, seedDatasetOfReceiptItem, type PurgeSeedDataset } from './marketplace-install-local-purge.js';
-import { UnmanagedCopyRecord } from './marketplace-install-local-unmanaged-copies.js';
+import {
+    UnmanagedCopyRecord,
+    readUnmanagedCopyInstance,
+    type UnmanagedCopyInstance,
+    type UnmanagedCopyPackageStore,
+} from './marketplace-install-local-unmanaged-copies.js';
 import {
     isStampableOwner,
     stampSeedOwner,
@@ -4734,22 +4739,38 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         );
         if (withheldMaps.length > 0) ctx.logger?.warn?.(withheldMapsLogLine(manifestId, 'unmanaged', withheldMaps));
         // [#30808] The door's record of this copy, in the same act — before
-        // any row is loaded, so a load that fails partway is still purgeable.
-        // A record that cannot be written leaves the copy unreachable by the
-        // purge (its 404), never reachable by mistake; the operator is told.
-        try {
-            this.unmanagedCopies.write({
-                baseId: result.targetPackageId,
-                sourcePackageId: result.sourcePackageId,
-                ...(result.sourceVersion !== undefined ? { sourceVersion: result.sourceVersion } : {}),
-                seeded: seedSampleData,
-                copiedAt: new Date().toISOString(),
-                ...(userId ? { copiedBy: userId } : {}),
-            });
-        } catch (err: any) {
+        // any row is loaded, so a load that fails partway is still purgeable —
+        // tied to the base instance the package store now holds
+        // ({@link UnmanagedCopyRecord}). A record that cannot be written
+        // leaves the copy unreachable by the purge (its 404), never reachable
+        // by mistake; the installer is told in the answer (`copyRecord`), the
+        // operator in the log.
+        let copyRecordFailure: string | undefined;
+        let copyRecordSaid: string | undefined;
+        const tie = await this.unmanagedCopyInstance(ctx, result.targetPackageId);
+        if ('failure' in tie) {
+            copyRecordFailure = tie.failure;
+            copyRecordSaid = 'the package store did not answer with the new base\'s row';
+        } else {
+            try {
+                this.unmanagedCopies.write({
+                    baseId: result.targetPackageId,
+                    sourcePackageId: result.sourcePackageId,
+                    ...(result.sourceVersion !== undefined ? { sourceVersion: result.sourceVersion } : {}),
+                    seeded: seedSampleData,
+                    copiedAt: new Date().toISOString(),
+                    ...(userId ? { copiedBy: userId } : {}),
+                    ...(tie.instance !== undefined ? { instance: tie.instance } : {}),
+                });
+            } catch (err: any) {
+                copyRecordFailure = `it could not be written under ${this.unmanagedCopies.dir}: ${err?.message ?? err}`;
+                copyRecordSaid = `it could not be written under ${this.unmanagedCopies.dir}`;
+            }
+        }
+        if (copyRecordFailure !== undefined) {
             ctx.logger?.warn?.(
-                `[MarketplaceInstallLocal] the record of the unmanaged copy '${result.targetPackageId}' could not be written `
-                + `under ${this.unmanagedCopies.dir}: ${err?.message ?? err}. Its sample data cannot be purged through this door.`,
+                `[MarketplaceInstallLocal] the record of the unmanaged copy '${result.targetPackageId}' was not kept: `
+                + `${copyRecordFailure}. Its sample data cannot be purged through this door.`,
             );
         }
         const declaresSeeds = unmanagedInstallValueCarries(packageBody.data);
@@ -4785,6 +4806,18 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 // [#30326] Omitted when the handshake checked the package's range.
                 ...(protocolCheckSkipped !== undefined ? { protocolCheckSkipped } : {}),
                 ...(seeded !== undefined ? { seeded } : {}),
+                // [#30808] Omitted when the door's record of the copy was
+                // kept, so that answer's key set is unchanged.
+                ...(copyRecordFailure !== undefined
+                    ? {
+                        copyRecord: {
+                            written: false,
+                            message: `This door's record of the copy '${result.targetPackageId}' was not kept (${copyRecordSaid}), `
+                                + 'so its sample data cannot be purged through `POST /marketplace/install-local/:id/purge-sample-data`. '
+                                + 'The copy itself is installed.',
+                        },
+                    }
+                    : {}),
                 note: `The package's metadata is now this system's own, in the base '${result.targetPackageId}', `
                     + 'and it follows no upgrade. Refresh the console to see it.',
             },
@@ -5514,15 +5547,17 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             }
             if ('failure' in copy) {
                 ctx.logger?.warn?.(`[MarketplaceInstallLocal] purge of the unmanaged copy ${manifestId} refused: ${copy.failure}`);
-                return c.json({
-                    success: false,
-                    error: {
-                        code: 'SERVICE_UNAVAILABLE',
-                        message: `The sample data of '${manifestId}' cannot be purged now: its seed items could not be read, `
-                            + 'and a receipt that was not read is never taken for "no sample data". Nothing was deleted. '
-                            + 'Retry once the metadata store answers.',
-                    },
-                }, 503);
+                // [#30808] The door's own record names the local file to
+                // repair; a receipt or a base row the stores did not answer
+                // names no file, and a retry is the remedy.
+                const message = copy.recordFile !== undefined
+                    ? `The sample data of '${manifestId}' cannot be purged now: this door's record of the copy could not be `
+                        + `read (${copy.failure}). Repair ${copy.recordFile}; removing it leaves this copy out of the purge's `
+                        + 'reach. Nothing was deleted.'
+                    : `The sample data of '${manifestId}' cannot be purged now: its seed items or its base's row could not `
+                        + 'be read, and a receipt that was not read is never taken for "no sample data". Nothing was deleted. '
+                        + 'Retry once the metadata and package stores answer.';
+                return c.json({ success: false, error: { code: 'SERVICE_UNAVAILABLE', message } }, 503);
             }
             return this.purgeSeedDatasets(c, ctx, manifestId, copy.datasets, null,
                 `The sample data receipt of '${manifestId}' holds no seed item any more, so no row can be matched. Nothing was deleted.`);
@@ -5564,27 +5599,68 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
 
     /**
      * [#30808] The datasets a purge of an UNMANAGED COPY deletes by: its
-     * base's seed receipt ({@link readUnmanagedCopySeedReceipt}). `null` when
-     * `packageId` is no copy this door made ({@link UnmanagedCopyRecord}) or
-     * is no longer an installed writable base — the purge's 404, as for no
-     * install at all; `notSeeded` for a copy made without the sample data;
-     * `failure` when the record or the receipt could not be read.
+     * base's seed receipt ({@link readUnmanagedCopySeedReceipt}). `null` —
+     * the purge's 404, as for no install at all — when `packageId` is no
+     * installed writable base (asked first, so a removed base never reaches
+     * its record), is no copy this door made ({@link UnmanagedCopyRecord}),
+     * or is a later base under the copy's id (the package store's row is gone
+     * or carries another `created_at`); `notSeeded` for a copy made without
+     * the sample data; `failure` when the record (`recordFile` set), the
+     * package store, or the receipt could not be read.
      */
     private unmanagedCopyPurgeDatasets = async (
         ctx: PluginContext,
         packageId: string,
-    ): Promise<{ datasets: PurgeSeedDataset[] } | { notSeeded: true } | { failure: string } | null> => {
-        const record = this.unmanagedCopies.read(packageId);
-        if (record.failure !== undefined) return { failure: record.failure };
-        if (record.entry === null) return null;
+    ): Promise<{ datasets: PurgeSeedDataset[] } | { notSeeded: true } | { failure: string; recordFile?: string } | null> => {
         let ql: NamespaceHoldingEngine | undefined;
         try { ql = ctx.getService<NamespaceHoldingEngine>('objectql'); } catch { return null; /* no data engine — no base */ }
         if (!ql?.registry?.getPackage?.(packageId) || !isWritablePackage(ql, packageId)) return null;
+        const record = this.unmanagedCopies.read(packageId);
+        if (record.failure !== undefined) return { failure: record.failure, recordFile: this.unmanagedCopies.fileOf(packageId) };
+        if (record.entry === null) return null;
+        const recorded = record.entry.instance;
+        if (recorded !== undefined) {
+            let store: Partial<UnmanagedCopyPackageStore> | undefined;
+            try { store = ctx.getService<Partial<UnmanagedCopyPackageStore>>('package'); } catch { return null; /* no package store — the instance cannot be shown */ }
+            if (typeof store?.get !== 'function') return null;
+            let held: UnmanagedCopyInstance | null | undefined;
+            try {
+                held = await readUnmanagedCopyInstance(store as UnmanagedCopyPackageStore, packageId, recorded.version);
+            } catch (err: any) {
+                return { failure: `the package store could not be read for '${packageId}' (${err?.message ?? err})` };
+            }
+            if (!held || held.createdAt !== recorded.createdAt) return null;
+        }
         if (!record.entry.seeded) return { notSeeded: true };
         const listed = await this.unmanagedCopySeedNames(ctx, packageId);
         if (listed.failure !== undefined) return { failure: listed.failure };
         const receipt = await this.readUnmanagedCopySeedReceipt(ctx, packageId, listed.names);
         return receipt.failure !== undefined ? { failure: receipt.failure } : { datasets: receipt.datasets };
+    };
+
+    /**
+     * [#30808] The base instance a new copy's record is tied to: the package
+     * store's row of `baseId` ({@link readUnmanagedCopyInstance}). No
+     * `instance` on a runtime with no `package` service (the record's reach is
+     * then by id alone — the residual its module docblock states); a
+     * `failure`, and so no record, when the store holds no readable row.
+     */
+    private unmanagedCopyInstance = async (
+        ctx: PluginContext,
+        baseId: string,
+    ): Promise<{ instance?: UnmanagedCopyInstance } | { failure: string }> => {
+        let store: Partial<UnmanagedCopyPackageStore> | undefined;
+        try { store = ctx.getService<Partial<UnmanagedCopyPackageStore>>('package'); } catch { return {}; /* no package store */ }
+        if (typeof store?.get !== 'function') return {};
+        let held: UnmanagedCopyInstance | null | undefined;
+        try {
+            held = await readUnmanagedCopyInstance(store as UnmanagedCopyPackageStore, baseId);
+        } catch (err: any) {
+            return { failure: `the package store could not be read for '${baseId}': ${err?.message ?? err}` };
+        }
+        if (held === null) return { failure: `the package store holds no row of '${baseId}'` };
+        if (held === undefined) return { failure: `the package store's row of '${baseId}' carries no readable version and created_at` };
+        return { instance: held };
     };
 
     /**
