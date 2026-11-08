@@ -58,6 +58,7 @@ export interface RotationHost {
   backfillCanonicalJsonEncoding: SqlDriver['backfillCanonicalJsonEncoding'];
   backfillCanonicalTimes: SqlDriver['backfillCanonicalTimes'];
   readonly booleanFields: SqlDriver['booleanFields'];
+  carryDeclaredRenames: SqlDriver['carryDeclaredRenames'];
   computeAndRecordTenantField: SqlDriver['computeAndRecordTenantField'];
   computeTenantField: SqlDriver['computeTenantField'];
   createAuditTimestampColumn: SqlDriver['createAuditTimestampColumn'];
@@ -95,6 +96,7 @@ export interface RotationHost {
   resolveFileColumnsMoved: SqlDriver['resolveFileColumnsMoved'];
   resolveTenantField: SqlDriver['resolveTenantField'];
   rethrowWithRowSizeExplanation: SqlDriver['rethrowWithRowSizeExplanation'];
+  retireIndexesNamedForOldKeys: SqlDriver['retireIndexesNamedForOldKeys'];
   readonly rotationStateByTable: SqlDriver['rotationStateByTable'];
   runWideningAlters: SqlDriver['runWideningAlters'];
   readonly supportsRotation: SqlDriver['supportsRotation'];
@@ -386,7 +388,7 @@ export class RotationFacet {
   }
 
   /** The body of `SqlDriver#initObjects`; the method's docblock there is its contract. */
-  static async initObjects(this: Pick<RotationHost, 'assertSchemaMutable' | 'autoNumberFields' | 'backfillCanonicalDatetimes' | 'backfillCanonicalJsonEncoding' | 'backfillCanonicalTimes' | 'createAuditTimestampColumn' | 'createColumn' | 'deferredDdl' | 'deferredSchemaObjects' | 'ensureDatabaseExists' | 'ensureRotation' | 'ensureSequencesTable' | 'knex' | 'migrateMysqlDatetimeColumns' | 'migrateMysqlTimeColumns' | 'reconcileAndWarnDrift' | 'registerObjectMetadata' | 'resolveFileColumnsMoved' | 'rethrowWithRowSizeExplanation' | 'supportsRotation' | 'syncTableIndexes' | 'tablesCreatedHere' | 'tablesFoundExisting' | 'tablesWithTimestamps' | 'tenantFieldByTable' | 'warnBuiltinColumnCollisions'>, objects: Array<{ name: string; fields?: Record<string, any>; tenancy?: any; indexes?: any[]; lifecycle?: any }>): Promise<void> {
+  static async initObjects(this: Pick<RotationHost, 'assertSchemaMutable' | 'autoNumberFields' | 'backfillCanonicalDatetimes' | 'backfillCanonicalJsonEncoding' | 'backfillCanonicalTimes' | 'carryDeclaredRenames' | 'createAuditTimestampColumn' | 'createColumn' | 'deferredDdl' | 'deferredSchemaObjects' | 'ensureDatabaseExists' | 'ensureRotation' | 'ensureSequencesTable' | 'knex' | 'migrateMysqlDatetimeColumns' | 'migrateMysqlTimeColumns' | 'reconcileAndWarnDrift' | 'registerObjectMetadata' | 'resolveFileColumnsMoved' | 'rethrowWithRowSizeExplanation' | 'retireIndexesNamedForOldKeys' | 'supportsRotation' | 'syncTableIndexes' | 'tablesCreatedHere' | 'tablesFoundExisting' | 'tablesWithTimestamps' | 'tenantFieldByTable' | 'warnBuiltinColumnCollisions'>, objects: Array<{ name: string; fields?: Record<string, any>; tenancy?: any; indexes?: any[]; lifecycle?: any }>): Promise<void> {
     // The ADR-0104 media arm, resolved BEFORE registration because
     // `registerObjectMetadata` below freezes `isJsonField`'s answer into
     // `jsonFields` for every media column it sees. Memoized, and every failure
@@ -531,6 +533,15 @@ export class RotationFacet {
         }
         this.tablesWithTimestamps.add(tableName);
       } else {
+        // [cloud#3652 D3 「写进清单 renamedFrom」] A field that declares
+        // `renamedFrom` takes its old column, values and all, BEFORE the
+        // additive diff below — which would otherwise add the new key as an
+        // empty column beside the old one. A declaration the carry cannot
+        // honour throws `DeclaredRenameRefusal` here, before any DDL on this
+        // table (`declared-rename.ts`). Idempotent: once carried there is
+        // nothing to plan. No-op, and no read, for an object declaring none.
+        await this.carryDeclaredRenames(tableName, obj);
+
         const columnInfo = await this.knex(tableName).columnInfo();
         const existingColumns = Object.keys(columnInfo);
 
@@ -590,6 +601,10 @@ export class RotationFacet {
           tenantField,
           physicalColumns,
         );
+        // [cloud#3652 D3] A carried column is keyed twice now: under the index
+        // name of its old key and under the one the declaration names. Drop
+        // the first once the second holds the same key.
+        if (exists) await this.retireIndexesNamedForOldKeys(tableName, obj, tenantField);
       }
 
       // #2186: the additive sync above only ever ADDs tables/columns/indexes.

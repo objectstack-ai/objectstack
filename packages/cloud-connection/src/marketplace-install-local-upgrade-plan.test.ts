@@ -83,7 +83,7 @@ afterEach(() => {
 
 const fold = (artifact: unknown) => ({ objects: resolveStackCollection(artifact, 'objects'), data: resolveStackCollection(artifact, 'data') });
 
-async function mount(options: { installed?: Row; planUpgrade?: false; columns?: Row[]; registryPackages?: Row[] } = {}) {
+async function mount(options: { installed?: Row; planUpgrade?: false; columns?: Row[]; registryPackages?: Row[]; driver?: unknown } = {}) {
     const register = vi.fn();
     const syncSchemas = vi.fn(async () => undefined);
     const planUpgrade = vi.fn(async (installed: unknown, incoming: unknown) => ({
@@ -98,6 +98,7 @@ async function mount(options: { installed?: Row; planUpgrade?: false; columns?: 
         objectql: withInstallerGrants({
             syncSchemas,
             ...(options.registryPackages ? { registry: { getAllPackages: () => options.registryPackages } } : {}),
+            ...(options.driver ? { getDriverForObject: () => options.driver } : {}),
         }, INSTALLER),
     };
     const hooks = new Map<string, any>();
@@ -213,9 +214,9 @@ describe('a dryRun this door cannot honour is refused, never run as an install',
  * [epic cloud#3652 Q3, #30884 · ruling record 6709061297] Step 2c′: a managed
  * RE-install whose plan carries an undeclared suspected rename or a
  * `needs_confirm` / `destructive` type change is refused 409 until the same
- * call carries the finding set's token; a declared rename is refused 501
- * until this runtime can carry the column; everything else installs as
- * before.
+ * call carries the finding set's token; a declared rename is step 2c″'s
+ * (#30885: carried, or refused by name before any write) and never a finding
+ * here; everything else installs as before.
  */
 describe('step 2c′: the schema upgrade verdict on a managed re-install', () => {
     const TOKEN = /^schema-upgrade:[0-9a-f]{32}$/;
@@ -357,34 +358,51 @@ describe('step 2c′: the schema upgrade verdict on a managed re-install', () =>
         expect(door.register).not.toHaveBeenCalled();
     });
 
-    it('a declared rename is refused 501 by name, token or not, and writes nothing', async () => {
+    it('a declared rename on a driver that renames no column is refused 422 `transport` by name, token or not, and writes nothing', async () => {
+        // [#30885] This engine answers no `planDeclaredRenames`: the installed
+        // version declares `company`, so the rename is pending and refused.
         const door = await mount({ installed: V1 });
         const before = ledgerFiles();
         const renamed = vendorBody('2.0.0', { account_name: { type: 'text', renamedFrom: ['company'] } });
 
-        // The real token of this verdict's finding set — the empty set — which a caller can compute.
         for (const extra of [{}, { confirmSchemaUpgrade: tokenFor([]) }]) {
             const res = await door.install(makeC({ manifest: renamed, ...extra }));
-            expect(res.status).toBe(501);
-            expect(res.payload.error.code).toBe('NOT_IMPLEMENTED');
-            expect(res.payload.error.details.declaredRenames).toEqual([
-                { object: 'acme_lead', from: 'company', to: 'account_name', fromType: 'text', toType: 'text' },
-            ]);
-            expect(res.payload.error.details.findings).toEqual([]);
-            expect(res.payload.error.message).toContain('acme_lead.company → acme_lead.account_name');
+            expect(res.status).toBe(422);
+            expect(res.payload.error.code).toBe('VALIDATION_ERROR');
+            expect(res.payload.error.details.refusals).toEqual([expect.objectContaining({
+                object: 'acme_lead', field: 'account_name', from: ['company'], reason: 'transport',
+            })]);
+            expect(res.payload.error.message).toContain('acme_lead.account_name declares `renamedFrom`');
         }
         expect(door.register).not.toHaveBeenCalled();
         expect(ledgerFiles()).toEqual(before);
     });
 
-    it('a declared rename that also retypes needs_confirm still owes the type change its confirmation', async () => {
-        const door = await mount({ installed: V1 });
+    it('a declared rename that also retypes needs_confirm is carried, and still owes the type change its confirmation', async () => {
+        // A driver that carries: the table holds `company`, not `account_name`.
+        const carry = vi.fn(async (table: string) => [{ table, from: 'company', to: 'account_name' }]);
+        const driver = {
+            planDeclaredRenames: vi.fn(async (table: string) => ({ carries: [{ table, from: 'company', to: 'account_name' }], refusals: [] })),
+            carryDeclaredRenames: carry,
+            reverseDeclaredRenames: vi.fn(async () => undefined),
+        };
+        const door = await mount({ installed: V1, driver });
+        const incoming = vendorBody('2.0.0', { account_name: { type: 'number', renamedFrom: ['company'] } });
         const token = tokenFor([['type_change', 'acme_lead', 'account_name', 'text', 'number', 'needs_confirm', 'company']]);
-        const res = await door.install(makeC({ manifest: vendorBody('2.0.0', { account_name: { type: 'number', renamedFrom: ['company'] } }), confirmSchemaUpgrade: token }));
-        expect(res.status).toBe(501);
-        expect(res.payload.error.details.findings).toEqual([expect.objectContaining({
+
+        const unconfirmed = await door.install(makeC({ manifest: incoming }));
+        expect(unconfirmed.status).toBe(409);
+        expect(unconfirmed.payload.error.details.findings).toEqual([expect.objectContaining({
             kind: 'type_change', field: 'account_name', renamedFrom: 'company', from: 'text', to: 'number', category: 'needs_confirm',
         })]);
+        expect(carry).not.toHaveBeenCalled();
+
+        const confirmed = await door.install(makeC({ manifest: incoming, confirmSchemaUpgrade: token }));
+        expect(confirmed.status).toBe(200);
+        expect(confirmed.payload.data.renamesCarried).toEqual([
+            { object: 'acme_lead', table: 'acme_lead', from: 'company', to: 'account_name' },
+        ]);
+        expect(entry()?.schemaUpgradeConfirmation).toMatchObject({ findingSet: token });
     });
 
     it('a safe type change, a removed field and a seed change install unrefused', async () => {

@@ -1752,9 +1752,11 @@ export function ChatPane({
   // copied, shared and logged (objectstack#28104, `recordFormAiDraft.ts`).
   // The form marks each of those fields 「AI 建议」 until the person edits
   // it, and opens unsaved; the form's own defaults fill the rest. An update
-  // opens the record's edit form: the card has shown old → new, and the form
-  // opens on the stored record. The card cancelled the pending write before
-  // calling this, so a record saved here is never written a second time.
+  // opens the record's edit form on the stored record with the card's
+  // proposed values in the same router state (objectstack#28106): the form
+  // applies each as an unsaved change, before → after, marked 「AI 建议」 with
+  // a per-field revert. The card cancelled the pending write before calling
+  // this, so a record saved here is never written a second time.
   const openRecordForm = useCallback(
     async (write: {
       operation: 'create' | 'update';

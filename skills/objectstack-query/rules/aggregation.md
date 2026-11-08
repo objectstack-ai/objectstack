@@ -1,6 +1,6 @@
 # Aggregation Rules
 
-Guide for building ObjectStack aggregation queries.
+A block pairing ❌ with ✅ is left out of `check:skill-examples`: its ❌ half is wrong on purpose.
 
 ## Aggregation Functions
 
@@ -21,19 +21,24 @@ Guide for building ObjectStack aggregation queries.
 
 ## Basic Aggregation
 
+<!-- os:check -->
 ```typescript
+import type { QueryInput } from '@objectstack/spec/data';
 // SQL: SELECT COUNT(*) AS total_orders FROM order
-{
+const query: QueryInput = {
   object: 'order',
   aggregations: [
     { function: 'count', alias: 'total_orders' }
   ]
-}
+};
 ```
 
 ## Aggregation with GROUP BY
 
+<!-- os:check -->
 ```typescript
+import type { IDataEngine } from '@objectstack/spec/contracts';
+declare const engine: IDataEngine;
 // SQL: SELECT region, SUM(amount) AS total, AVG(amount) AS average
 //      FROM sale GROUP BY region
 const rows = await engine.aggregate('sale', {
@@ -56,9 +61,11 @@ convention in `SKILL.md`).
 field into uniform periods — this is the supported way to build time-series
 aggregations (never bucket by hand in app code):
 
+<!-- os:check -->
 ```typescript
+import type { QueryInput } from '@objectstack/spec/data';
 // Revenue per quarter per region
-{
+const query: QueryInput = {
   object: 'deal',
   groupBy: [
     'region',
@@ -67,7 +74,7 @@ aggregations (never bucket by hand in app code):
   aggregations: [
     { function: 'sum', field: 'amount', alias: 'revenue' }
   ]
-}
+};
 // Result rows: { region: 'us', closed_at: '2025-Q1', revenue: 42000 }, ...
 ```
 
@@ -92,7 +99,10 @@ aggregations (never bucket by hand in app code):
 > Ordinary FilterCondition operators plus `$and`/`$or`/`$not`; an unknown
 > operator is rejected loudly, never ignored.
 
+<!-- os:check -->
 ```typescript
+import type { IDataEngine } from '@objectstack/spec/contracts';
+declare const engine: IDataEngine;
 // ✅ Only customers with more than 5 orders
 const rows = await engine.aggregate('order', {
   groupBy: ['customer_id'],
@@ -112,7 +122,10 @@ use `where` to shrink the scan, `having` to threshold the aggregates.
 > conditional aggregate, and one reached directly refuses `NOT_IMPLEMENTED`;
 > unfiltered aggregations keep native push-down.
 
+<!-- os:check -->
 ```typescript
+import type { IDataEngine } from '@objectstack/spec/contracts';
+declare const engine: IDataEngine;
 // ✅ Total and conditional count in one call
 const [row] = await engine.aggregate('user', {
   aggregations: [
@@ -131,14 +144,16 @@ const [row] = await engine.aggregate('user', {
 > `COUNT(DISTINCT *)`. The per-aggregation `distinct: true` flag is NOT its
 > equivalent — it is a removed key.
 
+<!-- os:check -->
 ```typescript
+import type { QueryInput } from '@objectstack/spec/data';
 // SQL: SELECT COUNT(DISTINCT department) FROM employee
-{
+const query: QueryInput = {
   object: 'employee',
   aggregations: [
     { function: 'count_distinct', field: 'department', alias: 'dept_count' }
   ]
-}
+};
 ```
 
 ## Window Functions
@@ -151,7 +166,10 @@ working alternatives:
 Model rankings in report/dashboard metadata (groupings + measures + sort),
 or fetch the ordered rows and rank in app code:
 
+<!-- os:check -->
 ```typescript
+import type { IDataEngine } from '@objectstack/spec/contracts';
+declare const engine: IDataEngine;
 // Top products per category — order the rows, rank in app code
 const rows = await engine.find('product', {
   fields: ['name', 'category', 'sales'],
@@ -167,7 +185,10 @@ const rows = await engine.find('product', {
 
 Fetch the ordered rows and accumulate in app code:
 
+<!-- os:check -->
 ```typescript
+import type { IDataEngine } from '@objectstack/spec/contracts';
+declare const engine: IDataEngine;
 const txns = await engine.find('transaction', {
   fields: ['date', 'amount'],
   orderBy: [{ field: 'date', order: 'asc' }],
