@@ -471,7 +471,8 @@
  *   H by PATH — the release, publish and deploy files in
  *      `WORKFLOW_TIER_H_FILES`, each with its reason, any edit at all.
  *   H by DIFF (C2) — an added or changed `permissions:`; a `secrets` or
- *      `github.token` line (any case, dot or index) added, changed or moved;
+ *      job-token line (`github.token` in any case, any `github[…]` index,
+ *      `toJSON(github)`) added, changed or moved;
  *      `pull_request_target`; a `uses:` (or image) not already used at the
  *      base; a deleted job, a changed literal check-run name or a changed
  *      `needs:`; a new `continue-on-error`; an `if:` the base does not hold for
@@ -482,7 +483,8 @@
  * ⛔ Biased to H, because this surface can switch the other gates off: a
  * changed job, step or workflow that holds a secret or a write token; an
  * added `|| true`, `set +e`, `exit 0` or `OS_SKIP_`/`OS_DISABLE_`/`OS_ALLOW_`;
- * a gate invocation or a `uses:` dropped; a changed trigger set or workflow
+ * a gate invocation or a `uses:` dropped from the file, or from an existing
+ * job (a gate moved into a new job that never runs); a changed trigger set or workflow
  * name; a new job with a computed or colliding name; a new, deleted or
  * non-YAML file. ⛔ Fail closed: a copy the line reader refuses (anchors,
  * tags, tabs, flow mappings, flow spanning lines, double-quoted escapes, a
@@ -1083,7 +1085,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '⭐ the argv is CLOSED: a flag the mode does not read, or a second repository beside a bare --pr, is refused': 22,
   'the per-row repository scope (ruled B2, 2026-10-13)': 20,
   'the nested `ui/` workspace rows, on the register (#25712)': 16,
-  '⭐ the workflows split: Tier H by path or by C2 trigger, else Tier S (ruling record 6722205630)': 61,
+  '⭐ the workflows split: Tier H by path or by C2 trigger, else Tier S (ruling record 6722205630)': 66,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -1629,8 +1631,8 @@ export const WORKFLOW_TIER_H_FILES = Object.freeze([
 
 /** The patterns an ADDED line may not carry without Tier H (biased cases: each can turn a check off or skip a gate). */
 const WORKFLOW_RISKY_LINE = /\|\|\s*true\b|\bset\s+\+e\b|\bexit\s+0\b|\bOS_(?:SKIP|DISABLE|ALLOW)_[A-Z0-9_]+/;
-/** `secrets` or the job's own token, in any case and by dot or index, as the expression evaluator reads them. */
-const WORKFLOW_CREDENTIAL = /\bsecrets\b|\bgithub\s*(?:\.\s*token\b|\[\s*['"]token['"]\s*\])/i;
+/** `secrets`, or the job's token: `github.token` in any case, any `github[…]` index, or `toJSON(github)` whole. */
+const WORKFLOW_CREDENTIAL = /\bsecrets\b|\bgithub\s*(?:\.\s*token\b|\[)|\btojson\s*\(\s*github\s*\)/i;
 /** The gate invocations a run block carries, each as a token; one dropped from a file is Tier H (biased: a removed check). */
 const WORKFLOW_INVOCATIONS = Object.freeze([
   [/check:[A-Za-z0-9:._-]+/g, (m) => m[0]],
@@ -1849,6 +1851,14 @@ export function workflowFacts(text) {
     permissions: [], ifs: [], coes: [], credentialLines: [], risky: [],
     credentialOwners: new Set(), writeOwners: new Set(),
     uses: [], invocations: new Set(),
+    // Per JOB: the gate tokens and `uses:` identities it holds, so a step moved out of an existing job is seen.
+    jobTokens: new Map(),
+  };
+  const holdToken = (owner, token) => {
+    if (!owner.startsWith('job:')) return;
+    const id = owner.split('/')[0].slice('job:'.length);
+    if (!facts.jobTokens.has(id)) facts.jobTokens.set(id, new Set());
+    facts.jobTokens.get(id).add(token);
   };
   const visit = (node, owner) => {
     const text = ownText(node);
@@ -1865,11 +1875,19 @@ export function workflowFacts(text) {
     for (const line of [node.value, ...node.block]) {
       if (!line.trim().startsWith('#') && WORKFLOW_RISKY_LINE.test(line)) facts.risky.push(JSON.stringify([owner, line.trim()]));
     }
-    if (node.key === 'uses' || (node.key === 'image' && node.value !== '')) facts.uses.push(workflowUsesIdentity(node.value));
+    if (node.key === 'uses' || (node.key === 'image' && node.value !== '')) {
+      facts.uses.push(workflowUsesIdentity(node.value));
+      holdToken(owner, `uses: ${workflowUsesIdentity(node.value)}`);
+    }
     if (node.key === 'run') {
       for (const line of [node.value, ...node.block]) {
         if (line.trim().startsWith('#')) continue;
-        for (const [pattern, token] of WORKFLOW_INVOCATIONS) for (const m of line.matchAll(pattern)) facts.invocations.add(token(m));
+        for (const [pattern, token] of WORKFLOW_INVOCATIONS) {
+          for (const m of line.matchAll(pattern)) {
+            facts.invocations.add(token(m));
+            holdToken(owner, token(m));
+          }
+        }
       }
     }
     for (const child of node.children) visit(child, owner);
@@ -1973,6 +1991,9 @@ export function workflowDiffReasons(a, b, inventory) {
       const computed = (name) => name.includes('${{');
       if (now.name !== job.name && !(computed(now.name) && computed(job.name))) say(`a job's check-run name changed: \`${id}\` \`${job.name}\` → \`${now.name}\``);
       // Either direction: a job whose dependency is skipped is skipped, and a skipped required check reads green.
+      // A gate step moved out of an existing job (into a new job that never runs) is a dropped gate there.
+      const held = b.jobTokens.get(id) ?? new Set();
+      for (const token of a.jobTokens.get(id) ?? []) if (!held.has(token)) say(`an existing job no longer holds \`${token}\`: \`${id}\``);
       if ([...new Set(job.needs)].sort().join() !== [...new Set(now.needs)].sort().join()) say(`a job's \`needs:\` changed: \`${id}\` [${job.needs.join(', ')}] → [${now.needs.join(', ')}]`);
     }
   }
@@ -5249,6 +5270,18 @@ async function selfTest() {
     const valuedParent = tierOf(edit('    name: Build Core\n', '    name: Build Core\n      if: false\n'));
     assert('⛔ M2d-a-child-under-a-node-with-a-scalar-value-is-refused-and-H', isH(valuedParent, /does not parse/), show(valuedParent));
     assert('M2d-a-plain-scalar-continuation-still-reads', workflowFacts(edit('    name: Build Core\n', '    name: Build\n      Core\n')).ok === true);
+    // The delta review's holes (FAIL at 87f686fc): a gate moved into a new job that never runs; two token spellings.
+    const GATE_BLOCK = "      - name: Gate\n        if: github.event_name != 'schedule'\n        run: |\n          # the gate\n          pnpm check:generated\n          node scripts/check-required-contexts.mjs\n";
+    const movedOff = tierOf(`${edit(GATE_BLOCK, '')}  gate2:\n    if: false\n    runs-on: ubuntu-latest\n    steps:\n${GATE_BLOCK}`);
+    assert('⛔ D1-a-gate-step-moved-into-a-new-job-with-if-false-is-H', isH(movedOff, /an existing job no longer holds `check:generated`: `build`/), show(movedOff));
+    const movedBehind = tierOf(`${edit(GATE_BLOCK, '')}  opt-in:\n    if: contains(github.event.pull_request.labels.*.name, 'x')\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo opt\n  gate2:\n    needs: [opt-in]\n    runs-on: ubuntu-latest\n    steps:\n${GATE_BLOCK}`);
+    assert('⛔ D1-a-gate-step-moved-into-a-new-job-behind-an-opt-in-needs-is-H', isH(movedBehind, /an existing job no longer holds `scripts\/check-required-contexts\.mjs`: `build`/), show(movedBehind));
+    const actionMoved = tierOf(`${edit("      - name: Restore cache\n        uses: actions/cache@v4\n        with:\n          key: core-${{ hashFiles('pnpm-lock.yaml') }}\n", '')}  cache2:\n    if: false\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/cache@v4\n`);
+    assert('⛔ D1-a-uses-moved-out-of-an-existing-job-is-H', isH(actionMoved, /an existing job no longer holds `uses: actions\/cache`: `build`/), show(actionMoved));
+    for (const spelling of ['${{ toJSON(github) }}', "${{ github[format('tok{0}', 'en')] }}"]) {
+      const r = tierOf(edit('      - run: pnpm vitest run', `      - run: pnpm vitest run\n        env:\n          T: ${spelling}`));
+      assert(`⛔ D2-the-job-token-reached-as-${spelling}-is-H`, isH(r, /token reference added, changed or moved/), show(r));
+    }
     const addedNeeds = tierOf(edit('    needs: [build]', '    needs: [build, opt-in]'));
     assert('⛔ S1-a-needs-added-on-an-existing-job-is-H', isH(addedNeeds, /`needs:` changed: `shards` \[build\] → \[build, opt-in\]/), show(addedNeeds));
 
