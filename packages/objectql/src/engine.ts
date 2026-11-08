@@ -140,8 +140,6 @@ import {
   type RetryOptions,
   recordNotFoundError,
   resolveUserAuthzGrants,
-  markAppAutomationElevation,
-  appAutomationElevationOf,
 } from '@objectstack/core';
 import { WriteEpoch } from './write-epoch.js';
 import { SummaryRecomputeError, cascadeStoppedRefusal, rolledBackRefusal, type SummaryRecomputeFailure } from './summary-errors.js';
@@ -10213,11 +10211,9 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
    */
   private appAuthored = false;
 
-  /** A child over `executionContext` that keeps this api's provenance. */
   private derive(executionContext: ExecutionContext): ScopedContext {
-    const child = new ScopedContext(executionContext, this.engine);
-    child.appAuthored = this.appAuthored;
-    return child;
+    // [#30975] The body moved to `engine-scoped-context.ts`, its docblock with it (see `ScopedContextHost`).
+    return ScopedContextFacet.derive.call(scopedContextHost.of(this), executionContext);
   }
 
   /**
@@ -10261,11 +10257,8 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
    * keeps its mark; a user's context is not elevated and needs none.
    */
   [APP_AUTHORED_HOOK_API](): ScopedContext {
-    const ctx = this.executionContext;
-    const inheritsElevation = ctx.isSystem && !ctx.flowRunId && !appAutomationElevationOf(ctx);
-    const api = new ScopedContext(inheritsElevation ? markAppAutomationElevation(ctx, 'hook') : ctx, this.engine);
-    api.appAuthored = true;
-    return api;
+    // [#30975] The body moved to `engine-scoped-context.ts` (see `ScopedContextHost`).
+    return ScopedContextFacet.appAuthoredHookApi.call(scopedContextHost.of(this));
   }
 
   /**
@@ -10648,6 +10641,7 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
   static {
     scopedContextHost.install((instance) => ({
       get appAuthored() { return instance.appAuthored; },
+      set appAuthored(v) { instance.appAuthored = v; },
       derive: (...a) => instance.derive(...a),
       get engine() { return instance.engine; },
       get executionContext() { return instance.executionContext; },

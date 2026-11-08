@@ -69,20 +69,6 @@
     {
       "file": "packages/objectql/src/engine.ts",
       "class": "ScopedContext",
-      "member": "derive",
-      "card": "#30975",
-      "reason": "codemod limit: foreign-private, it writes `appAuthored` on another instance, which a module function cannot (#30052 report)"
-    },
-    {
-      "file": "packages/objectql/src/engine.ts",
-      "class": "ScopedContext",
-      "member": "[APP_AUTHORED_HOOK_API]",
-      "card": "#30975",
-      "reason": "codemod limit: not-identifier-name, a symbol-keyed method; it also writes `appAuthored` on another instance (#30052 report)"
-    },
-    {
-      "file": "packages/objectql/src/engine.ts",
-      "class": "ScopedContext",
       "member": "[SEED_USER_GRANTS]",
       "card": "#30020",
       "reason": "state-owning: bare-this, the body hands the instance itself on (`return this`); also a symbol-keyed method (#30052 report)"
