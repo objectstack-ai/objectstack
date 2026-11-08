@@ -17,8 +17,8 @@
 
 | Status | Records |
 |---|---|
-| Accepted | 131 |
-| Proposed | 5 |
+| Accepted | 132 |
+| Proposed | 4 |
 | Superseded | 4 |
 | Draft | 3 |
 | Deferred | 2 |
@@ -216,7 +216,7 @@ A bare `ADR-0006` names the decision; its current text is [0006-project-environm
 | [ADR-0146](./0146-studio-designs-setup-administers-one-editor-per-item-paired-customize-package.md) | Package-level override — every customization of an installed package lives in its paired `.custom` package, t… | Accepted — 2026-10-31 — rewritten in place from the Proposed draft of 2026… | 2026-10-31 | ADR-0126, ADR-0131, ADR-0005, ADR-0048, ADR-0141, ADR-0070 | — |
 | [ADR-0147](./0147-membership-scoped-rls-lowers-to-an-engine-internal-org-member-semi-join-leaf.md) | Membership-scoped RLS (`FIELD in currentuser.orguserids`) lowers to an engine-internal organization-member se… | Proposed — 2026-11-02. `docs/adr/` is Tier H (Prime Directive #14): the re… | 2026-11-02 | — | — |
 | [ADR-0148](./0148-recycle-bin-separate-store-restore-under-original-ids-retention-in-days.md) | The recycle bin is a separate store — one entry per delete operation, restore under the original ids, retenti… | Accepted — 2026-11-05, recording the maintainer's ruling of 2026-11-04 on… | 2026-11-05 | — | — |
-| [ADR-0149](./0149-ai-answers-business-questions-through-the-dataset-semantic-layer.md) | The AI answers business questions through the dataset semantic layer — synonyms and descriptions on measures… | Proposed — 2026-11-08, drafted on card #31503 under the maintainer's rulin… | 2026-11-08 | — | — |
+| [ADR-0149](./0149-ai-answers-business-questions-through-the-dataset-semantic-layer.md) | The AI answers business questions through the dataset semantic layer — synonyms and descriptions on measures… | Accepted — 2026-11-08, recording two rulings of the maintainer: the placem… | 2026-11-08 | — | — |
 
 ## ObjectUI registry — `ui/docs/adr/` (`ui-` prefix)
 
