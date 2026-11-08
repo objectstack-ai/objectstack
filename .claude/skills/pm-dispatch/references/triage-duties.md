@@ -7,6 +7,7 @@
 - 查重缓存住席内:新会话全量拉,其后 `since` 增量;⛔ 不建分支、不共享、不依赖备份。
 - 每日一 fire 跑两仓全量对账(`objectstack-ai/objectstack`、`objectstack-ai/cloud`)并归集日频职责;
 - 选层按 fire 时刻 ⛔ 不用计数器,简报写明层;cloud 卡首触归 `repo:cloud` 席自巡,见多仓协调。
+- 每日看板的车道一节展示 devx 六项度量;清单住 `lanes/devx.md` 范围节度量行,⛔ 不另抄。
 - 每条枚举比对返回数与 `totalCount`,不等 ⇒ 报 `sweep INCOMPLETE` 点名缺口,⛔ 永不报干净。
 - 轮次记录按车道计欠审逾一轮的 head 数并点名车道(`check-owed-reviews.mjs`),只报 ⛔ 不接审。
 - 轮次记录分写「决策卡 N」与「待您审合 PR M」,不合计;后者 = open `pm:awaiting-merge` PR。
