@@ -522,6 +522,13 @@ export class ClassHeadFacet {
   /** The body of `SqlDriver#assertDialectEmits`; the method's docblock there is its contract. */
   static assertDialectEmits(this: Pick<ClassHeadHost, 'config'>, operation: string): void {
     const client = SqlDriver.clientSpelling(this.config);
+    // Oracle is federation-only (ADR-0015 §4.6): read and the double-opt-in
+    // write path, never a table built or altered. Refused by name, with its own
+    // reason — it is not a Postgres-wire database and the escape hatch the
+    // wire refusal names is not the one that applies.
+    if (SqlDriver.ORACLE_CLIENTS.has(client)) {
+      throw new UnsupportedDialectEmissionError(client, operation, SqlDriver.emissionClients(), 'federation-only');
+    }
     if (!SqlDriver.POSTGRES_WIRE_ONLY_CLIENTS.has(client)) return;
     throw new UnsupportedDialectEmissionError(client, operation, SqlDriver.emissionClients());
   }

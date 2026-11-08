@@ -56,6 +56,7 @@ import {
   unsupportedFilterError, unsupportedFilterOperatorError, withheldFilterDiagnosticOf,
 } from './sql-driver-top-level.js';
 import { assertOracleComparandNotEmptyString, oracleDayBinding, oracleInstantBinding } from './sql-driver-oracle-dialect.js';
+import { jsonMembershipUnsupportedOnOracleError } from './sql-driver-predicate-emitters.js';
 import type { ReadPresentationKind } from './sql-driver-top-level.js';
 import type { SqlDriver } from './sql-driver.js';
 
@@ -615,7 +616,7 @@ export class FilterHelpersFacet {
   }
 
   /** The body of `SqlDriver#applyFilterCondition`; the method's docblock there is its contract. */
-  static applyFilterCondition(this: Pick<FilterHelpersHost, 'applyContainsLike' | 'applyCrossFieldComparison' | 'applyEmptyOperator' | 'applyFalseConstant' | 'applyFilterCondition' | 'applyJsonMembership' | 'applyLike' | 'applyLikePattern' | 'applyNormalizedComparison' | 'applyNowAnchorComparison' | 'applyNullSafeNegative' | 'applyTextOperatorOverNonTextColumn' | 'assertOperatorAppliesToColumn' | 'coerceFilterValue' | 'coercionKey' | 'filterColumnExpr' | 'isNonTextColumn' | 'isOracle' | 'mapSortField' | 'readableIdsSubquery' | 'remoteColumn' | 'withWithheldFilterLog'>,
+  static applyFilterCondition(this: Pick<FilterHelpersHost, 'applyContainsLike' | 'applyCrossFieldComparison' | 'applyEmptyOperator' | 'applyFalseConstant' | 'applyFilterCondition' | 'applyJsonMembership' | 'applyLike' | 'applyLikePattern' | 'applyNormalizedComparison' | 'applyNowAnchorComparison' | 'applyNullSafeNegative' | 'applyTextOperatorOverNonTextColumn' | 'assertOperatorAppliesToColumn' | 'coerceFilterValue' | 'coercionKey' | 'filterColumnExpr' | 'isJsonColumn' | 'isNonTextColumn' | 'isOracle' | 'mapSortField' | 'readableIdsSubquery' | 'remoteColumn' | 'withWithheldFilterLog'>,
     builder: Knex.QueryBuilder,
     condition: any,
     logicalOp: 'and' | 'or' = 'and',
@@ -833,7 +834,15 @@ export class FilterHelpersFacet {
           // deleted: a caller that passes no seam compiles the comparison it
           // wrote, `<=` / BETWEEN against midnight.
           const op = rawOp;
-          if (this.isOracle) assertOracleComparandNotEmptyString(op, localField, opValue, refusalSubtree(value, condition));
+          if (this.isOracle) {
+            assertOracleComparandNotEmptyString(op, localField, opValue, refusalSubtree(value, condition));
+            // JSON-array membership has no Oracle construct; refused here, where
+            // the refusing subtree is known, rather than in the emitter below
+            // (which keeps the same refusal as its backstop).
+            if ((op === '$contains' || op === '$notContains') && this.isJsonColumn(table, localField)) {
+              throw jsonMembershipUnsupportedOnOracleError(localField, refusalSubtree(value, condition));
+            }
+          }
           const coerced = this.coerceFilterValue(table, localField, opValue);
           if (columnExpr && this.applyNormalizedComparison(builder, logicalOp, columnExpr, op, coerced)) continue;
           switch (op) {

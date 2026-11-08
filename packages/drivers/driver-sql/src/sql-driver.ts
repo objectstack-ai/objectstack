@@ -318,6 +318,7 @@ export interface SqlDriverStaticsHost {
   readonly MYSQL_EMIT_CLIENTS: (typeof SqlDriver)['MYSQL_EMIT_CLIENTS'];
   readonly MYSQL_ROW_BYTE_BUDGET: (typeof SqlDriver)['MYSQL_ROW_BYTE_BUDGET'];
   readonly MYSQL_TEXT_TEMPORAL_TYPES: (typeof SqlDriver)['MYSQL_TEXT_TEMPORAL_TYPES'];
+  readonly ORACLE_CLIENTS: (typeof SqlDriver)['ORACLE_CLIENTS'];
   readonly PG_OID_DATE: (typeof SqlDriver)['PG_OID_DATE'];
   readonly PG_OID_DATE_ARRAY: (typeof SqlDriver)['PG_OID_DATE_ARRAY'];
   readonly PG_OID_TEXT_ARRAY: (typeof SqlDriver)['PG_OID_TEXT_ARRAY'];
@@ -8863,6 +8864,7 @@ export class SqlDriver implements IDataDriver {
       PG_OID_TEXT_ARRAY: { get: () => SqlDriver.PG_OID_TEXT_ARRAY },
       POSTGRES_EMIT_CLIENTS: { get: () => SqlDriver.POSTGRES_EMIT_CLIENTS },
       POSTGRES_WIRE_CLIENTS: { get: () => SqlDriver.POSTGRES_WIRE_CLIENTS },
+      ORACLE_CLIENTS: { get: () => SqlDriver.ORACLE_CLIENTS },
       POSTGRES_WIRE_ONLY_CLIENTS: { get: () => SqlDriver.POSTGRES_WIRE_ONLY_CLIENTS },
       SQLITE_AUTO_VACUUM_INCREMENTAL: { get: () => SqlDriver.SQLITE_AUTO_VACUUM_INCREMENTAL },
       SQLITE_EMIT_CLIENTS: { get: () => SqlDriver.SQLITE_EMIT_CLIENTS },
