@@ -92,6 +92,10 @@ import { armChatDockExpanded } from '../chatDockState';
 // scope, so no test's send-wait spends its budget on the first cold import and
 // the `lazy()` resolves from the module cache.
 import '../ChatDockConversation';
+// The layout reaches `@objectstack/lint` through a dynamic import (the draft
+// preview bar's capability lint): pay that load during collection, not inside
+// a clocked case (check:test-source-alias).
+import '@objectstack/lint';
 
 const CRM = { name: 'crm_app', label: 'Customer Desk', _packageId: 'app.crm' };
 const OBJECTS = [{ name: 'account', label: 'Account' }];
