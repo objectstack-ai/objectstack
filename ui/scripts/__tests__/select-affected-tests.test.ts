@@ -610,7 +610,7 @@ describe("the root ci.yml's Test UI job wires the selector fail-open (objectui#1
 // undoes the measurement the fetch step's budget was sized from.
 describe("the root ci.yml's history readers check out at depth 1, then fetch (objectstack#22034)", () => {
   type Step = { name?: string; uses?: string; with?: Record<string, unknown>; 'timeout-minutes'?: number; run?: string; env?: Record<string, string> };
-  const jobs = (parseYaml(rootCi()) as { jobs: Record<string, { steps: Step[] }> }).jobs;
+  const jobs = (parseYaml(rootCi()) as { jobs: Record<string, { 'timeout-minutes'?: number; steps: Step[] }> }).jobs;
   const FETCH = "Fetch this commit's history and the base branch";
   // Each job's first step that reads history: the fetch must come before it.
   const FIRST_READER: Record<string, string> = {
@@ -630,12 +630,24 @@ describe("the root ci.yml's history readers check out at depth 1, then fetch (ob
       expect(steps[checkout + 1]?.name, `${job}: the step after the checkout is not the fetch`).toBe(FETCH);
       const first = steps.findIndex((s) => s.name === reader);
       expect(first, `${job} has no step named ${reader}`).toBeGreaterThan(checkout + 1);
-      expect(steps[checkout + 1]['timeout-minutes']).toBe(8);
+      // Each job sizes its own budget inside its wall (the `test` job's FETCH
+      // BUDGET comment): never under the healthy floor, never the whole wall.
+      const budget = steps[checkout + 1]['timeout-minutes'];
+      const wall = jobs[job]['timeout-minutes'];
+      expect(typeof budget, `${job}'s fetch step has no timeout-minutes`).toBe('number');
+      expect(budget).toBeGreaterThanOrEqual(8);
+      expect(typeof wall, `${job} has no job wall`).toBe('number');
+      expect(budget!).toBeLessThan(wall!);
     });
   }
 
-  it('the fetch step is one step, the same in all four jobs', () => {
-    const copies = Object.keys(FIRST_READER).map((job) => jobs[job].steps.find((s) => s.name === FETCH));
+  it('the fetch step is one step, the same in all four jobs but for its budget', () => {
+    const copies = Object.keys(FIRST_READER).map((job) => {
+      const copy: Step = { ...jobs[job].steps.find((s) => s.name === FETCH) };
+      delete copy['timeout-minutes'];
+      return copy;
+    });
+    expect(copies[0]).toHaveProperty('run');
     for (const copy of copies) expect(copy).toEqual(copies[0]);
     expect(copies[0]?.run).toContain('git fetch --no-tags "${deepen[@]}" origin "$head" "${refspecs[@]}"');
   });
