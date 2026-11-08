@@ -1,14 +1,15 @@
 # ADR-0150: Behavioural metadata is addressed by (package, name) — objects keep the literal prefix; ADR-0028 re-opened for the behavioural tier
 
-**Status**: Proposed (2026-11-08). `docs/adr/` is Tier H (Prime Directive #14): this record becomes **Accepted** by the maintainer's merge, and ⛔ the cards under [Execution plan](#execution-plan-after-acceptance) are cut after that merge, never before it. **This record declares; it implements nothing**: no schema, no code, no changeset. · **Supersedes in part** [ADR-0028](./0028-metadata-naming-and-namespace-isolation.md) (D1 and D3, for the metadata types of buckets 2–4 below; ADR-0028 stays Deferred for objects and everything else) · **Amends** [ADR-0048](./0048-cross-package-metadata-collision.md) §3.3 and its 2026-11-06 addendum (the one-holder refusal retires per type as that type's readers carry the package, [D9](#d9--what-retires-and-what-stays)) · **Withdraws** the non-object half of ruling C on #30798: phase 3 (#30806 S1 and S5) does not ship.
+**Status**: Proposed (2026-11-08). `docs/adr/` is Tier H (Prime Directive #14): this record becomes **Accepted** by the maintainer's merge. The child cards under [Execution plan](#execution-plan-after-acceptance) are filed under the epic ruling [`6723499113`](https://github.com/objectstack-ai/objectstack/issues/31527#issuecomment-6723499113) (child R is #31575); ⛔ no child lands before this record is accepted. **This record declares; it implements nothing**: no schema, no code, no changeset. · **Supersedes in part** [ADR-0028](./0028-metadata-naming-and-namespace-isolation.md) (D1 and D3, for the metadata types of buckets 2–4 below; ADR-0028 stays Deferred for objects and everything else) · **Amends** [ADR-0048](./0048-cross-package-metadata-collision.md) §3.3 and its 2026-11-06 addendum (the one-holder refusal retires per type as that type's readers carry the package, [D9](#d9--what-retires-and-what-stays)) · **Withdraws** the non-object half of ruling C on #30798: phase 3 (#30806 S1 and S5) does not ship.
 
 - **Date**: 2026-11-08
+- **Supersedes**: [ADR-0028](./0028-metadata-naming-and-namespace-isolation.md) in part (D1 and D3, for buckets 2–4)
 - **Card**: [#31527](https://github.com/objectstack-ai/objectstack/issues/31527), replacing [#30806](https://github.com/objectstack-ai/objectstack/issues/30806) phase 3 for the behavioural tier.
 - **Decided by**: the maintainer, 2026-11-08, three rulings, verbatim and untranslated. This record executes them as written; ⛔ none is re-opened here.
   - The direction, decision card tapped **A 「转向包寻址」** at 13:12:35Z (seat record [`6721941146`](https://github.com/objectstack-ai/objectstack/issues/30806#issuecomment-6721941146) on #30806), after his message 「你不能只考虑现状，还要考虑长远的合理性；我说的流程不是url挂到对象下，而是挂到软件包下」.
   - The scope, 13:13:39Z: 「流程等行为元数据按软件包寻址，立决策卡，现在就所有的元数据类型然后和我沟通。」
   - The per-type table, decision card tapped **A 「按修正后分档写入」** at 15:36:01Z (seat record [`6723462584`](https://github.com/objectstack-ai/objectstack/issues/31527#issuecomment-6723462584) on #31527). [D1](#d1--four-buckets-as-ruled) restates it; where the two differ in words, the ruling binds.
-- **Left open by the ruling, and put to the maintainer by this record** ([Open questions](#open-questions-needs-decision)): the bucket-3 flat spelling on the AI face (D6) and how two packages' same-named positions are handled (D7). Each carries the four-axis analysis and a recommendation. ⛔ Neither is decided here, and no slice that depends on one is cut before it is ruled.
+- **Left open by the per-type ruling, put to the maintainer by this record, and since ruled**: the bucket-3 flat spelling on the AI face (Q1, D6) and how two packages' same-named positions are handled (Q2, D7). Decision card tapped **option 0 「A+A，含对象动作补充」** at 16:30:25Z (seat record [`6724050556`](https://github.com/objectstack-ai/objectstack/issues/31527#issuecomment-6724050556) on #31527): Q1 = A with the object-action refinement, Q2 = A. D6 and D7 record both as decided. One question the refined spelling raises is still open ([Open questions](#open-questions-needs-decision), Q3).
 - **Division of labour** (ruling A 「留核心，其余交车道」, record [`6723571682`](https://github.com/objectstack-ai/objectstack/issues/31527#issuecomment-6723571682)) and the red lines every child carries (the #31527 body) shape the [Execution plan](#execution-plan-after-acceptance).
 - **Builds on**: [ADR-0005](./0005-metadata-customization-overlay.md) (overlays), [ADR-0019](./0019-app-as-consumer-unit.md) (the namespace-named app), [ADR-0048](./0048-cross-package-metadata-collision.md) §3.1–§3.3 (package id is identity; prefer-local resolution), [ADR-0126](./0126-packaged-metadata-customization-model.md) §4 (the activation ledger; no re-encoded literal in a column), [ADR-0129](./0129-object-name-is-the-canonical-id.md) (the object name is the table name), [ADR-0130](./0130-release-artifact-as-co-ownership-boundary.md) and [ADR-0141](./0141-inter-app-dependency-declared-checked-before-install.md) (namespace co-ownership; the declared dependency closure), [ADR-0146](./0146-studio-designs-setup-administers-one-editor-per-item-paired-customize-package.md) (the paired `.custom` package).
 - **Inputs**: the #30806 plan ([`6719833098`](https://github.com/objectstack-ai/objectstack/issues/30806#issuecomment-6719833098)), the seat records `6721537981` and `6721596287`, and the #31527 stage-1 inventory, measured read-only on `main` at `86e37660`. Measurements below cite it.
@@ -20,9 +21,15 @@
 1. **Two tiers, two mechanisms.** Names that are storage identity or a shared data contract (objects, fields, object extensions, views, capabilities, docs, API paths) keep ADR-0129's literal prefix. Behavioural and presentation metadata (flows, actions, hooks, jobs, permission sets, apps, pages, …) are identified by **(package, name)**. Authors write short names, and **no behavioural name is ever rewritten**.
 2. **The storage already holds the package.** The registry keys every non-object item `PACKAGE:NAME`, and `sys_metadata` is unique on `(type, name, package_id, bundle_member)`. What this record changes is the **readers that drop the package before they ask**: runtime indexes, the activation ledger, by-name doors, the AI face and stored references.
 3. **One resolution rule** for a bare name: the caller's own package → else the unique holder in its declared dependency closure (ADR-0141) → else a refusal that lists the candidates.
-4. **Addresses carry the namespace when they must.** A by-name URL takes an optional namespace segment (`/automation/crm/send_email`). A bare one keeps resolving while the name is unique in the environment, and answers `409` with the candidates when it is not. The AI face spells a flat name derived from namespace and name; the spelling is an open question (recommended: `NS-NAME`).
+4. **Addresses carry the namespace when they must.** A by-name URL takes an optional namespace segment (`/automation/crm/send_email`). A bare one keeps resolving while the name is unique in the environment, and answers `409` with the candidates when it is not. The AI face spells a flat name derived from the address (ruled): `NS-NAME`, and `OBJECT-ACTION` for an action bound to an object.
 5. **Stored references gain a package column beside the name**, backfilled from the one holder phase 1 guarantees today. The sealed ambiguity set is reported, ⛔ never rewired on a guess.
-6. **Positions stay one environment-wide slot per name** (ruled). Whether a second package holder is refused, as today, or merged is an open question (recommended: refused).
+6. **Positions stay one environment-wide slot per name** (ruled), and a second package holder is refused, as today (ruled). An administrator binds another package's set through an overlay; there is no merge engine.
+7. **What this record adds beyond the rulings: two refusals at install, plus one more if Q3 is ruled.** Each is a narrowing:
+   - **Child N**: a `(type, name)` held twice inside one namespace (D2). ⛔ It is pending the maintainer's word on D2.
+   - **The address grammar's literal segments** (`trigger`, `hooks`, `connectors`, `global`, `types`) are refused as a namespace (D5).
+   - **Q3's guard**, if it is ruled: a namespace may not equal an object name.
+
+   Measured first-party, none of them refuses anything.
 
 ---
 
@@ -68,7 +75,7 @@ On 2026-11-08 the maintainer redirected it: 「你不能只考虑现状，还要
 | **1 — global literal prefix, unchanged** | `object` (ADR-0129 D2, the table name) · `field` · `object_extension` · `view` (object-derived) · `capability` (`NS.SHORT`, ruling 6683456244) · `doc` (ADR-0046 doc lint) · an api's `path` (globally unique) | the literal name | unchanged |
 | **2 — (package, name)** (20 types) | `flow` · `action` (`objectName:name` plus package) · `hook` · `job` (`jobKeyFor` aligned to the package coordinate) · `webhook` · `mapping` · `connector` · `permission` (set) · `sharing_rule` · `queue` · `assignment_rule` · `app` · `page` · `dashboard` · `report` · `dataset` · `analytics_cube` · `picklist` · `email_template` · `book`; an api item's `name` | `(package, name)` | D3 resolution; D5 addresses |
 | **3 — (package, name) plus a derived flat name on the AI face** | `tool` · `skill` · `agent` · `rag_pipeline`; the cloud's action tool name (#31515) | `(package, name)` | D3 resolution; D6 face spelling |
-| **4 — environment-authored rows** | mostly `datasource`, and every customer-authored item | `(environment, name)`: package null, the implicit environment package | unique in the environment; no rename, no migration |
+| **4 — environment-authored rows** | mostly `datasource`, and every customer-authored item whose name no package holds for that type (a package-less row bearing a package-held name is that holder's customization, D4) | `(environment, name)`: package null, the implicit environment package | unique in the environment; no rename, no migration |
 | **position (ruled separately)** | `position` | one slot per name in the environment | D7 |
 
 **Why objects differ (the card's question).** An object's name is not an address that a resolver can qualify. It is a physical identifier that leaves the platform:
@@ -83,16 +90,16 @@ ADR-0028 D2 proposed deriving physical names from `(namespace, short)` to hide t
 
 - **Identity** is `(package id, type, name)`: the registry's composite key, ADR-0048 §3.1's globally unique package id, and every new stored package column (D8) holds the package id.
 - **Address** is `(namespace, name)`: the URL segment (D5), the AI face (D6) and the MCP inputs carry the manifest `namespace`, which an author and an AI already know and which the install gate keeps unique per environment (ADR-0048 §3.2).
-- **Co-owners of a namespace keep each behavioural name unique across it.** ADR-0130 and ADR-0141 let several packages share one namespace (HotCRM's five packages all declare `crm`). The address `crm/send_email` must name one item, so within a namespace a `(type, name)` has at most one package holder. This is the object rule of ADR-0130 D3 / ADR-0141 D5, extended to buckets 2 and 3. Measured on HotCRM `6961ab1`: 0 of its 297 behavioural `(type, name)` keys are held by two of its packages, so the rule costs no rename.
+- **Co-owners of a namespace keep each behavioural name unique across it** (child N; ⛔ pending the maintainer's word, which the Q1/Q2 ruling [`6724050556`](https://github.com/objectstack-ai/objectstack/issues/31527#issuecomment-6724050556) left with him). ADR-0130 and ADR-0141 let several packages share one namespace (HotCRM's five packages all declare `crm`). The address `crm/send_email` must name one item, so within a namespace a `(type, name)` has at most one package holder. This is the object rule of ADR-0130 D3 / ADR-0141 D5, extended to buckets 2 and 3. Measured on HotCRM `6961ab1`: 0 of its 297 behavioural `(type, name)` keys are held by two of its packages, so the rule costs no rename.
 - **`sys`** is the reserved kernel package (ADR-0028 TL;DR 5): platform metadata belongs to it, and its address is `sys/NAME`.
-- **The environment package** has no namespace. An environment item is addressed by its bare name, which is unique in the environment.
+- **The environment package** has no namespace. An environment item is addressed by its bare name, which is unique in the environment, or under the reserved segment `_env` where a bare name would read as a namespace (D5).
 
 ### D3 — One resolution rule for a bare name (buckets 2 and 3, as ruled)
 
 A bare name, read by a caller that belongs to package P, resolves to:
 
 1. **P's own item** of that type and name;
-2. else **the unique holder in P's declared dependency closure** (ADR-0141: P's `manifest.dependencies`, transitively, plus `sys`);
+2. else **the unique holder in P's declared dependency closure** (ADR-0141: P's `manifest.dependencies`, transitively, plus `sys`, which the resolver adds itself: `resolvePackageClosure` in `packages/lint/src/runtime-gate.ts` does not, and ADR-0141 admits platform objects by a separate clause);
 3. else a **refusal that lists the candidates**, in the vocabulary `bare-name-one-holder.ts` already defines (`BareNameHolder`, `describeBareNameHolder`).
 
 A caller with no package (an environment item, a context-free door, an MCP client) resolves against the whole environment: the environment item of that name first (ADR-0005 overlay precedence keeps the environment's own item ahead), else the unique package holder, else the refusal with candidates (`409` at a door, D5).
@@ -122,6 +129,8 @@ Every runtime index that keys a bucket 2 or 3 item by bare name gains the packag
 
 Hooks bind by event and object and already carry `packageId`. Only `isArtifactShippedHook` (name-only) gains the package.
 
+**A package-less row that bears a package-held name is a customization, never a second item.** A `sys_metadata` row with `package_id` NULL hydrates into the bare slot today (`registerItem`). Where a package holds that `(type, name)`, the row is the ADR-0005 overlay of that one phase-1 holder (`bare-name-one-holder.ts` already counts it as no holder). It is not a bucket-4 item, so it never arms beside the item it shadows (E1) and never makes the name ambiguous. Its migration into a declared override in the holder's paired `.custom` package is [ADR-0146](./0146-studio-designs-setup-administers-one-editor-per-item-paired-customize-package.md) D11's, and this record does not repeat it (R15). A bucket-4 item is therefore one whose `(type, name)` no package holds. If a package installed later takes such a name, the row reads as that holder's overlay, which is what the bare slot does today. The D10 upgrade report names the row.
+
 ### D5 — Addresses: an optional namespace segment, `409` on ambiguity
 
 **The grammar.** A by-name door accepts the qualified form, with the namespace before the name, and keeps the bare form:
@@ -134,40 +143,63 @@ Hooks bind by event and object and already carry `packageId`. Only `isArtifactSh
 | metadata | `/meta/:type/:name` (`?package=` kept for Studio's write binding) | `/meta/:type/:ns/:name` |
 | connectors | `/automation/connectors/:name/connection` | `/automation/connectors/:ns/:name/connection` |
 
-- **How the router tells them apart.** A first segment that names an installed namespace is the namespace (the install gate keeps namespaces unique, ADR-0048 §3.2). Otherwise the bare grammar applies. Object names cannot collide with this, because an object name is `NS_SHORT` and never equals a bare namespace. A flow whose bare name equals an installed namespace is still reachable by its qualified address. This is documented precedence, not a guess, and it adds no refusal.
+- **How the router tells them apart**, in this order:
+  1. **The grammar's literal segments win.** `trigger`, `hooks`, `connectors`, `global` and `types`, and the `_`-led ones such as `_status`, `_activation` and `_drafts`, are read as the literal before any namespace. A `_`-led literal can never be a namespace (`^[a-z][a-z0-9_]{1,19}$`). The letter-led ones can be today: `RESERVED_NAMESPACES` is `{base, system}` plus `sys` (objectql `registry.ts`). So the install gate (ADR-0048 §3.2) also refuses a namespace that spells a literal, naming it. That is a narrowing (child G1), and no first-party package declares any of those namespaces.
+  2. **A first segment that names an installed namespace is the namespace.** The install gate keeps namespaces unique (ADR-0048 §3.2).
+  3. **Otherwise the bare grammar applies.**
+- **A package item whose bare name equals an installed namespace** is still reachable by its qualified address.
+- **An environment item has no namespace, so it gets the reserved segment `_env`**: `/automation/_env/:name`, `/actions/_env/:object/:action`, and so on. A `_`-led segment can never be a namespace. So an environment flow named like an installed namespace, including one installed after the flow was saved, keeps every sub-resource door (`runs`, `trigger`, `toggle`, `clone`) through `_env`, and nothing is refused.
+- **An object name can equal a namespace.** The namespace grammar admits `_`, so the object `crm_lead` of namespace `crm` and a package namespaced `crm_lead` can both be installed. Then `/actions/crm_lead/convert_lead/REC1` reads as qualified (namespace `crm_lead`, object `convert_lead`) under step 2. This is the same ambiguity as D6's face check, and it is guarded by Q3.
+- This is documented precedence, not a guess.
 - **A bare address** resolves while the name has one holder in the environment, and answers **`409`** with the candidate qualified addresses otherwise, in the D3 refusal vocabulary. The status already exists in the ledger (`RESOURCE_CONFLICT`); ⛔ no new code is minted.
 - **MCP.** `run_action` gains an optional `namespace` input beside `objectName`. `list_actions` rows carry `namespace`. Skill prompts and agents are named by the D6 face.
 - **The client SDK** methods that take a name (`automation.*`, `actions.invoke`, `meta.getItem`) take an optional namespace and build the qualified path.
 - **Studio and the Console** (`ui/`, in this repository) pass the package they already hold. `ui/packages/app-shell`'s `MetadataService` `meta.getItem(type, name, opts)` accepts `{ packageId }` today, and `StudioDesignSurface`, `ObjectFormDesigner` and `StudioCustomizeControls` hold the current package id. About ten page, view, dashboard and app reads go without it; object reads need none.
 - ⛔ **No alias window.** Every existing bare address keeps working while unique, which is the common case: there is nothing to alias. A bare address that becomes ambiguous because a second package installed the name answers `409` with both qualified addresses. That is the loud answer, never a silent pick.
 
-### D6 — The AI face spells a derived flat name (spelling: open question Q1)
+### D6 — The AI face spells a derived flat name (ruled: Q1 = A, with object-bound actions)
 
 MCP requires one unique name per tool and per prompt on a server, and the model providers that consume them admit only letters, digits, `_` and `-` in a tool name (OpenAI caps it at 64 characters; MCP itself also admits `.`, which the providers do not). A bucket-3 item's face name is therefore **derived** from its address, never authored. This is ADR-0028 D2's "derived physical name", applied to the one physical surface this tier has.
 
-**Recommended, pending ruling (Q1): `NS-NAME`.** For example, `crm-qualify_lead`; an environment item keeps its bare `NAME`. When the result exceeds 64 characters it is cut to 55 and suffixed with `-` and 8 hex characters of a hash of the full identity: deterministic, and the same on every server.
+**Ruled** (Q1 = A with the object-action refinement, 16:30:25Z, record [`6724050556`](https://github.com/objectstack-ai/objectstack/issues/31527#issuecomment-6724050556) on #31527):
+
+- **`NS-NAME`** for a tool, a skill, an agent, a `rag_pipeline` and an object-less action. For example, `crm-qualify_lead`. An environment item keeps its bare `NAME`.
+- **`OBJECT-ACTION`** for an action bound to an object. For example, `crm_lead-convert_lead`. One package may bind the same action name to several objects (the #5510 dedup reading), so `NS-NAME` would not name one action; the object name already carries the global prefix (ADR-0129), so the namespace is not repeated.
+- **Past 64 characters**, the result is cut to 55, then `-` and 8 hex characters of a hash of the full identity are appended: deterministic, and the same on every server.
+- **The cloud's action tool** (#31515; today `action_` plus the bare action name) derives its name from the same function (carrier: cloud).
+
+The four-axis reading the maintainer ruled on, kept as the record of why:
 
 | Option | Business need (measured) | Long-term | Hard for AI to get wrong | Startup scope |
 |:--|:--|:--|:--|:--|
-| **`NS-NAME` (recommended)** | every MCP client and both providers accept it | reversible: a namespace and a name never contain `-`, so the face parses back to `(namespace, name)` with no lookup table | collision-free by construction; nothing to remember | no new gate, no registry of spellings |
+| **`NS-NAME` (ruled)** | every MCP client and both providers accept it | reversible: a namespace and a name never contain `-`, so the face parses back to its two parts with no lookup table, except the hashed long form, which the registry resolves (see the check below for the object-bound form) | nothing to remember | no new gate, no registry of spellings |
 | `NS.NAME` (ADR-0028 D3's proposal) | the providers refuse `.` in a tool name | — | breaks at the first provider call | — |
 | `NS_NAME` | accepted everywhere | not reversible: `crm` + `a_b` and `crm_a` + `b` both give `crm_a_b`, so a clash needs a refusal at registration | the clash reappears as a rare registration error | a new gate, which defaults to no |
 | `NS__NAME` | accepted everywhere | a name may itself contain `__` (`^[a-z_][a-z0-9_]*$`), so it is ambiguous again | as above | a new gate |
 
-The cloud's action tool (`action_` plus the bare action name, #31515) derives its name from the same function (carrier: cloud).
+**Collision and reversibility check of the two ruled forms** (measured on this tree):
 
-### D7 — Positions are environment-scoped (conflict handling: open question Q2)
+- **Each form on its own is collision-free and splits at its only `-`.** No grammar admits `-`: a namespace is `^[a-z][a-z0-9_]{1,19}$` (`kernel/namespace-prefix.ts`), an object name `^[a-z_][a-z0-9_]*$` (`data/object.zod.ts`), and an action, tool, skill or agent name snake_case (`SnakeCaseIdentifierSchema`).
+- **The two forms can produce the same string.** The left part is a namespace in one form and an object name in the other, and the namespace grammar admits `_`, so an object name is also a valid namespace. A package with namespace `crm_lead` and an object-less action `convert_lead` spells `crm_lead-convert_lead`. So does the action `convert_lead` on the object `crm_lead` of the package with namespace `crm`. The install gate compares namespaces for equality only (`NamespaceConflictError`, objectql `registry.ts`), so nothing refuses that pair today. The shape is ordinary: the paired `.custom` package's namespace is `NS_custom` (the tree's fixtures spell `crm_custom`). Measured: HotCRM `6961ab1` declares the namespaces `crm` and `probe` and no object named like either, so the collision count is 0.
+- **Reading a face back is therefore not grammar-only.** `L-R` splits unambiguously, but whether `L` is a namespace or an object needs the environment's catalog. That is a lookup the server already holds. A hashed face needs the server's derivation in any case.
+- **The 64-character boundary.** A face of exactly 64 characters is not cut, and it can have the cut form's shape: an object name of 55 characters, `-`, and an 8-letter action name made only of `a`–`f`.
+
+- **One list, several types.** A carrier that lists several types' faces together can collide across them. For example, the cloud lists its action tools as `action_` plus the face beside tool faces, and a tool of a namespace `action_crm` named `x` spells `action_crm-x`, the same as the cloud tool for `crm`'s object-less action `x`.
+
+These are recorded as Q3 rather than decided here, because each guard narrows or re-spells what the maintainer ruled.
+
+### D7 — Positions are environment-scoped (ruled: Q2 = A, the one-holder refusal stays)
 
 Ruled: one org chart per environment; packages contribute positions; the same name is the same slot. Approval routing (`position:NAME`) and sharing recipients carry no package.
 
-**Recommended, pending ruling (Q2): keep the one-holder refusal** (`security-catalog-namespace.ts`, ADR-0048 addendum 2026-10-08) for positions. A second package that ships a position name another package or the environment already holds is refused at registration, naming both holders.
+**Ruled** (Q2 = A, 16:30:25Z, record [`6724050556`](https://github.com/objectstack-ai/objectstack/issues/31527#issuecomment-6724050556) on #31527): **positions keep the one-holder refusal** (`security-catalog-namespace.ts`, ADR-0048 addendum 2026-10-08). A second package that ships a position name another package or the environment already holds is refused at registration, naming both holders. There is no merge engine.
 
 | Option | Business need (measured) | Long-term | Hard for AI to get wrong | Startup scope |
 |:--|:--|:--|:--|:--|
-| **Keep the refusal (recommended)** | HotCRM's 12 positions all live in one package. No first-party package contributes to another's slot. | one definition per slot: label, `permissionSets` and `delegatable` have one author | a clash is loud at install | ships today; no new mechanism |
+| **Keep the refusal (ruled)** | HotCRM's 12 positions all live in one package. No first-party package contributes to another's slot. | one definition per slot: label, `permissionSets` and `delegatable` have one author | a clash is loud at install | ships today; no new mechanism |
 | Merge contributions | no measured pull | needs a merge rule for every field: whose `label`, a union of `permissionSets` or not, `delegatable` true if either?; and what an uninstall removes | a merged slot silently gains another package's grants, the widening ADR-0090 D9 refuses for `everyone` | a new merge engine plus uninstall semantics |
 
-A package that needs its permission sets on another package's position asks the environment to bind them: an ADR-0005 overlay of the position adds the set, by an administrator's decision, exactly as an `isDefault` set is suggested and never auto-bound (ADR-0090 D9). A merge is ruled by its own card when a named package needs it.
+A package that needs its permission sets on another package's position asks the environment to bind them (ruled): an ADR-0005 overlay of the position adds the set, by an administrator's decision, exactly as an `isDefault` set is suggested and never auto-bound (ADR-0090 D9).
 
 `position.permissionSets` names permission sets, which are bucket 2, so each name resolves by D3 from the package that declared the position (an environment position resolves environment-wide).
 
@@ -192,7 +224,8 @@ This replaces #30806 S3's name rewrite. Nothing is renamed, so nothing is rewrit
 | R11 | `sys_connector_connection.connector_name` | `connector_package` | per-organization OAuth connections |
 | R13 | `sys_assignment_cursor.rule` | `rule_package` | |
 | R14 | `sys_job.name` | follows the aligned `jobKeyFor` key | the run history stays as written |
-| R15, R16 | `sys_metadata` overlays and `.custom` pairs | already carry the package | the overlay slot binds per package (D4) |
+| R15 | package-less `sys_metadata` overlay rows over a package-held name | `package_id` bound to the one phase-1 holder by ADR-0146 D11's migration (a declared override in that holder's `.custom` pair); two holders → the ambiguous set, reported | D4: a customization, never a bucket-4 item |
+| R16 | `.custom` pair overrides | already carry the package | the overlay slot binds per package (D4) |
 | R17 | `sys_metadata` bodies that name another item | nothing stored | resolved by D3; an ambiguous one is reported |
 | R20 | `sys_email_template` overlays | `package_id` | |
 | R12, R18, R19, R21 | informational, prose and code, history, `NS.SHORT` scopes | none | |
@@ -200,8 +233,8 @@ This replaces #30806 S3's name rewrite. Nothing is renamed, so nothing is rewrit
 ### D9 — What retires, and what stays
 
 - **Narrows per type, in that type's own trailing child, last:** phase 1's one-holder refusal (`BARE_NAME_ONE_HOLDER_TYPES`). It narrows from one package holder per environment to one holder per namespace (D2), only after that type's indexes, doors and stored references all carry the package. Until then it stays in force, so every intermediate `main` behaves as today plus optional package coordinates (the card's decision 6 and red line 3).
-- **Withdrawn with this record:** #30806 phase 3 (S1 spec refusal, S5 HotCRM renames). **Retired by child P:** phase 2's `naming/namespace-prefix` bare-name warning for buckets 2–4 (the intra-package duplicate warning stays), and the authoring skills' and templates' instruction to prefix non-object names (#30805's text). **Retired by child U:** ADR-0146 D3's prefix on a Studio-authored non-object name (the `.custom` pair's items are short names in their own package; its objects keep the prefix).
-- **Stays:** ADR-0129 and the object rule, unchanged; the one-holder rule for platform-requested bare names (D3) and, unless Q2 rules otherwise, for positions (D7); the capability's `NS.SHORT` spelling (bucket 1); the ADR-0048 §3.2 namespace install gate.
+- **Withdrawn with this record:** #30806 phase 3 (S1 spec refusal, S5 HotCRM renames). **Retired by child P:** phase 2's `naming/namespace-prefix` bare-name warning for buckets 2–4 (the intra-package duplicate warning stays), and the authoring skills' and templates' instruction to prefix non-object names (#30805's text). Studio prefixes object names only (`prefixObjectName` in `ui/packages/app-shell/src/views/studio-design/packages-io.ts`), so child U retires no prefix.
+- **Stays:** ADR-0129 and the object rule, unchanged; the one-holder rule for platform-requested bare names (D3) and, as ruled (Q2 = A), for positions (D7); the capability's `NS.SHORT` spelling (bucket 1); the ADR-0048 §3.2 namespace install gate.
 - **Names already prefixed stay as they are.** The examples renamed in phase 2 (#30927) and HotCRM's already prefixed names (email templates) are just names, and ⛔ nothing un-renames them.
 
 ### D10 — Upgrade: what an already-deployed app sees
@@ -217,10 +250,22 @@ This replaces #30806 S3's name rewrite. Nothing is renamed, so nothing is rewrit
 
 Each slice is a child card, cut after this record merges. **Who builds** follows ruling `6723571682`: the epic seat keeps D and R; E, G and S go to the `domain:server` queue, P to `domain:spec`, the Studio slice to the ui lane, #31515 to the cloud lane. **Order** (same ruling): R before E and G; S after E and G; the backstop narrowing last.
 
-**Every child is independently releasable** (red line 3). It is additive: nullable package columns are backfilled before any reader uses them, an index gains the package without dropping the bare path, a URL gains an optional segment, and a bare name keeps resolving to its unique holder. While phase 1's refusal stands, no two package holders of a name exist, so adding the coordinate changes no observable answer. Each child PR proves it with four readings:
+**Every child is independently releasable** (red line 3). It is additive: nullable package columns are backfilled before any reader uses them, an index gains the package without dropping the bare path, a URL gains an optional segment, and a bare name keeps resolving to its unique holder.
+
+**Covered and uncovered types.** For the 13 types phase 1 covers (`BARE_NAME_ONE_HOLDER_TYPES`' 12 plus permission sets), no two package holders of a name exist while its refusal stands, so adding the coordinate changes no observable answer. The other 12 bucket 2/3 types have no backstop: sharing rule, queue, assignment rule, hook, job, app, page, dashboard, report, book, cube and tool. Two unrelated packages may hold `page/home` today, and a bare read serves the first match (`getItem` with no package; `declaredItems().find`; ADR-0048 §3.3's best-effort first match, for packages with no dependency relation). After E4, E6, E8 and G1, that same bare read answers a refusal or a `409` with the candidates. That is the outcome red line 2 asks for, but it is a **narrowing**, and those rows declare it.
+
+The alternative was to widen phase 1's backstop to those 12 types first, so that red line 3 holds literally. This record does not take it, for three reasons:
+
+- it refuses a package install that this record exists to allow;
+- B children would then retire it again, so the same deployments would see two narrowings and a widening instead of one narrowing;
+- it extends a refusal the maintainer scoped to 12 types.
+
+What the declared narrowing changes is limited to a deployment that already holds one of those names twice. That deployment moves from a silent first match to a loud answer. Measured on HotCRM `6961ab1`: 0 such names.
+
+Each child PR proves it is releasable with four readings:
 
 - **(a)** the phase-1 one-holder tests stay green;
-- **(b)** bare-name behaviour (URLs, MCP, SDK) is unchanged;
+- **(b)** bare-name behaviour (URLs, MCP, SDK) is unchanged for every name with one holder; for an uncovered type's name with two holders, the child's declared narrowing stands in its place;
 - **(c)** any migration is re-runnable and never guesses an ambiguous reference;
 - **(d)** its `Clause-②:` declaration and, where it changes the protocol, its ADR-0087 migration entry.
 
@@ -229,22 +274,22 @@ Each slice is a child card, cut after this record merges. **Who builds** follows
 | # | Child | Builds | File surface | Clause-② | Narrowing |
 |:--|:--|:--|:--|:--|:--|
 | D | this ADR | epic seat | `docs/adr/` | no | no |
-| R | **resolver and closure**: one `(package, name)` resolver (D3) with the ADR-0141 closure (the save door's `resolveWritePackageScope` is the nearest existing one), the refusal in `bare-name-one-holder.ts`'s vocabulary, and the per-package overlay slot (D4). Not wired to any reader yet | epic seat | objectql (`registry.ts`, a new resolver module), metadata-protocol (closure) | no | no |
-| N | **namespace co-owner uniqueness** for the bucket 2/3 types phase 1 does not cover (sharing rule, queue, assignment rule, hook, job, app, page, dashboard, report, book, cube, tool): a `(type, name)` held twice inside one namespace is refused at install and `os validate` (D2), on the ADR-0130 D3 object check. Lands before G1, so a qualified address always names one item | server | objectql `registry.ts` (`installPackage`), cli validate | no | **yes** (measured first-party: 0 of 297) |
-| P | **spec**: `namespace` on MCP `run_action` / `list_actions` shapes; the address grammar helpers (D5); the face derivation once Q1 is ruled; retire phase 2's bare-name lint finding and the skills and templates text (D9) | `domain:spec` | spec (`ai/`, `api/`), cli `lint.ts`, `skills/`, create-objectstack templates | yes (additive) | no |
+| R | **resolver and closure**: one `(package, name)` resolver (D3) with the ADR-0141 closure (the save door's `resolveWritePackageScope` is the nearest existing one), the refusal in `bare-name-one-holder.ts`'s vocabulary, and the per-package overlay slot (D4). The resolver adds `sys` to the closure itself (D3). Not wired to any reader yet | epic seat | objectql (`registry.ts`, a new resolver module), metadata-protocol (closure) | no | no |
+| N | **namespace co-owner uniqueness** for the bucket 2/3 types phase 1 does not cover (sharing rule, queue, assignment rule, hook, job, app, page, dashboard, report, book, cube, tool): a `(type, name)` held twice inside one namespace is refused at install and `os validate` (D2), on the ADR-0130 D3 object check. Lands before G1, so a qualified address always names one item. ⛔ Pending the maintainer's word on D2 | server | objectql `registry.ts` (`installPackage`), cli validate | no | **yes** (measured first-party: 0 of 297) |
+| P | **spec**: `namespace` on MCP `run_action` / `list_actions` shapes; the address grammar helpers (D5); the face derivation (D6, ruled: `NS-NAME`, `OBJECT-ACTION`); retire phase 2's bare-name lint finding and the skills and templates text (D9) | `domain:spec` | spec (`ai/`, `api/`), cli `lint.ts`, `skills/`, create-objectstack templates | yes (additive) | no |
 | E1 | flow index and activation consult on `(package, name)` | server | service-automation (`engine.ts`, `flow-definitions.ts`) | no | no |
 | E2 | action engine key `(package, objectName, name)`; `ActionNavItem` resolved by D3 | server | objectql (`engine` action registry, `action-governance.ts`), runtime `action-execution.ts` | no | no |
 | E3 | security catalog: permission sets by `(package, name)`; `position.permissionSets` by D3; positions unchanged | server | core `security/security-catalog.ts`, plugin-security | no | no |
-| E4 | sharing rules, queues, assignment rules | server | plugin-sharing | no | no |
+| E4 | sharing rules, queues, assignment rules | server | plugin-sharing | no | **yes**, for a bare name of an uncovered type that two packages hold today (measured first-party: 0) |
 | E5 | webhooks, connectors, email templates | server | plugin-webhooks, service-automation connectors, plugin-email | no | no |
-| E6 | picklist, mapping, dataset, the api matcher's name key, engine functions by referrer | server | objectql, rest (`endpoint-matcher.ts`), service-analytics | no | no |
+| E6 | picklist, mapping, dataset, the api matcher's name key, engine functions by referrer | server | objectql, rest (`endpoint-matcher.ts`), service-analytics | no | **yes**, for a bare name of an uncovered type that two packages hold today (measured first-party: 0) |
 | E7 | jobs: `jobKeyFor` on the package coordinate, keeping the bare key readable | server | runtime `app-artifact-handlers.ts`, service-job | no | no |
-| E8 | presentation and AI items: app, page, dashboard, report, book, cube, tool, skill, agent, rag_pipeline; `agent_prompt` on the protocol read (#31514) | server | objectql, metadata-protocol, mcp | no | no |
-| G1 | REST doors: the optional namespace segment and the `409` with candidates (D5) on `/automation`, `/automation/hooks`, `/actions`, `/meta`, connectors | server | runtime `domains/*.ts`, `route-ledger.ts` | yes (additive) | no: a bare address that resolves today still resolves |
-| G2 | MCP: `run_action` / `list_actions` `namespace`; skill and agent face names once Q1 is ruled | server | mcp | yes (additive) | no |
+| E8 | presentation and AI items: app, page, dashboard, report, book, cube, tool, skill, agent, rag_pipeline; `agent_prompt` on the protocol read (#31514) | server | objectql, metadata-protocol, mcp | no | **yes**, for a bare name of an uncovered type that two packages hold today (measured first-party: 0) |
+| G1 | REST doors: the optional namespace segment, the `_env` segment and the `409` with candidates (D5) on `/automation`, `/automation/hooks`, `/actions`, `/meta`, connectors; the install gate refuses a namespace that spells a grammar literal (D5) | server | runtime `domains/*.ts`, `route-ledger.ts`; objectql `registry.ts` (`RESERVED_NAMESPACES`) | yes (additive) | **yes**: a namespace spelling a literal (first-party: none); and a today-ambiguous bare name of an uncovered type answers `409` (measured first-party: 0). A bare address with one holder still resolves |
+| G2 | MCP: `run_action` / `list_actions` `namespace`; skill, agent and action face names (D6, ruled) | server | mcp | yes (additive) | no |
 | G3 | client SDK: optional namespace on `automation.*`, `actions.invoke`, `meta.getItem` | server | client | yes (additive) | no |
-| U | Studio and Console pass the held package id through `MetadataService` reads and editors (D5); stop ADR-0146 D3's prefix on non-object names (D9) | ui lane | `ui/packages/app-shell` (`services/MetadataService.ts`, `views/studio-design/*`) | no | no |
-| C | the action tool name on the AI face (#31515), after Q1 | cloud lane | cloud `service-ai` | carrier: cloud | — |
+| U | Studio and Console pass the held package id through `MetadataService` reads and editors (D5) | ui lane | `ui/packages/app-shell` (`services/MetadataService.ts`, `views/studio-design/*`) | no | no |
+| C | the action tool name on the AI face (#31515), from the D6 derivation (ruled) | cloud lane | cloud `service-ai` | carrier: cloud | — |
 | S1 | activation ledger unique `(metadata_type, package_id, name)`, backfilled (R4) | server | platform-objects, core `metadata-activation-store.ts` | no | no |
 | S2 | security and sharing columns: R1, R3, R5, R6, R13 | server | plugin-security, plugin-sharing | no | no |
 | S3 | automation columns: R7, R8, R9, R10, R11, R14, R20 | server | service-automation, plugin-approvals, service-job, plugin-email | no | no |
@@ -252,42 +297,48 @@ Each slice is a child card, cut after this record merges. **Who builds** follows
 | B1…B13 | **backstop narrowing, one child per type**, last: the one-holder refusal narrows from environment to namespace (D2), after that type's E, G and S children land | server, after each type's E/G/S | objectql `bare-name-one-holder.ts`, `security-catalog-namespace.ts` (permission sets) | no | **yes** for co-owners of one namespace (measured first-party: 0); a widening for everyone else |
 | A | ADR status lines (ADR-0048 addendum, ADR-0146 D3, ADR-0129 cross-reference) | epic seat | `docs/adr/` | no | no |
 
-**Count:** D, R, N, P, A, U, C, 8 E, 3 G and 4 S make 21 build children. The B children are one per covered type, 13 in all (phase 1's 12 types plus permission sets), and small; several types of one family can ride one PR where their E, G and S children have all landed. This is within the evaluation thread's 18–22 for the build children, plus N. The trailing B children are new, and come from red line 3.
+**Count:** D, R, N, P, A, U and C (7), 8 E, 3 G and 4 S make 22 build children, N included. That is the top of the evaluation thread's estimate of 18–22.
+
+The B children are one per covered type, 13 in all (phase 1's 12 types plus permission sets), and small. Several types of one family can ride one PR where their E, G and S children have all landed. The trailing B children are new, and come from red line 3.
 
 **Critical path, at fleet pace** (about 2–6 hours per medium PR, lanes in parallel):
 
 | Step | Working days |
 |:--|:--|
-| this ADR, plus the maintainer's Tier H approval and the Q1/Q2 rulings | 0.5 + his approval |
+| this ADR, plus the maintainer's Tier H approval (Q1/Q2 ruled 16:30Z; D2/N and Q3 with him) | 0.5 + his approval |
 | R | 0.5–1 |
-| E, G, P, U in parallel (C waits on Q1) | 1–2 |
+| E, G, P, U, C in parallel | 1–2 |
 | S | 1 |
 | B, per type | 0.5 |
 | **Total** | **about 4–5** |
 
-The real bottlenecks are not calendar weeks. They are the maintainer's ADR approval and the two open questions, merge-queue and CI throughput, and the cloud lane for C.
+The real bottlenecks are not calendar weeks. They are the maintainer's ADR approval and his word on D2/N and Q3, merge-queue and CI throughput, and the cloud lane for C.
 
 ## Open questions (needs decision)
 
-Both are put to the maintainer with this record. The recommendation is the four-axis reading in D6 and D7; neither is decided here.
+- **Q1 — the bucket-3 face spelling** (`status: decided`). Ruled `NS-NAME`, with `OBJECT-ACTION` for an object-bound action (D6). Decision card option 0 「A+A，含对象动作补充」 at 16:30:25Z, record [`6724050556`](https://github.com/objectstack-ai/objectstack/issues/31527#issuecomment-6724050556). This unblocks P, G2 and C.
+- **Q2 — two packages' same-named position** (`status: decided`). Ruled: keep the one-holder refusal; an administrator binds another package's set through an ADR-0005 overlay; no merge engine (D7). Same card and record.
+- **Q3 — the face collisions the refined spelling leaves** (`status: needs_decision`), from D6's check. There are three cases:
+  - (i) a namespace that equals an object name, which collides on the AI face and also makes D5's router read an object's action URL as qualified;
+  - (ii) an uncut 64-character face shaped like a cut one;
+  - (iii) one carrier list holding several types' faces.
 
-- **Q1 — the bucket-3 face spelling** (`status: needs_decision`). Options: `NS-NAME` (recommended), `NS_NAME`, `NS__NAME`, `NS.NAME`. Axes:
-  - *business need*: measured, MCP clients and both providers accept `-` and `_`, and the providers refuse `.`;
-  - *long-term*: only `NS-NAME` parses back to `(namespace, name)` with no lookup table;
-  - *hard for AI to get wrong*: `NS-NAME` cannot collide, while `NS_NAME` and `NS__NAME` collide in rare cases and need a refusal;
-  - *startup scope*: `NS-NAME` needs no new gate.
-  - Blocks: P's face derivation, G2's face names, and C.
-- **Q2 — two packages' same-named position** (`status: needs_decision`). Options: keep the one-holder refusal (recommended), or merge the contributions. Axes:
-  - *business need*: measured, no first-party package contributes to another's slot;
-  - *long-term*: a merge needs a rule for every field and for uninstall;
-  - *hard for AI to get wrong*: a merged slot silently gains another package's grants, while the refusal is loud;
-  - *startup scope*: the refusal ships today, while a merge is a new engine.
-  - Blocks nothing, because positions keep today's behaviour until it is ruled.
+  Options:
+  - **A (recommended).** The install gate (ADR-0048 §3.2) refuses a namespace that equals an installed object name, and an object whose name equals an installed namespace, naming both. A face is cut from 64 characters on, so an uncut face is at most 63. Where one list holds several types' faces, the list builder refuses a duplicate face at registration, naming both items. That last check is the backstop for any residual case, including a hash collision.
+  - **B.** A separator of its own for the object-bound form, `OBJECT--ACTION`, which reads back by grammar alone. It re-spells the ruled example, and D5's router still needs A's install check.
+
+  Axes:
+  - *business need*: measured on HotCRM `6961ab1`, 0 namespaces equal an object name; the shape is still ordinary, because the paired `.custom` package's namespace is `NS_custom`;
+  - *long-term*: A keeps the ruled spelling and makes `L-R` name one thing per environment; B is grammar-reversible but adds a second separator to remember;
+  - *hard for AI to get wrong*: A is loud at install, while left unguarded the collision is a silent wrong tool;
+  - *startup scope*: A is one more comparison in an existing gate (a narrowing) plus a duplicate check where the face list is built; B needs no gate for the face, but not for the URL.
+
+  Under A, it blocks nothing: the faces stay as ruled, and A's checks ride G1 (the same gate) and G2/C (the face list). Under B, P's derivation and C wait.
 
 ## Consequences
 
 - **Good.** Two packages can ship `send_email` side by side, and every caller reaches the one it means. No author, no AI and no stored row carries the namespace inside a behavioural name. The literal prefix is left only where a name leaves the platform (objects). Live environments migrate by adding columns, not by rewriting names.
-- **Cost.** Every runtime index and by-name door of 20 behavioural types gains a coordinate, which is the plan above. The router gains a documented precedence for a first segment that names a namespace. Co-owners of a namespace keep behavioural names unique across it.
+- **Cost.** Every runtime index and by-name door of 20 behavioural types gains a coordinate, which is the plan above. The router gains a documented precedence (the grammar's literals, then a namespace, then the bare grammar) and the reserved `_env` segment. Two refusals are added at install: a namespace spelling a grammar literal, and, pending the maintainer's word on D2, a name held twice across a namespace's co-owners (N). Q3 may add a third. On an uncovered type, a bare name that two packages already hold turns from a silent first match into a `409`.
 - **Risk.** A reader that is missed keeps resolving first-registered. Each slice therefore retires its type's phase-1 refusal only once its readers are measured on a booted two-package deployment, as phase 1 measured them.
 
 ## Alternatives considered
@@ -295,4 +346,5 @@ Both are put to the maintainer with this record. The recommendation is the four-
 - **Finish phase 3 (literal prefix on every name).** Rejected by the 13:12:35Z ruling: 206 renames in HotCRM, 17 kinds of stored rewrite per environment, and a prefix every AI must remember.
 - **Derive physical table names for objects too (ADR-0028 D2 in full).** Rejected by the per-type ruling: the table name is read by consumers the platform does not control (D1).
 - **A qualified reference spelling inside metadata now (`NS:NAME`).** Deferred: no measured cross-package ambiguity (D3).
+- **No co-owner uniqueness (no child N); a qualified address with two co-owner holders answers `409` with package-id candidates instead.** This alternative is not taken, pending the maintainer's word on D2. `?package=` already disambiguates `/meta`, so this costs no install refusal. But a qualified address would then not always name one item, and the AI face (D6) would need the package id after all. Every client would need a second disambiguation step for a case HotCRM measures at 0 of 297 keys. N refuses that case once, at install, where an author can rename.
 - **Package id, not namespace, in addresses.** Rejected: `com.objectstack.hotcrm.revenue` in every URL and tool name is unreadable to authors and AI, and the namespace already identifies the item once co-owners keep names unique (D2).

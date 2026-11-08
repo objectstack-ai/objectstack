@@ -217,7 +217,7 @@ A bare `ADR-0006` names the decision; its current text is [0006-project-environm
 | [ADR-0147](./0147-membership-scoped-rls-lowers-to-an-engine-internal-org-member-semi-join-leaf.md) | Membership-scoped RLS (`FIELD in currentuser.orguserids`) lowers to an engine-internal organization-member se… | Proposed — 2026-11-02. `docs/adr/` is Tier H (Prime Directive #14): the re… | 2026-11-02 | — | — |
 | [ADR-0148](./0148-recycle-bin-separate-store-restore-under-original-ids-retention-in-days.md) | The recycle bin is a separate store — one entry per delete operation, restore under the original ids, retenti… | Accepted — 2026-11-05, recording the maintainer's ruling of 2026-11-04 on… | 2026-11-05 | — | — |
 | [ADR-0149](./0149-ai-answers-business-questions-through-the-dataset-semantic-layer.md) | The AI answers business questions through the dataset semantic layer — synonyms and descriptions on measures… | Accepted — 2026-11-08, recording two rulings of the maintainer: the placem… | 2026-11-08 | — | — |
-| [ADR-0150](./0150-behavioural-metadata-addressed-by-package-objects-keep-the-literal-prefix.md) | Behavioural metadata is addressed by (package, name) — objects keep the literal prefix; ADR-0028 re-opened fo… | Proposed — 2026-11-08. `docs/adr/` is Tier H (Prime Directive #14): this r… | 2026-11-08 | — | — |
+| [ADR-0150](./0150-behavioural-metadata-addressed-by-package-objects-keep-the-literal-prefix.md) | Behavioural metadata is addressed by (package, name) — objects keep the literal prefix; ADR-0028 re-opened fo… | Proposed — 2026-11-08. `docs/adr/` is Tier H (Prime Directive #14): this r… | 2026-11-08 | ADR-0028 | — |
 
 ## ObjectUI registry — `ui/docs/adr/` (`ui-` prefix)
 
