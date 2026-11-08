@@ -96,6 +96,35 @@ export {
 // stay private to the engine.
 export { findPackageHeldSecurityCatalogNames } from './registry.js';
 
+// [#31575, ADR-0150 D3/D4] The ONE package-scoped resolver for behavioural
+// metadata: the caller package's own item, else the unique holder in its
+// declared dependency closure (plus `sys`), else a refusal naming every
+// candidate. Exported for the readers epic #31527's later children switch to
+// it (runtime indexes, doors, stored references); no reader calls it yet. On
+// this barrel only: it reads `@objectstack/metadata-protocol`'s closure, which
+// the lean `./core` entry never imports (ADR-0076 D2).
+export {
+  resolvePackageScopedName,
+  packageResolutionClosure,
+  packageScopedRefusalMessage,
+  describePackageScopedHolder,
+  isPackageScopedType,
+  isPlatformRequestedBareName,
+  PACKAGE_SCOPED_TYPES,
+  PLATFORM_REQUESTED_BARE_NAMES_BY_TYPE,
+  KERNEL_NAMESPACE,
+} from './package-scoped-resolver.js';
+export type {
+  PackageScopedType,
+  PackageScopedHolder,
+  PackageScopedQuery,
+  PackageScopedRegistry,
+  PackageScopedResolution,
+  PackageScopedResolutionStep,
+  PackageScopedRefusal,
+  PackageScopedRefusalReason,
+} from './package-scoped-resolver.js';
+
 // [#15204 W2] Every `(type, name)` a manifest declares, read from the sources
 // the engine's registration seams read. Exported for the install-local door
 // (`@objectstack/cloud-connection`), which refuses a catalog-carrying package
