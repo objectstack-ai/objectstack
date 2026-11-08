@@ -21,7 +21,7 @@
  * the gate meet: the gate admits exactly what the resolver grants.
  */
 
-import { describe, it, expect, afterEach, vi } from 'vitest';
+import { describe, it, expect, afterEach, beforeAll, afterAll, vi } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { resolveThrownHttpError } from '@objectstack/types';
@@ -1030,94 +1030,100 @@ describe('[ADR-0090 D12] a delegate can neither capture nor evict a direct grant
     return (Array.isArray(rows) ? rows : []).map((r: any) => r.user_id)[0];
   }
 
-  const OUTSIDE_HOLDER =
-    /^\[Security\] Outside your delegated scope: delegated 'update' on sys_user_permission_set rejected — target user 'u_subject' is outside the delegated subtree \(scope from 'east_grant_admin'\)\.$/;
+  /** The one answer a holder outside the scope gets at the gate, at either end of the move: one sentence, one class, one set of details. */
+  const OUTSIDE_ANSWER = {
+    status: 403,
+    code: 'DELEGATION_SCOPE_VIOLATION',
+    class: 'DelegationScopeViolationError',
+    message: "[Security] Outside your delegated scope: delegated 'update' on sys_user_permission_set rejected — target user 'u_subject' is outside the delegated subtree (scope from 'east_grant_admin').",
+    details: { operation: 'update', object: 'sys_user_permission_set', permissionSet: 'field_user' },
+  };
+  type Rig = Awaited<ReturnType<typeof bootWith>>;
+  /** Both grants are where the rig booted them: nothing a refused pin sent moved either. */
+  async function expectUnmoved(h: Rig) {
+    expect(await holderOf(h, 'g_subject')).toBe(SUBJECT);
+    expect(await holderOf(h, 'g_target')).toBe('u_target');
+  }
 
   for (const posture of POSTURES) {
     describe(`posture '${posture}'`, () => {
-      it(`moving a grant FROM a holder outside the scope TO one inside is refused, for each of the ${STATES.length} states with one answer, at the gate and through the write door, and the grant stays`, async () => {
-        const answers = [];
-        for (const state of STATES) {
-          const h = await bootWith(posture, state);
-          const gate = await atGate(h, 'from', delegateFor(state));
-          const door = await throughWriteDoor(h, 'from', delegateFor(state));
-          answers.push({ gate, door, holder: await holderOf(h, 'g_subject') });
-        }
-        for (const [i, answer] of answers.entries()) expect(answer, STATES[i]).toEqual(answers[0]);
-        const [{ gate, door, holder }] = answers;
-        expect([gate.status, (gate as any).code, (gate as any).class]).toEqual([403, 'DELEGATION_SCOPE_VIOLATION', 'DelegationScopeViolationError']);
-        expect((gate as any).message).toMatch(OUTSIDE_HOLDER);
-        expect((gate as any).details).toEqual({ operation: 'update', object: 'sys_user_permission_set', permissionSet: 'field_user' });
-        expect([door.status, (door as any).code, (door as any).message]).toEqual([403, 'DELEGATION_SCOPE_VIOLATION', (gate as any).message]);
-        expect(holder).toBe(SUBJECT);
-      });
+      // Every pin under a state is a refusal and moves nothing (each re-reads
+      // both grants to show it), so the subject in each state boots ONE rig that
+      // serves them all — a boot is what a pin here costs. The CONTROLs that
+      // move a grant, below, boot their own.
+      for (const state of STATES) {
+        describe(`the subject is ${state}`, () => {
+          let h: Rig;
+          beforeAll(async () => {
+            h = await bootWith(posture, state);
+            // Kept past the file's per-test teardown (`engines`); destroyed by this describe's afterAll.
+            engines.splice(engines.indexOf(h.engine), 1);
+          });
+          afterAll(async () => {
+            try { await h?.engine.destroy(); } catch { /* noop */ }
+          });
 
-      it('moving a grant FROM a holder inside the scope whom the delegate cannot read is refused, and the grant stays', async () => {
-        const h = await bootWith(posture, UNREADABLE_INSIDE);
-        const door = await throughWriteDoor(h, 'from', delegateFor(UNREADABLE_INSIDE));
-        expect([door.status, (door as any).code]).toEqual([403, 'DELEGATION_SCOPE_VIOLATION']);
-        expect((door as any).message).toMatch(OUTSIDE_HOLDER);
-        expect(await holderOf(h, 'g_subject')).toBe(SUBJECT);
-      });
+          it('moving a grant FROM the subject TO a holder inside the scope is refused with the one answer, at the gate and through the write door, and the grant stays', async () => {
+            expect(await atGate(h, 'from', delegateFor(state))).toEqual(OUTSIDE_ANSWER);
+            const door = await throughWriteDoor(h, 'from', delegateFor(state));
+            expect([door.status, (door as any).code, (door as any).message]).toEqual([403, OUTSIDE_ANSWER.code, OUTSIDE_ANSWER.message]);
+            await expectUnmoved(h);
+          });
 
-      it('moving a grant TO a holder outside the scope is refused, as before', async () => {
-        for (const state of STATES) {
-          const answer = await atGate(await bootWith(posture, state), 'to', delegateFor(state));
-          expect([answer.status, (answer as any).code, (answer as any).message], state)
-            .toEqual([403, 'DELEGATION_SCOPE_VIOLATION', expect.stringMatching(OUTSIDE_HOLDER)]);
-        }
-      });
+          it('moving a grant TO the subject is refused with the one answer, as before', async () => {
+            expect(await atGate(h, 'to', delegateFor(state))).toEqual(OUTSIDE_ANSWER);
+            await expectUnmoved(h);
+          });
 
-      it('the refusal is the same whichever end is outside: status, code, class, message and details', async () => {
-        for (const state of STATES) {
-          const h = await bootWith(posture, state);
-          expect(await atGate(h, 'from', delegateFor(state)), state).toEqual(await atGate(h, 'to', delegateFor(state)));
-        }
-      });
+          it('the refusal is the same whichever end the subject is at: status, code, class, message and details', async () => {
+            expect(await atGate(h, 'from', delegateFor(state))).toEqual(await atGate(h, 'to', delegateFor(state)));
+            await expectUnmoved(h);
+          });
 
-      it('CONTROL: moving a grant between two holders inside the scope, both read by the delegate, is admitted at either end, and the grant moves', async () => {
-        for (const end of Object.keys(ENDS) as End[]) {
+          it("a delegate that cannot read the stored grant is told the same refusal without the stored holder's name", async () => {
+            // `east_admin` holds no read of `sys_user_permission_set`: the stored
+            // grant's values are ones it may not be told (ruling of record 6649064874).
+            const { message: fromMessage, ...from } = await atGate(h, 'from', delegateFor(state, 'east_admin')) as any;
+            const { message: toMessage, ...to } = await atGate(h, 'to', delegateFor(state, 'east_admin')) as any;
+            expect(from).toEqual(to);
+            expect([from.status, from.code]).toEqual([403, 'DELEGATION_SCOPE_VIOLATION']);
+            expect(fromMessage).toBe(
+              "[Security] Outside your delegated scope: delegated 'update' on sys_user_permission_set rejected — the grant's target user is outside the delegated subtree (scope from 'east_admin').",
+            );
+            expect(toMessage).toMatch(/target user 'u_subject' is outside the delegated subtree/);
+            await expectUnmoved(h);
+          });
+
+          it('CONTROL: an organization administrator gets the answer it always got at either end, an edit in place being no part of its right', async () => {
+            const organization = delegateCtx('u_org_admin', 'organization_admin');
+            for (const end of Object.keys(ENDS) as End[]) {
+              const answer = await throughWriteDoor(h, end, organization);
+              expect([answer.status, (answer as any).code], end).toEqual([403, 'PERMISSION_DENIED']);
+              expect((answer as any).message, end).toMatch(/'update' is not part of the right — an assignment row is created and removed, never edited in place/);
+            }
+            await expectUnmoved(h);
+          });
+        });
+      }
+
+      for (const end of Object.keys(ENDS) as End[]) {
+        const which = end === 'from' ? 'FROM' : 'TO';
+        it(`CONTROL: moving a grant ${which} a holder inside the scope whom the delegate reads is admitted at the gate and through the write door, and the grant moves`, async () => {
           const h = await bootWith(posture, CONTROL, [end]);
-          expect(await atGate(h, end, delegateFor(CONTROL)), end).toEqual({ status: 200 });
-          expect(await throughWriteDoor(h, end, delegateFor(CONTROL)), end).toEqual({ status: 200 });
-          expect(await holderOf(h, ENDS[end].id), end).toBe(ENDS[end].user_id);
-        }
-      });
+          expect(await atGate(h, end, delegateFor(CONTROL))).toEqual({ status: 200 });
+          expect(await throughWriteDoor(h, end, delegateFor(CONTROL))).toEqual({ status: 200 });
+          expect(await holderOf(h, ENDS[end].id)).toBe(ENDS[end].user_id);
+        });
 
-      it("a delegate that cannot read the stored grant is told the same refusal without the stored holder's name", async () => {
-        // `east_admin` holds no read of `sys_user_permission_set`: the stored
-        // grant's values are ones it may not be told (ruling of record 6649064874).
-        for (const state of STATES) {
-          const h = await bootWith(posture, state);
-          const { message: fromMessage, ...from } = await atGate(h, 'from', delegateFor(state, 'east_admin')) as any;
-          const { message: toMessage, ...to } = await atGate(h, 'to', delegateFor(state, 'east_admin')) as any;
-          expect(from, state).toEqual(to);
-          expect([from.status, from.code], state).toEqual([403, 'DELEGATION_SCOPE_VIOLATION']);
-          expect(fromMessage, state).toBe(
-            "[Security] Outside your delegated scope: delegated 'update' on sys_user_permission_set rejected — the grant's target user is outside the delegated subtree (scope from 'east_admin').",
-          );
-          expect(toMessage, state).toMatch(/target user 'u_subject' is outside the delegated subtree/);
-        }
-      });
-
-      it('CONTROL: a tenant-level administrator still moves the grant whichever end is outside; an organization administrator gets the answer it always got, an edit in place being no part of its right', async () => {
-        const tenant = delegateCtx('u_org_admin', 'admin_full_access');
-        const organization = delegateCtx('u_org_admin', 'organization_admin');
-        for (const state of ['a user whose business unit is outside the scope', UNREADABLE_INSIDE] as const) {
-          for (const end of Object.keys(ENDS) as End[]) {
-            const label = `${end} · ${state}`;
-            const moved = await bootWith(posture, state, [end]);
-            expect(await throughWriteDoor(moved, end, tenant), label).toEqual({ status: 200 });
-            expect(await holderOf(moved, ENDS[end].id), label).toBe(ENDS[end].user_id);
-
-            const kept = await bootWith(posture, state, [end]);
-            const answer = await throughWriteDoor(kept, end, organization);
-            expect([answer.status, (answer as any).code], label).toEqual([403, 'PERMISSION_DENIED']);
-            expect((answer as any).message, label).toMatch(/'update' is not part of the right — an assignment row is created and removed, never edited in place/);
-            expect(await holderOf(kept, ENDS[end].id), label).not.toBe(ENDS[end].user_id);
+        it(`CONTROL: a tenant-level administrator still moves the grant ${which} a holder outside the scope, through the write door`, async () => {
+          const tenant = delegateCtx('u_org_admin', 'admin_full_access');
+          for (const state of ['a user whose business unit is outside the scope', UNREADABLE_INSIDE] as const) {
+            const h = await bootWith(posture, state, [end]);
+            expect(await throughWriteDoor(h, end, tenant), state).toEqual({ status: 200 });
+            expect(await holderOf(h, ENDS[end].id), state).toBe(ENDS[end].user_id);
           }
-        }
-      });
+        });
+      }
     });
   }
 });
