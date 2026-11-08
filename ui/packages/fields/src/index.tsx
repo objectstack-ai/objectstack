@@ -4728,6 +4728,10 @@ const fieldWidgetMap = {
   //   notification-channel → a notification channel, `*` for all
   'notification-topic': () => import('./widgets/RegistryRefField.js').then(m => ({ default: m.NotificationTopicField })),
   'notification-channel': () => import('./widgets/RegistryRefField.js').then(m => ({ default: m.NotificationChannelField })),
+  // A notification preference's quiet hours: a daily window stored as
+  // `{ tz?, start: 'HH:MM', end: 'HH:MM' }`, drawn as a time-zone picker and
+  // two times.
+  'quiet-hours': () => import('./widgets/QuietHoursField.js').then(m => ({ default: m.QuietHoursField })),
 } satisfies Record<string, FieldWidgetLoader>;
 
 /** The registered field widget keys, as a literal union (objectui#4857). */
@@ -4913,6 +4917,7 @@ const FIELD_TYPES_SKIP_FALLBACK = new Set([
   'permission-ref',
   'notification-topic',
   'notification-channel',
+  'quiet-hours',
   // ── Retired bare node keys (objectui#10859 batch 8) ───────────────────────
   // Each was registered bare only as this loop's fallback: no other package
   // owns the name, no form path reads it, and no document authors it as a
@@ -5064,6 +5069,7 @@ export const FIELD_WIDGET_LABELLING: Record<
   'permission-ref': 'control',
   'notification-topic': 'control',
   'notification-channel': 'control',
+  'quiet-hours': 'group',
 };
 
 export function registerField(fieldType: string): void {

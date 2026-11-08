@@ -72,6 +72,12 @@
  * (`fleet-write/dispatch.mjs`) over the one alias map. ⛔ A rewrite, never a
  * refusal: no card is held back for its label.
  *
+ * ## The kind rule
+ *
+ * A `--label` the kind rule forbids on an issue (`pm:awaiting-merge`, any case)
+ * is refused as usage (exit 2), on a dry run too, with the rule quoted —
+ * `refuseKindLabels` (`label-write.mjs`), the one rule every label door asks.
+ *
  * ## Read-back
  *
  * After a 201 the card is fetched again and its title compared. A mismatch is
@@ -104,7 +110,7 @@ import { isEntrypoint } from '../invoked-as.mjs';
 import { EXIT_PREREQUISITE_NOT_MET, PROXY_FLAG, SEAT_SIGNATURE_SHAPE, proxyRearmPlan, resolveSweepRepo, signatureRefusal } from './check-half-states.mjs';
 import { EXIT_UNCONFIRMED, exitForResult, matchRunAnnotations, packRequest, parseRelayAnnotation, relayAnnotationMessage, resolveRoute, retiredLaneRewriteLine, rewriteRetiredLaneLabels, sendFleetWrite, unconfirmedText } from './fleet-write/dispatch.mjs';
 import { refusalText as relayRefusalText } from './fleet-write/validate.mjs';
-import { classifyHttp } from './label-write.mjs';
+import { KIND_ISSUE, KIND_RULE_AWAITING_MERGE_PR_ONLY, classifyHttp, refuseKindLabels } from './label-write.mjs';
 import { EXIT_WRITE_PACE_REFUSED, isWriteMethod, noteResponse, paceWrite, releaseWriteLease } from './write-pace.mjs';
 
 const SELF_PATH = fileURLToPath(import.meta.url);
@@ -225,6 +231,9 @@ export function planFrom(opts, { read = (p) => readFileSync(p, 'utf8'), env = pr
   // A retired lane alias is written as its lane (header): a rewrite, never a refusal.
   const lanes = rewriteRetiredLaneLabels(dedupe(opts.labels));
   const labels = lanes.labels;
+  // The kind rule (label-write.mjs), asked of a new card's labels before any write, dry run included.
+  const wrongKind = refuseKindLabels({ kind: KIND_ISSUE, add: labels, ref: 'the new card' });
+  if (wrongKind) errors.push(wrongKind);
   const assignees = dedupe(opts.assignees);
   const payload = { title: title ?? '', body: body ?? '' };
   if (labels.length) payload.labels = labels;
@@ -446,7 +455,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the payload: title trimmed to one line, labels and assignees de-duplicated, nothing invented': 5,
   "the signature: a card body opens with the seat's signature line, or the plan is refused before any request": 8,
   'the transport: a fake platform, and what each answer does to the exit code': 9,
-  'dry-run: no request leaves, and the plan is printed': 3,
+  'dry-run: no request leaves, and the plan is printed': 4,
   'the wiring: both halves around the one POST, on the write verb only': 4,
   'the relay transport: ONE dispatch carrying the create, the card found by title since the dispatch, and an accepted dispatch with no run UNCONFIRMED under auto too — never the direct POST': 9,
   'the retired lane aliases: a domain:engine / services / cli / rest --label is sent as domain:server on either transport, the dry run and the read-back say so, a live domain:* label passes untouched, and nothing is refused': 8,
@@ -653,6 +662,11 @@ export async function selfTest() {
       t('--dry-run exits 0 and prints the request it did not send', [spawned.status, spawned.stdout.includes('NOTHING was sent') && spawned.stdout.includes('POST /repos/o/r/issues')], [0, true], spawned.stderr.slice(-300));
       t('…and the throttle recorded nothing: a dry run makes no write', existsSync(join(dir, 'dry-pace.jsonl')), false);
       t('a refused plan is usage, printed, and nothing is sent', spawnSync(process.execPath, [SELF_PATH, '--dry-run', '--repo', 'o/r', '--title', 'x'], { encoding: 'utf8', env: { ...process.env, HTTPS_PROXY: '', https_proxy: '' } }).status, EXIT_USAGE);
+      const kindCli = spawnSync(process.execPath, [SELF_PATH, '--dry-run', '--repo', 'o/r', '--title', 'Dry', '--body-file', join(dir, 'b.md'), '--label', 'PM:AWAITING-MERGE'], {
+        encoding: 'utf8',
+        env: { ...process.env, OS_PM_WRITE_PACE_FILE: join(dir, 'kind-pace.jsonl'), GITHUB_TOKEN: TOKEN_FIXTURE, GH_TOKEN: '', HTTPS_PROXY: '', https_proxy: '' },
+      });
+      t('⛔ a PR-only label (PM:AWAITING-MERGE, any case) is refused on a dry run too — usage, the rule quoted, nothing printed as sent, nothing paced', [kindCli.status, kindCli.stderr.includes(KIND_RULE_AWAITING_MERGE_PR_ONLY), kindCli.stdout.includes('NOTHING was sent'), existsSync(join(dir, 'kind-pace.jsonl'))], [EXIT_USAGE, true, false, false], kindCli.stderr.slice(-300));
     }
 
     // ── the relay transport ─────────────────────────────────────────────────

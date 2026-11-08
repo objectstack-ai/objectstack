@@ -40,6 +40,13 @@ import {
   runOneTimeTokenHandoff,
   s256Challenge,
 } from './one-time-token-handoff';
+import * as packageRoot from './index';
+import {
+  answerOneTimeTokenHandoff,
+  type HandoffAnswer,
+  type OneTimeTokenHandoffManager,
+  type OneTimeTokenHandoffServing,
+} from './index';
 
 const SECRET = 'test-secret-at-least-32-chars-long!!';
 const PASSWORD = 'S3cure!Passw0rd-one-time-token';
@@ -730,5 +737,130 @@ describe('trustedAppSchemes — refused at construction, never dropped', () => {
     const manager = makeManager(createMemoryEngine());
     expect(() => manager.applyConfigPatch({ trustedAppSchemes: ['https'] } as any)).toThrow(/invalid trustedAppSchemes/);
     expect(manager.getRegisteredAppSchemes()).toEqual([APP_SCHEME]);
+  });
+});
+
+// A host that forwards `/api/v1/auth/*` to a kernel's `AuthManager` it did not
+// mount (the cloud's per-environment kernels: no `http-server`, AuthPlugin with
+// `registerRoutes: false`) answers the hand-off through the package root's one
+// export, so the token is still minted inside the challenge scope and the
+// AuthPlugin route and every such host share one implementation.
+describe('one-time-token hand-off — a host that forwards the auth routes answers it through the package export', () => {
+  const query = { redirect_uri: CALLBACK, code_challenge: s256Challenge(VERIFIER), code_challenge_method: 'S256' };
+  const HOST_ORIGIN = 'https://env-42.hosted.example';
+
+  /**
+   * The host: a Hono app that is NOT AuthPlugin's. It serves its own sign-in
+   * page, answers the hand-off for the manager it was handed, and forwards every
+   * other auth path to that manager the way a forwarding host does. No
+   * AuthPlugin is constructed, so nothing here mounts `registerAuthRoutes`.
+   */
+  const arrangeHost = async () => {
+    const engine = createMemoryEngine();
+    for (const [name, rows] of await signedUpOnce()) engine.tables.set(name, structuredClone(rows));
+    const manager = makeManager(engine);
+    const unserved: string[] = [];
+    const host = new Hono();
+    servedConsole(host);
+    host.get(`${BASE}${ONE_TIME_TOKEN_HANDOFF_PATH}`, async (c) => {
+      const handedManager: OneTimeTokenHandoffManager = manager;
+      const serving: OneTimeTokenHandoffServing = {
+        authMountPath: BASE,
+        server: host,
+        serverEnv: c.env,
+        onUnserved: (path, reason) => unserved.push(`${path}: ${reason}`),
+      };
+      const answer: HandoffAnswer = await answerOneTimeTokenHandoff(
+        handedManager,
+        { url: c.req.url, headers: c.req.raw.headers, queries: c.req.queries() ?? {} },
+        serving,
+      );
+      if (answer.status === 302) return new Response(null, { status: 302, headers: answer.headers });
+      return c.json(answer.body, answer.status as any, answer.headers);
+    });
+    host.all(`${BASE}/*`, (c) => manager.handleRequest(c.req.raw));
+
+    const viaHost = (path: string, init: RequestInit = {}) => host.request(`${HOST_ORIGIN}${path}`, init);
+    const handoff = (cookie: string | undefined, extra: Record<string, string> = {}) =>
+      viaHost(`${BASE}${ONE_TIME_TOKEN_HANDOFF_PATH}?${new URLSearchParams(query)}`, {
+        headers: { ...(cookie ? { cookie } : {}), ...extra },
+      });
+    const signIn = async (): Promise<string> => {
+      const res = await viaHost(`${BASE}/sign-in/email`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', origin: ORIGIN },
+        body: JSON.stringify({ email: ALICE_EMAIL, password: PASSWORD }),
+      });
+      expect(res.status, `sign-in: ${await res.clone().text()}`).toBe(200);
+      return cookieFrom(res);
+    };
+    const redeem = (token: string) =>
+      viaHost(`${BASE}${ONE_TIME_TOKEN_VERIFY_PATH}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', origin: ORIGIN },
+        body: JSON.stringify({ token }),
+      });
+    return { engine, unserved, handoff, signIn, redeem };
+  };
+
+  it('answers the app\'s anonymous probe with 401 UNAUTHENTICATED and mints nothing', async () => {
+    const { engine, handoff } = await arrangeHost();
+    const before = verificationRows(engine).length;
+    const res = await handoff(undefined, { accept: 'application/json' });
+    expect(res.status).toBe(401);
+    expect(((await res.json()) as any).error.code).toBe('UNAUTHENTICATED');
+    expect(res.headers.get('location')).toBeNull();
+    expect(verificationRows(engine).length).toBe(before);
+  });
+
+  it('sends a signed-out navigation to the HOST\'s own sign-in page, root-relative, naming the same request', async () => {
+    const { handoff, unserved } = await arrangeHost();
+    const res = await handoff(undefined, NAVIGATION);
+    expect(res.status).toBe(302);
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    const location = res.headers.get('location')!;
+    expect(location.startsWith('/')).toBe(true);
+    const target = new URL(location, HOST_ORIGIN);
+    expect(target.pathname).toBe('/_console/login');
+    expect(target.searchParams.get('redirect')).toBe(`${BASE}${ONE_TIME_TOKEN_HANDOFF_PATH}?${new URLSearchParams(query)}`);
+    expect(unserved).toEqual([]);
+  });
+
+  it('hands a fresh session to the app, the token redeems at /one-time-token/verify with the verifier once, and no log line carries it', async () => {
+    const streams = [process.stdout, process.stderr].map((stream) => vi.spyOn(stream, 'write'));
+    const consoles = (['log', 'info', 'debug', 'warn', 'error'] as const).map((level) =>
+      vi.spyOn(console, level).mockImplementation(() => {}),
+    );
+    const { engine, signIn, handoff, redeem, unserved } = await arrangeHost();
+    const cookie = await signIn();
+
+    const res = await handoff(cookie, NAVIGATION);
+    expect(res.status).toBe(302);
+    const location = new URL(res.headers.get('location')!);
+    expect(location.protocol).toBe(`${APP_SCHEME}:`);
+    const token = location.searchParams.get('token')!;
+    expect(token).toMatch(/^[A-Za-z0-9_-]{32}$/);
+
+    const redeemed = await redeem(`${token}.${VERIFIER}`);
+    expect(redeemed.status, await redeemed.clone().text()).toBe(200);
+    expect(((await redeemed.json()) as any).user.id).toBe(userRows(engine).find((r) => r.email === ALICE_EMAIL).id);
+    expect(cookieFrom(redeemed)).toContain('session_token=');
+
+    const replay = await redeem(`${token}.${VERIFIER}`);
+    expect(replay.status).toBe(400);
+    expect(((await replay.json()) as any).message).toBe('Invalid token');
+
+    const written = [...streams, ...consoles]
+      .flatMap((spy) => spy.mock.calls)
+      .map((args) => args.map((arg) => (typeof arg === 'string' ? arg : String(arg))).join(' '))
+      .concat(unserved);
+    expect(written.filter((line) => line.includes(token))).toEqual([]);
+  });
+
+  it('the package root publishes the one answer and none of the minting seams', () => {
+    expect(typeof packageRoot.answerOneTimeTokenHandoff).toBe('function');
+    for (const seam of ['runOneTimeTokenHandoff', 'withHandoffChallenge', 'resolveHandoffSignInEntry', 'oneTimeTokenStoreHasher']) {
+      expect(Object.keys(packageRoot), seam).not.toContain(seam);
+    }
   });
 });

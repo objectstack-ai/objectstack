@@ -105,6 +105,9 @@ describe('unknown top-level stack keys are refused at parse', () => {
       ['themes', 'app.branding'],
       // #4212: the uninvoked lifecycle family.
       ['onDisable', 'uninvoked lifecycle'],
+      // Never declared; the collection registries listed it until their rows
+      // were retired (ADR-0049).
+      ['ragPipelines', 'knowledge-source schemas'],
     ];
     for (const [key, mustContain] of cases) {
       const result = parseTopLevel({ [key]: [] });

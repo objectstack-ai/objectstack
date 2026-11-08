@@ -173,6 +173,53 @@ describe('#12977 — ORGANIZATION_CREATION_DISABLED (objectstack registered code
   });
 });
 
+describe('#28124 — YOU_HAVE_REACHED_THE_MAXIMUM_NUMBER_OF_ORGANIZATIONS (the per-user creation cap)', () => {
+  // better-auth refuses a create past `organizationLimit` (`OS_ORG_LIMIT`) with
+  // 403 and this code, and the body is its bare `{ code, message }`: no limit
+  // in it, and none in `/auth/config` either. So the console explains the cap
+  // without a number, and no pack may carry one.
+  const CODE = 'YOU_HAVE_REACHED_THE_MAXIMUM_NUMBER_OF_ORGANIZATIONS';
+  const SERVER_SENTENCE = 'You have reached the maximum number of organizations';
+  const KEY = 'organization.errors.organizationLimitReached';
+  const packValue = (lang: string): unknown =>
+    KEY.split('.').reduce<unknown>(
+      (n, k) => (n as Record<string, unknown> | undefined)?.[k],
+      builtInLocales[lang as keyof typeof builtInLocales],
+    );
+  const tPack = (lang: string) => (key: string, options?: Record<string, unknown>): string => {
+    const hit = key
+      .split('.')
+      .reduce<unknown>(
+        (n, k) => (n as Record<string, unknown> | undefined)?.[k],
+        builtInLocales[lang as keyof typeof builtInLocales],
+      );
+    return typeof hit === 'string' ? hit : String(options?.defaultValue ?? key);
+  };
+
+  it('zh: the refusal renders the zh pack sentence, not better-auth\'s English', () => {
+    const shown = resolveOrgErrorMessage(withCode(CODE, SERVER_SENTENCE), tPack('zh-Hans'));
+    expect(shown).toBe(packValue('zh-Hans'));
+    expect(shown).not.toBe(SERVER_SENTENCE);
+    expect(shown).toMatch(/\p{Script=Han}/u);
+  });
+
+  it('en: the refusal renders the en pack sentence, which says invited organizations do not count', () => {
+    const shown = resolveOrgErrorMessage(withCode(CODE, SERVER_SENTENCE), tPack('en'));
+    expect(shown).toBe(packValue('en'));
+    expect(shown).not.toBe(SERVER_SENTENCE);
+  });
+
+  it('every pack defines the key, with its own sentence and no number in it', () => {
+    const en = packValue('en');
+    for (const lang of Object.keys(builtInLocales)) {
+      const value = packValue(lang);
+      expect(typeof value, `${lang} lacks ${KEY}`).toBe('string');
+      expect(value as string, `${lang} names a number the server never sent`).not.toMatch(/\p{Nd}/u);
+      if (lang !== 'en') expect(value, `${lang} still serves the English sentence`).not.toBe(en);
+    }
+  });
+});
+
 describe('#4474 — the mapping table itself', () => {
   it('every mapped code resolves to a key the zh pack actually defines', () => {
     // Guards the class of typo that only shows up as a raw i18n key on screen,
@@ -196,6 +243,7 @@ describe('#4474 — the mapping table itself', () => {
         'ORGANIZATION_SLUG_ALREADY_TAKEN',
         'USER_IS_ALREADY_INVITED_TO_THIS_ORGANIZATION',
         'YOU_ARE_NOT_ALLOWED_TO_CREATE_A_NEW_ORGANIZATION',
+        'YOU_HAVE_REACHED_THE_MAXIMUM_NUMBER_OF_ORGANIZATIONS',
         'YOU_ARE_NOT_ALLOWED_TO_INVITE_USERS_TO_THIS_ORGANIZATION',
         'YOU_ARE_NOT_ALLOWED_TO_INVITE_USER_WITH_THIS_ROLE',
         'YOU_ARE_NOT_THE_RECIPIENT_OF_THE_INVITATION',
