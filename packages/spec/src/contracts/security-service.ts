@@ -1399,4 +1399,22 @@ export interface ISecurityService {
     plugin: string,
     alternates: readonly OwnershipFloorAlternate[],
   ): void;
+  /**
+   * [ADR-0090 D12] Is permission set `setName` inside the organization
+   * boundary? Resolves `null` when it is, otherwise the reason, naming the set
+   * and the condition it fails: outside by name (platform administration, the
+   * organization-administrator sets, the agent ceilings), a superuser bit on its
+   * `objects['*']` entry, an `adminScope`, or a capability not declared
+   * `scope: 'org'`. A set the security catalog does not hold cannot be shown
+   * inside, and is not. It is the same predicate the delegated-administration
+   * gate judges an organization administrator's assignment by, served so a
+   * second door that distributes permission sets (the identity-provider group
+   * mapping) judges them by it and never by a copy of its list.
+   *
+   * **OPTIONAL, and absence is a defined state, not a bug.** Callers
+   * feature-detect (`typeof svc.organizationBoundaryFailure === 'function'`)
+   * and fail CLOSED when it is absent: no set is shown to be inside, so nothing
+   * that depends on the answer is saved or granted.
+   */
+  organizationBoundaryFailure?(setName: string): Promise<string | null>;
 }

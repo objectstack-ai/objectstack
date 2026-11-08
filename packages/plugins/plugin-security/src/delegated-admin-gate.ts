@@ -543,6 +543,55 @@ function mayName(t: DelegatedTarget, side: 'next' | 'prev', column: string): boo
   return t.reads.has(column);
 }
 
+/**
+ * [ADR-0090 D12, amended 2026-10-17] Is permission set `setName` inside the
+ * organization boundary? `null` when it is; otherwise the reason, naming the
+ * set and the condition it fails:
+ *
+ * - by name — {@link ORGANIZATION_BOUNDARY_DENYLIST};
+ * - (a) its `objects['*']` entry carries `viewAllRecords` or `modifyAllRecords`;
+ * - (b) it carries an `adminScope`;
+ * - (c) a name in its `systemPermissions` is not a capability declared
+ *   `scope: 'org'` in the security catalog (a name no declaration carries is
+ *   not an organization capability).
+ *
+ * A set the catalog does not hold cannot be shown inside, and is not.
+ *
+ * Exported so a second save door that distributes permission sets judges them by
+ * THIS predicate and never by a copy of its list: plugin-auth's identity-provider
+ * group mapping refuses, at save, any set this answers a reason for.
+ */
+export async function organizationBoundaryFailure(
+  catalog: SecurityCatalogReader | undefined,
+  setName: string,
+): Promise<string | null> {
+  if (ORGANIZATION_BOUNDARY_DENYLIST.has(setName)) {
+    return `permission set '${setName}', which is outside the organization boundary by name (platform and organization administration and the agent ceilings are never assigned by an organization administrator)`;
+  }
+  const entry = catalog ? await catalog.resolve('permission', setName) : undefined;
+  if (!catalog || !entry) {
+    return `permission set '${setName}', which is not in the security catalog, so it cannot be shown to be inside the organization boundary`;
+  }
+  const definition: any = entry.definition;
+  const wildcard = (parseMaybeJson(definition.objects) ?? {})?.['*'];
+  for (const bit of ['viewAllRecords', 'modifyAllRecords'] as const) {
+    if (wildcard?.[bit] === true) {
+      return `permission set '${setName}', which fails condition (a) of the organization boundary: its objects['*'] entry carries the superuser bit '${bit}'`;
+    }
+  }
+  if (parseMaybeJson(definition.adminScope ?? definition.admin_scope)) {
+    return `permission set '${setName}', which fails condition (b) of the organization boundary: it carries an adminScope`;
+  }
+  const capabilities = parseMaybeJson(definition.systemPermissions);
+  for (const capability of Array.isArray(capabilities) ? capabilities : []) {
+    const declared = await catalog.resolve('capability', String(capability));
+    if (declared?.definition.scope !== 'org') {
+      return `permission set '${setName}', which fails condition (c) of the organization boundary: its capability '${String(capability)}' is ${declared ? "not declared scope 'org'" : "declared nowhere, so it is not an organization capability"}`;
+    }
+  }
+  return null;
+}
+
 export class DelegatedAdminGate {
   constructor(private readonly deps: DelegatedAdminGateDeps) {}
 
@@ -1118,47 +1167,9 @@ export class DelegatedAdminGate {
     return [...new Set(listed)];
   }
 
-  /**
-   * [ADR-0090 D12, amended 2026-10-17] Is permission set `setName` inside the
-   * organization boundary? `null` when it is; otherwise the reason, naming the
-   * set and the condition it fails:
-   *
-   * - by name — {@link ORGANIZATION_BOUNDARY_DENYLIST};
-   * - (a) its `objects['*']` entry carries `viewAllRecords` or `modifyAllRecords`;
-   * - (b) it carries an `adminScope`;
-   * - (c) a name in its `systemPermissions` is not a capability declared
-   *   `scope: 'org'` in the security catalog (a name no declaration carries is
-   *   not an organization capability).
-   *
-   * A set the catalog does not hold cannot be shown inside, and is not.
-   */
-  private async organizationBoundaryFailure(setName: string): Promise<string | null> {
-    if (ORGANIZATION_BOUNDARY_DENYLIST.has(setName)) {
-      return `permission set '${setName}', which is outside the organization boundary by name (platform and organization administration and the agent ceilings are never assigned by an organization administrator)`;
-    }
-    const catalog = this.catalog();
-    const entry = catalog ? await catalog.resolve('permission', setName) : undefined;
-    if (!catalog || !entry) {
-      return `permission set '${setName}', which is not in the security catalog, so it cannot be shown to be inside the organization boundary`;
-    }
-    const definition: any = entry.definition;
-    const wildcard = (parseMaybeJson(definition.objects) ?? {})?.['*'];
-    for (const bit of ['viewAllRecords', 'modifyAllRecords'] as const) {
-      if (wildcard?.[bit] === true) {
-        return `permission set '${setName}', which fails condition (a) of the organization boundary: its objects['*'] entry carries the superuser bit '${bit}'`;
-      }
-    }
-    if (parseMaybeJson(definition.adminScope ?? definition.admin_scope)) {
-      return `permission set '${setName}', which fails condition (b) of the organization boundary: it carries an adminScope`;
-    }
-    const capabilities = parseMaybeJson(definition.systemPermissions);
-    for (const capability of Array.isArray(capabilities) ? capabilities : []) {
-      const declared = await catalog.resolve('capability', String(capability));
-      if (declared?.definition.scope !== 'org') {
-        return `permission set '${setName}', which fails condition (c) of the organization boundary: its capability '${String(capability)}' is ${declared ? "not declared scope 'org'" : "declared nowhere, so it is not an organization capability"}`;
-      }
-    }
-    return null;
+  /** [ADR-0090 D12] {@link organizationBoundaryFailure}, against this gate's catalog. */
+  private organizationBoundaryFailure(setName: string): Promise<string | null> {
+    return organizationBoundaryFailure(this.catalog(), setName);
   }
 
   /** Is business unit `id` a unit of `organizationId`? Fail-closed on an unreadable unit. */

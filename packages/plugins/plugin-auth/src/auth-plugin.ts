@@ -822,6 +822,21 @@ export class AuthPlugin implements Plugin {
       }
     };
 
+    // [ADR-0090 D12] Lazy handle to the `security` service's organization
+    // boundary predicate, for the identity-provider group mapping (its save
+    // door and the SCIM group projection). Feature-detected: a security
+    // service without the member, or none at all, answers `undefined`, and
+    // both callers then fail closed.
+    authConfig.organizationBoundary = async () => {
+      try {
+        const svc = ctx.getService<{ organizationBoundaryFailure?: (setName: string) => Promise<string | null> }>('security');
+        const judge = svc?.organizationBoundaryFailure;
+        return typeof judge === 'function' ? { organizationBoundaryFailure: (setName: string) => judge.call(svc, setName) } : undefined;
+      } catch {
+        return undefined;
+      }
+    };
+
     // [#25495] A new organization takes its creator's default currency
     // (`localization.currency`), derived from their stored language or the
     // creating request's `Accept-Language`; nothing derivable ⇒ nothing
@@ -4201,6 +4216,39 @@ export class AuthPlugin implements Plugin {
           return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
         }
       });
+
+      // [ADR-0134 D4, filled for permission sets] The identity-provider group
+      // mapping door: which ordinary permission set a SCIM connection's group
+      // grants. The same gate as the credential door above, then the save
+      // refuses any set outside the organization boundary (judged by the
+      // `security` service), so an IdP group never confers administrator
+      // standing. See `idp-group-mapping-admin.ts`.
+      const groupMappingDeps = (actor: PlatformAdminActor): import('./idp-group-mapping-admin.js').IdpGroupMappingAdminDeps => ({
+        getDataEngine: () => this.authManager!.getDataEngine(),
+        isScimEnabled: () => this.authManager!.isScimWired(),
+        boundary: () => this.authManager!.organizationBoundaryJudge(),
+        reconcile: (domain) => this.authManager!.reconcileScimProjectionDomain(domain),
+        attributed: (fn) => runAttributedToUser(actor, fn),
+        logger: { warn: (m) => ctx.logger.warn(m), error: (m) => ctx.logger.error(m) },
+      });
+      for (const [path, runner] of [
+        ['/admin/scim/set-group-mapping', 'runSetIdpGroupMapping'],
+        ['/admin/scim/delete-group-mapping', 'runDeleteIdpGroupMapping'],
+      ] as const) {
+        rawApp.post(`${basePath}${path}`, async (c: any) => {
+          try {
+            const actor = await gateAdmin(c);
+            if (actor instanceof Response) return actor;
+            const door = await import('./idp-group-mapping-admin.js');
+            const { status, body } = await door[runner](groupMappingDeps(actor), actor, c.req.raw);
+            return c.json(body, status as any);
+          } catch (error) {
+            const err = error instanceof Error ? error : new Error(String(error));
+            ctx.logger.error(`[AuthPlugin] ${path.slice(1)} failed`, err);
+            return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+          }
+        });
+      }
     }
 
     // ────────────────────────────────────────────────────────────────────

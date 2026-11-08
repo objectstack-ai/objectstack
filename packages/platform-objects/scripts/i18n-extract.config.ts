@@ -145,6 +145,7 @@ import {
   SysScimProjectionGrant,
   SysScimSubject,
   SysScimUser,
+  SysIdpGroupMapping,
 } from '../src/identity/index.js';
 
 // ── Security ──────────────────────────────────────────────────────────────
@@ -310,6 +311,7 @@ const config: ObjectStackDefinition = defineStack({
     SysScimProjectionGrant,
     SysScimSubject,
     SysScimUser,
+    SysIdpGroupMapping,
 
     // Security: RBAC moved to @objectstack/plugin-security, sharing to
     // @objectstack/plugin-sharing (ADR-0029 K2 / D8).

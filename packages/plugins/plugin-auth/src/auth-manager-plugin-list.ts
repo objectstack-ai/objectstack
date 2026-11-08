@@ -797,6 +797,7 @@ export async function buildPluginList(this: PluginListHost): Promise<any[]> {
       const { verifyScimBearerToken, recordScimRequestConnection } = await import(
         './scim-connection-service.js'
       );
+      const { createScimGroupProjection } = await import('./scim-group-projection.js');
       const secret = this.resolveAuthSecret();
       return scim({
         connections: [],
@@ -835,6 +836,15 @@ export async function buildPluginList(this: PluginListHost): Promise<any[]> {
         identity: {
           reconcileUser: (state, context) => this.reconcileScimUserLifecycle(state, context),
         },
+        // [ADR-0134 D4, filled for permission sets] A pushed group grants the
+        // permission sets its `sys_idp_group_mapping` rows name, inside the
+        // SCIM transaction; an unmapped group grants nothing, and no mapping
+        // can name an administrator set. See `scim-group-projection.ts`.
+        projection: createScimGroupProjection({
+          getEngine: () => this.getDataEngine(),
+          boundary: async () => (await this.config.organizationBoundary?.().catch(() => undefined)) ?? undefined,
+          warn: (message) => this.config.logger?.warn?.(message),
+        }),
       });
     });
   }
