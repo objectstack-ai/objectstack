@@ -3950,8 +3950,10 @@ export class SchemaRegistry {
    * object's contributor list (an `extend` or overlay layer of another package
    * or a tenant sits in it and is put back unchanged), a namespace's owners,
    * an item slot (the package record included), this package's picklist
-   * extension of one list, and the security catalog and default record page
-   * claims the package door records. Nothing the run does not write is
+   * extension of one list, the security catalog and default record page
+   * claims the package door records, each app's navigation contributions, and
+   * every entry outside the registry a caller records through
+   * {@link recordRestoreOnRefusal}. Nothing the run does not write is
    * recorded or put back. After a restore every merged object is
    * re-resolved, since a fold computed during the run may have read an entry
    * the restore put back.
@@ -3960,7 +3962,9 @@ export class SchemaRegistry {
    * {@link unregisterObject} and the overlay removals are never journaled.
    * Synchronous by contract: `register` must not return a promise, so no
    * other caller's write can land between the run's writes and its restore.
-   * A nested call joins the run that is already open.
+   * A nested call joins the run that is already open: the engine's `manifest`
+   * service registers every package of one artifact (and its residual) in ONE
+   * run, so a refusal of any of them puts back all of them.
    */
   restoringOnRefusal<T>(register: () => T): T {
     if (this.restorePoint) return register();
@@ -3979,6 +3983,31 @@ export class SchemaRegistry {
     } finally {
       this.restorePoint = undefined;
     }
+  }
+
+  /**
+   * Record an entry that lives OUTSIDE this registry — an engine map a package
+   * body writes beside the registry (its manifest, its datasource definitions)
+   * — before the open {@link restoringOnRefusal} run's first write to it, so a
+   * refusal later in the same run puts it back with the registry's own
+   * entries. `capture` reads the entry as it is now and returns how to put it
+   * back; it is called once per `key` per run. Outside a run it records
+   * nothing, as the registry's own entries are not recorded either.
+   */
+  recordRestoreOnRefusal(key: string, capture: () => () => void): void {
+    this.restorePoint?.note(`outside\u0000${key}`, capture);
+  }
+
+  /** Record one app's list of navigation contributions before its first write. */
+  private noteAppNavContributions(app: string): void {
+    this.restorePoint?.note(`navContributions\u0000${app}`, () => {
+      const saved = this.appNavContributions.get(app);
+      const copy = saved ? [...saved] : undefined;
+      return () => {
+        if (copy) this.appNavContributions.set(app, copy);
+        else this.appNavContributions.delete(app);
+      };
+    });
   }
 
   /** Record an object's contributor list (and each contributor's mutable slots) before its first write. */
@@ -9094,6 +9123,7 @@ export class SchemaRegistry {
     packageId?: string,
   ): void {
     if (!contribution || !contribution.app) return;
+    this.noteAppNavContributions(contribution.app);
     const list = this.appNavContributions.get(contribution.app) ?? [];
     list.push({
       packageId,
@@ -9141,6 +9171,10 @@ export class SchemaRegistry {
       });
       incoming.set(contribution.app, list);
     }
+    for (const [app, list] of this.appNavContributions) {
+      if (list.some((c) => c.packageId === packageId)) this.noteAppNavContributions(app);
+    }
+    for (const app of incoming.keys()) this.noteAppNavContributions(app);
     for (const [app, list] of [...this.appNavContributions]) {
       const at = list.findIndex((c) => c.packageId === packageId);
       if (at === -1) continue;

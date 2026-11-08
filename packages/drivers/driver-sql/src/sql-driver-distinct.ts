@@ -44,8 +44,10 @@ export interface DistinctHost {
   coercionKey: SqlDriver['coercionKey'];
   distinctBackendFault: SqlDriver['distinctBackendFault'];
   getBuilder: SqlDriver['getBuilder'];
+  readonly isMssql: SqlDriver['isMssql'];
   readonly isOracle: SqlDriver['isOracle'];
   presentReadValue: SqlDriver['presentReadValue'];
+  primeMssqlGuidColumns: SqlDriver['primeMssqlGuidColumns'];
   primeOracleRawUuidColumns: SqlDriver['primeOracleRawUuidColumns'];
   readPresentationKind: SqlDriver['readPresentationKind'];
   remoteColumn: SqlDriver['remoteColumn'];
@@ -54,7 +56,9 @@ export interface DistinctHost {
 /** The bodies of the "Distinct" section of `SqlDriver`: a stateless facet, called by the class's stubs. */
 export class DistinctFacet {
   /** The body of `SqlDriver#distinct`; the method's docblock there is its contract. */
-  static async distinct(this: Pick<DistinctHost, 'applyFilters' | 'applyTenantScope' | 'coercionKey' | 'distinctBackendFault' | 'getBuilder' | 'isOracle' | 'presentReadValue' | 'primeOracleRawUuidColumns' | 'readPresentationKind' | 'remoteColumn'>, object: string, field: string, filters?: FilterCondition, options?: DriverOptions): Promise<any[]> {
+  static async distinct(this: Pick<DistinctHost, 'applyFilters' | 'applyTenantScope' | 'coercionKey' | 'distinctBackendFault' | 'getBuilder' | 'isMssql' | 'isOracle' | 'presentReadValue' | 'primeMssqlGuidColumns' | 'primeOracleRawUuidColumns' | 'readPresentationKind' | 'remoteColumn'>, object: string, field: string, filters?: FilterCondition, options?: DriverOptions): Promise<any[]> {
+    // [#31395] SQL Server: which columns are GUIDs, before a text operator compiles.
+    if (this.isMssql) await this.primeMssqlGuidColumns(object, filters);
     // [#31390] On Oracle a federated object's RAW(16) uuid columns are read from
     // the remote catalog before a comparand or a written value is bound.
     if (this.isOracle) await this.primeOracleRawUuidColumns(object);

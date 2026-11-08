@@ -189,6 +189,31 @@ function packageOf(prefix: string) {
   };
 }
 
+/**
+ * [#31514] A package that ships one agent and no object, the shape a package
+ * contributing only AI metadata has: the agent lives in the registry the
+ * protocol reads, and on a kernel with an `environmentId` the `metadata`
+ * service holds no copy of it.
+ */
+function agentPackageOf(prefix: string) {
+  const agent = `${prefix}_helper`;
+  return {
+    id: `com.qa.${prefix}`,
+    agent,
+    instructions: `You help with what the ${prefix} package ships.`,
+    artifact() {
+      return {
+        id: `com.qa.${prefix}`,
+        name: `${prefix} package`,
+        version: '1.0.0',
+        type: 'app',
+        objects: [],
+        agents: [{ name: agent, label: 'QA Helper', role: 'assistant', instructions: this.instructions }],
+      };
+    },
+  };
+}
+
 /** What a tool call answered: `isError`, and the JSON the tool returned (or its bare error text). */
 interface ToolAnswer {
   isError: boolean;
@@ -230,6 +255,8 @@ interface Booted {
   readRecord(object: string, id: string): Promise<any>;
   /** [#25245] What `resources/read` on `uri` answered, parsed. */
   readResource(uri: string): Promise<any>;
+  /** [#31514] One JSON-RPC frame on the stdio session (`prompts/list`, `prompts/get`). */
+  rpc(method: string, params?: unknown): Promise<any>;
 }
 
 /**
@@ -240,7 +267,7 @@ interface Booted {
 async function boot(
   environmentId: string | undefined,
   when: 'boot' | 'install',
-  pkg: ReturnType<typeof packageOf>,
+  pkg: { artifact(): unknown },
   beforeStart?: (kernel: ObjectKernel, engine: ObjectQL) => Promise<void>,
 ): Promise<Booted> {
   const kernel = new ObjectKernel({ logger: { level: 'silent' }, gracefulShutdown: false });
@@ -355,6 +382,7 @@ async function boot(
       return readResource(`objectstack://objects/${object}/records/${id}`);
     },
     readResource,
+    rpc: session.rpc,
   };
 }
 
@@ -571,4 +599,52 @@ for (const { shape, environmentId } of SHAPES) {
       });
     }
   });
+}
+
+// [#31514] `agent_prompt` reads an agent through the protocol, the read
+// `GET /api/v1/meta/agent/NAME` serves, and is advertised from the protocol's
+// listing. Before, both read the `metadata` service, so on a kernel whose
+// metadata service holds no copy of a package's agent the prompt was not
+// listed and a get could not serve it, while `/meta/agent/NAME` served it.
+for (const { shape, environmentId } of SHAPES) {
+  for (const { label, when } of REGISTRATIONS) {
+    describe(`[#31514] the MCP stdio door and a package's agent — ${shape}, ${label}`, () => {
+      const pkg = agentPackageOf('qa_agentpkg');
+      let k: Booted | undefined;
+
+      beforeAll(async () => {
+        k = await boot(environmentId, when, pkg);
+      }, 60_000);
+      afterAll(async () => {
+        vi.restoreAllMocks();
+        await shutdown(k);
+      }, 60_000);
+
+      it('prompts/list advertises agent_prompt, naming the package agent, on a boot whose only agent the package ships', async () => {
+        const frame = await k!.rpc('prompts/list', {});
+        expect(frame.error).toBeUndefined();
+        const prompt = frame.result.prompts.find((p: { name: string }) => p.name === 'agent_prompt');
+        expect(prompt).toBeDefined();
+        const argument = prompt.arguments.find((a: { name: string }) => a.name === 'agentName');
+        expect(argument.description).toContain(`"${pkg.agent}"`);
+      });
+
+      it('prompts/get agent_prompt serves the instructions GET /meta/agent/NAME serves, and a miss keeps its answer', async () => {
+        const meta = (await k!.kernel.getService<{ getMetaItem(r: { type: string; name: string }): Promise<any> }>('protocol')
+          .getMetaItem({ type: 'agent', name: pkg.agent })) as { item?: { instructions?: string } };
+        expect(meta.item?.instructions).toBe(pkg.instructions);
+
+        const served = await k!.rpc('prompts/get', { name: 'agent_prompt', arguments: { agentName: pkg.agent } });
+        expect(served.error).toBeUndefined();
+        expect(served.result.messages).toEqual([
+          { role: 'assistant', content: { type: 'text', text: meta.item!.instructions } },
+        ]);
+
+        const miss = await k!.rpc('prompts/get', { name: 'agent_prompt', arguments: { agentName: 'qa_agentpkg_nowhere' } });
+        expect(miss.result.messages).toEqual([
+          { role: 'user', content: { type: 'text', text: 'Error: Agent "qa_agentpkg_nowhere" not found' } },
+        ]);
+      });
+    });
+  }
 }

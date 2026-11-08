@@ -30,6 +30,9 @@ import {
 } from './meta-item-read-gate.js';
 import { unknownQueryParamMessage } from './query-allowlist.js';
 import { repeatedQueryParamMessage } from './query-multiplicity.js';
+// Pays `@objectstack/objectql`'s first load at collection, never inside a clocked case
+// (the source under test imports it lazily; `check:test-source-alias`).
+import '@objectstack/objectql';
 import { RestServer } from './rest-server.js';
 
 const DOORS = Object.keys(META_QUERY_ARITY_DOORS) as MetaQueryArityDoor[];
@@ -133,7 +136,7 @@ describe('RestServer refuses exactly the names the shared list declares, door by
             .toMatchObject({ packageId: 'com.acme' });
         expect((await drive('book-tree', { package: 'com.acme' })).protocol.getMetaItems.mock.calls[0][0])
             .toMatchObject({ packageId: 'com.acme' });
-        expect((await drive('drafts', { packageId: 'com.acme', type: ['view'] })).protocol.listDrafts)
+        expect((await drive('drafts', { package: 'com.acme', type: ['view'] })).protocol.listDrafts)
             .toHaveBeenCalledWith({ packageId: 'com.acme', type: 'view' });
         // The state read reaches its engine seam with one `from`; this RestServer
         // wires no engine, so the honest answer is the not-found it always gave.
@@ -181,8 +184,8 @@ describe('a BRACKETED `package` key on the two arity doors that read `package`',
             .toBe(repeatedQueryParamMessage('package', 2));
     });
 
-    it('is judged only where `package` is read: not on `_drafts`, `state`, or a key that merely starts alike', () => {
-        expect(metaQueryArityRefusal('drafts', { 'package[]': 'com.acme' })).toBeUndefined();
+    it('is judged only where `package` is read: not on `state`, or a key that merely starts alike', () => {
+        // `_drafts` reads `package` too since #31490; its bracketed sentence is pinned below.
         expect(metaQueryArityRefusal('state', { 'package[]': 'com.acme' })).toBeUndefined();
         expect(metaQueryArityRefusal('list', { 'packages[]': 'com.acme', packageId: 'x' })).toBeUndefined();
     });
@@ -208,26 +211,27 @@ describe('a BRACKETED `package` key on the two arity doors that read `package`',
 });
 
 /**
- * The same class on `_drafts`' own two filters. `?packageId[]=ID`,
- * `?packageId[0]=ID`, `?type[]=TYPE` and `?type[0]=TYPE` reached the door under
+ * The same class on `_drafts`' own two filters. `?package[]=ID` (`?packageId[]=ID`
+ * before #31490 retired that spelling), `?package[0]=ID`, `?type[]=TYPE` and
+ * `?type[0]=TYPE` reached the door under
  * the key as spelled, so `listDrafts` was handed no package and no type, and a
  * caller who named one package's (or one type's) drafts got every draft it may
  * read. Refused at the door's arity step, before `listDrafts`, in the same
  * sentence frame as the list's bracketed `package`.
  */
-const bracketedDraftsMessage = (key: string, param: 'packageId' | 'type'): string => (param === 'packageId'
-    ? `Query parameter '${key}' names no package; the 'packageId' filter takes exactly one package id, `
-        + `spelled ?packageId=ID. The list was not served: a bracketed 'packageId' key is not a filter. `
+const bracketedDraftsMessage = (key: string, param: 'package' | 'type'): string => (param === 'package'
+    ? `Query parameter '${key}' names no package; the 'package' filter takes exactly one package id, `
+        + `spelled ?package=ID. The list was not served: a bracketed 'package' key is not a filter. `
         + `Name one package, or leave the parameter out to list the drafts of every package.`
     : `Query parameter '${key}' names no metadata type; the 'type' filter takes exactly one metadata type, `
         + `spelled ?type=TYPE. The list was not served: a bracketed 'type' key is not a filter. `
         + `Name one metadata type, or leave the parameter out to list the drafts of every type.`);
 const DRAFTS_KEYS = [
-    ['packageId[]', 'packageId'], ['packageId[0]', 'packageId'], ['packageId[id]', 'packageId'],
+    ['package[]', 'package'], ['package[0]', 'package'], ['package[id]', 'package'],
     ['type[]', 'type'], ['type[0]', 'type'], ['type[name]', 'type'],
 ] as const;
 
-describe('a BRACKETED `packageId` or `type` key on `_drafts`', () => {
+describe('a BRACKETED `package` or `type` key on `_drafts`', () => {
     it.each(DRAFTS_KEYS)('`%s` is refused as data, naming the key', (key, param) => {
         expect(metaQueryArityRefusal('drafts', { [key]: 'x' })).toEqual({
             status: 400,
@@ -239,15 +243,17 @@ describe('a BRACKETED `packageId` or `type` key on `_drafts`', () => {
         expect(metaQueryArityRefusal('drafts', { [param]: 'x', [key]: 'y' })?.rule).toBe('bracketed-parameter');
     });
 
-    it('a repeated plain `packageId` still answers the multiplicity sentence first', () => {
-        expect(metaQueryArityRefusal('drafts', { packageId: ['a', 'b'], 'type[]': 'view' })?.message)
-            .toBe(repeatedQueryParamMessage('packageId', 2));
+    it('a repeated plain `package` still answers the multiplicity sentence first', () => {
+        expect(metaQueryArityRefusal('drafts', { package: ['a', 'b'], 'type[]': 'view' })?.message)
+            .toBe(repeatedQueryParamMessage('package', 2));
     });
 
     it('is judged only on `_drafts`, and not for a key that merely starts alike', () => {
-        expect(metaQueryArityRefusal('list', { 'packageId[]': 'x', 'type[]': 'view' })).toBeUndefined();
+        expect(metaQueryArityRefusal('list', { 'type[]': 'view' })).toBeUndefined();
         expect(metaQueryArityRefusal('book-tree', { 'type[]': 'view' })).toBeUndefined();
-        expect(metaQueryArityRefusal('drafts', { 'types[]': 'view', 'packageIds[]': 'x', 'package[]': 'x' })).toBeUndefined();
+        // The arity step judges only the door's own filters; a retired or unknown
+        // name (`packageId[]`) is the recognition step's (`metaDraftsQueryRefusal`).
+        expect(metaQueryArityRefusal('drafts', { 'types[]': 'view', 'packages[]': 'x', 'packageId[]': 'x' })).toBeUndefined();
     });
 
     it.each(DRAFTS_KEYS.filter(([key]) => key.endsWith('[]') || key.endsWith('[0]')))(
@@ -261,7 +267,7 @@ describe('a BRACKETED `packageId` or `type` key on `_drafts`', () => {
     );
 
     it('RestServer: the plain spellings still narrow, and absent ones read every draft (controls)', async () => {
-        expect((await drive('drafts', { packageId: 'com.acme', type: 'view' })).protocol.listDrafts)
+        expect((await drive('drafts', { package: 'com.acme', type: 'view' })).protocol.listDrafts)
             .toHaveBeenCalledWith({ packageId: 'com.acme', type: 'view' });
         expect((await drive('drafts', {})).protocol.listDrafts)
             .toHaveBeenCalledWith({ packageId: undefined, type: undefined });

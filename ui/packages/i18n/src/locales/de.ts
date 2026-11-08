@@ -432,6 +432,10 @@ const de = {
       available: 'Verfügbar',
       all: 'Alle Währungen (ISO 4217)',
     },
+    currencyHome: {
+      convertedAt: 'Umgerechnet zum Kurs {{rate}} vom {{date}}',
+      homeCurrency: 'In der Hauswährung (Kurs 1)',
+    },
     boolean: {
       offBadge: "{{label}} — Aus",
       completed: "Abgeschlossen",

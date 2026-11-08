@@ -61,6 +61,16 @@ export function isJsonStoredShape(shape: ValueShapeFieldDef | undefined): boolea
   return STRUCTURED_JSON_TYPES.has(shape.type) || isMultiValueField(shape);
 }
 
+/**
+ * [#31394] Whether `@objectstack/core`'s `jsonMembershipPredicate` has a
+ * construct for `dialect`. SQL Server is named in this package for the
+ * text-match arms and has none (`driver-sql` refuses it there too), so it is
+ * handed on as `'unknown'` and refused exactly as it was before it was named.
+ */
+export function hasJsonMembershipSql(dialect: AnalyticsSqlDialect): dialect is 'sqlite' | 'postgres' | 'mysql' {
+  return dialect === 'sqlite' || dialect === 'postgres' || dialect === 'mysql';
+}
+
 /** One membership predicate to compile. */
 export interface ContainsMembershipRequest {
   /** The dialect that will run the statement. */
@@ -86,7 +96,8 @@ export interface ContainsMembershipRequest {
  * the caller's wrapper, exactly as it is for the text-match family.
  */
 export function containsMembershipSql(req: ContainsMembershipRequest): string | null {
-  const positive = jsonMembershipPredicate(req.dialect, { column: () => req.column, value: (v) => req.bind(v) }, req.value);
+  const dialect = hasJsonMembershipSql(req.dialect) ? req.dialect : 'unknown';
+  const positive = jsonMembershipPredicate(dialect, { column: () => req.column, value: (v) => req.bind(v) }, req.value);
   if (positive === null) return null;
   return req.negate ? `NOT ${positive}` : positive;
 }

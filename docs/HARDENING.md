@@ -144,23 +144,30 @@ too (`trustProxy` option); `objectstack serve` does that for you.
 The buckets live in the kernel `cache` service, resolved when the first
 request is metered, so a cache plugin that registers late is still found.
 Under `objectstack serve` the `cache` service is always on and is served by
-`@objectstack/service-cache`, whose only working adapter is **in-memory** —
-per process. On one node that is exact. On N nodes each counts on its own,
-so the effective limit is the budget **multiplied by N**, and nothing about
-the deployment looks wrong.
+`@objectstack/service-cache`. On one node it is **in-memory** — per process,
+and exact. On N nodes a per-process cache would make each node count on its
+own, so the effective limit would be the budget **multiplied by N** with
+nothing about the deployment looking wrong.
 
-For one limit across nodes, register a `cache` service backed by a store
-every node shares (Redis, Memcached, …) that implements the
+So `@objectstack/service-cache` picks the store from the deployment's
+declaration. Declare multi-node (`OS_EXPECT_MULTI_NODE=true` or
+`OS_CLUSTER_REPLICAS` > 1) and run the `redis` cluster driver
+(`OS_CLUSTER_DRIVER=redis` + `OS_REDIS_URL`), and the cache is Redis — one
+store for every node, on a connection duplicated from the driver's. Boot logs
+`registered redis cache adapter — one cache for every node on this Redis`.
+Declared multi-node over the redis driver, a per-process cache is refused:
+`adapter: 'memory'` stops the boot. Declared multi-node over any other driver,
+the cache stays per-process and boot warns that limits multiply by the
+replica count; to share it there, register a `cache` service backed by a
+store every node reaches that implements the
 [`ICacheService` contract](../content/docs/kernel/contracts/cache-service.mdx)
 — see [Registering Services](../content/docs/kernel/services.mdx#registering-services).
-`CacheServicePlugin({ adapter: 'redis' })` is not that: its Redis adapter is a
-skeleton and the plugin refuses to start with it. Boot logs which store the
-limiter bound to: `inbound rate-limit buckets bound to the kernel cache
-service — enforced against ONE store across nodes iff the cache is shared`,
-or, with no `cache` service at all, a warning that it fell back to a
-per-process store. Counting is read-modify-write, so two nodes can both admit
-the last request at a window boundary — a slight over-admit, never a
-per-node limit.
+The limiter logs which store it bound to: `inbound rate-limit buckets bound
+to the kernel cache service — enforced against ONE store across nodes iff the
+cache is shared`, or, with no `cache` service at all, a warning that it fell
+back to a per-process store. Counting is read-modify-write, so two nodes can
+both admit the last request at a window boundary — a slight over-admit, never
+a per-node limit.
 
 ### Per-class budgets
 

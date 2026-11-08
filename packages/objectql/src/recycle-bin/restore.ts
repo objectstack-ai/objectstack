@@ -113,6 +113,12 @@ export interface RecycleBinRestoreHost {
 export interface RecycleBinRestoreOptions {
   /** The caller; it scopes the entry to its organization and is authorized for `restore`. */
   context?: ExecutionContext;
+  /**
+   * The object the caller addresses the entry under (the REST door's
+   * `/data/:object/recycle-bin/:entryId`). When given, an entry of another
+   * object is not found: the restore answers `null` and dispatches nothing.
+   */
+  object?: string;
 }
 
 /** What `ObjectQL.restore` answers for an entry it wrote back. */
@@ -244,7 +250,8 @@ function uniqueValueTakenRefusal(entryId: string, row: { object: string; id: str
 }
 
 /** A stored snapshot, read off a driver that may hand JSON back as text; `undefined` when it does not parse. */
-function parseSnapshot(stored: unknown) {
+/** The entry's stored snapshot, parsed, or `undefined` when it does not parse (`list.ts` serves it as this answers it). */
+export function parseSnapshot(stored: unknown) {
   let value = stored;
   if (typeof value === 'string') {
     try { value = JSON.parse(value); } catch { value = undefined; }
@@ -331,25 +338,44 @@ export async function assertCallerMayRestoreEntry(
   if (context?.isSystem === true) return;
   const caller = context?.userId;
   if (typeof caller === 'string' && caller !== '' && entry.deletedBy === caller) return;
+  const answer = await callerRecycleBinManagement.call(this, entry.object, context, 'restore of another caller\'s entry', entry.id);
+  if (answer !== 'manages') throw notOwnEntryRefusal(entry.id, entry.object, answer === 'unanswered');
+}
+
+/**
+ * [#30237, ADR-0148 D5] Whether the caller's effective permissions grant
+ * `manageRecycleBin` on `object`, folded by the spec's
+ * `objectPermissionGrants` over the map the registered resolver answers (the
+ * map `/me/permissions` serves). `'unanswered'` when no resolver is
+ * registered or it throws, which every caller refuses: fail closed. Asks
+ * nothing about the system; each caller answers the system first.
+ */
+export async function callerRecycleBinManagement(
+  this: Pick<RecycleBinRestoreHost, 'effectiveObjectPermissionsResolver' | 'logger'>,
+  object: string,
+  context: ExecutionContext | undefined,
+  act: string,
+  entryId?: string,
+): Promise<'manages' | 'not-granted' | 'unanswered'> {
   const resolver = this.effectiveObjectPermissionsResolver;
-  if (!resolver) throw notOwnEntryRefusal(entry.id, entry.object, true);
+  if (!resolver) return 'unanswered';
   let permissions: unknown;
   try {
     permissions = await resolver(context);
   } catch (error) {
-    this.logger.warn('[recycle-bin] the effective-permission resolution failed, so the restore of another caller\'s entry is refused (failed closed)', {
-      object: entry.object, entryId: entry.id, error,
+    this.logger.warn(`[recycle-bin] the effective-permission resolution failed, so the ${act} is refused (failed closed)`, {
+      object, ...(entryId !== undefined ? { entryId } : {}), error,
     });
-    throw notOwnEntryRefusal(entry.id, entry.object, true);
+    return 'unanswered';
   }
   const permission =
-    permissions !== null && typeof permissions === 'object' && Object.prototype.hasOwnProperty.call(permissions, entry.object)
-      ? (permissions as Record<string, unknown>)[entry.object]
+    permissions !== null && typeof permissions === 'object' && Object.prototype.hasOwnProperty.call(permissions, object)
+      ? (permissions as Record<string, unknown>)[object]
       : undefined;
   const manages =
     permission !== null && typeof permission === 'object' &&
     objectPermissionGrants(permission as EffectiveObjectPermission, RECYCLE_BIN_GRANT_KEYS.manage);
-  if (!manages) throw notOwnEntryRefusal(entry.id, entry.object, false);
+  return manages ? 'manages' : 'not-granted';
 }
 
 /**
@@ -381,6 +407,7 @@ export async function restoreRecycleBinEntry(
   )) ?? []) as Array<Record<string, unknown>>;
   const entry = found[0];
   if (entry?.id == null || typeof entry.object_name !== 'string' || entry.object_name === '') return null;
+  if (options?.object !== undefined && entry.object_name !== options.object) return null;
   const id = String(entry.id);
   const snapshot = readSnapshot(id, entry.snapshot);
   const opCtx: OperationContext = { object: entry.object_name, operation: 'restore', options: { context }, context };

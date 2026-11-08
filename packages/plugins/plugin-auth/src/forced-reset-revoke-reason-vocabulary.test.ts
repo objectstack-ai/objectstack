@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { SysApiKey, SysSession } from '@objectstack/platform-objects/identity';
 import { FORCED_RESET_REVOKE_REASON } from './forced-reset-revocation';
 import { MEMBERSHIP_ENDED_REVOKE_REASON } from './membership-ended-session';
+import { ADMINISTRATOR_SUSPENDED_REVOKE_REASON } from './api-key-restore-guard';
 import { INTERACTIVE_REVOKE_REASON } from './session-tombstone';
 import { managedExtensionEditableFields, managedExtensionFields } from './managed-extension-fields';
 
@@ -25,20 +26,30 @@ describe('sys_session.revoke_reason vocabulary', () => {
 });
 
 // `sys_api_key.revoked_reason` is a closed select of the reasons that decide
-// who may restore a key: the value the forced reset writes, and the value a
-// host writes when it revokes a departed member's keys. Each is the word
-// `sys_session.revoke_reason` carries for the same event. It is readonly and
-// declared ours but never generically editable: an owner who could clear it
-// could restore the key the reset or the removal closed.
+// who may restore a key: the value the forced reset writes, the value a host
+// writes when it revokes a departed member's keys, and the value the restore
+// guard stamps when a platform administrator revokes a key that is not theirs.
+// The first two are the word `sys_session.revoke_reason` carries for the same
+// event; a session is never restored, so it has no counterpart of the third.
+// It is readonly and declared ours but never generically editable: an owner
+// who could clear it could restore the key the reset, the removal or the
+// administrator closed.
 describe('sys_api_key.revoked_reason vocabulary', () => {
-  it('is a readonly select whose options are exactly the forced-reset and membership-ended values', () => {
+  it('is a readonly select whose options are exactly the forced-reset, membership-ended and administrator-suspended values', () => {
     const field = (SysApiKey.fields as any).revoked_reason;
     expect(field.type).toBe('select');
     expect(field.readonly).toBe(true);
     expect((field.options as Array<{ value: string }>).map((o) => o.value)).toEqual([
       FORCED_RESET_REVOKE_REASON,
       MEMBERSHIP_ENDED_REVOKE_REASON,
+      ADMINISTRATOR_SUSPENDED_REVOKE_REASON,
     ]);
+  });
+
+  it('names the administrator-suspended value, and who restores it, in the field description', () => {
+    expect(ADMINISTRATOR_SUSPENDED_REVOKE_REASON).toBe('administrator_suspended');
+    const description = String((SysApiKey.fields as any).revoked_reason.description);
+    expect(description).toMatch(/Suspended by an administrator: a platform administrator revoked a key that is not theirs, and only a platform administrator can restore it/);
   });
 
   it('reuses the session word for a membership ending, which sys_session.revoke_reason already names', () => {

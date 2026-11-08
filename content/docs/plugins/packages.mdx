@@ -229,9 +229,9 @@ All services implement contracts from `@objectstack/spec/contracts` and are kern
 
 ### @objectstack/service-cache
 
-**Cache Service** — In-memory caching behind the [`ICacheService` contract](/docs/kernel/contracts/cache-service).
+**Cache Service** — Caching behind the [`ICacheService` contract](/docs/kernel/contracts/cache-service), in memory on one node and on a shared Redis across replicas.
 
-- **Adapters**: Memory (the only working adapter). `RedisCacheAdapter` is a **skeleton** — every method throws `not yet implemented`, and `CacheServicePlugin({ adapter: 'redis' })` refuses to start. For a real distributed cache, register your own `ICacheService` via `ctx.registerService('cache', impl)`.
+- **Adapters**: Memory (the default) and Redis. A deployment that declares multi-node (`OS_EXPECT_MULTI_NODE=true` / `OS_CLUSTER_REPLICAS` > 1) over the `redis` cluster driver gets `RedisCacheAdapter` on the driver's Redis, so cache-backed limits hold across replicas; a per-process cache there refuses to boot. For any other store, register your own `ICacheService` via `ctx.registerService('cache', impl)`.
 - **Features**: `get` / `set` / `delete` / `has` / `clear` / `stats`, per-entry TTL, `maxSize` eviction, lookup & write metrics
 - **When to use**: Performance optimization, reduce database load
 - **README**: [View README](https://github.com/objectstack-ai/objectstack/blob/main/packages/services/service-cache/README.md)

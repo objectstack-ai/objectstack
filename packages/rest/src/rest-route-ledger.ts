@@ -389,6 +389,12 @@ export const REST_ROUTE_LEDGER: readonly RestRouteLedgerEntry[] = [
   { route: 'GET /api/v1/data/:object/export', family: 'data-actions', source: 'route-manager', disposition: 'sdk', client: 'data.export',
     note: 'file-stream response; the SDK returns the raw Response rather than a JSON envelope' },
 
+  // ── recycle bin (#30237, ADR-0148) ────────────────────────────────────────
+  { route: 'GET /api/v1/data/:object/recycle-bin', family: 'recycle-bin', source: 'route-manager', disposition: 'sdk', client: 'recycleBin.list' },
+  { route: 'DELETE /api/v1/data/:object/recycle-bin', family: 'recycle-bin', source: 'route-manager', disposition: 'sdk', client: 'recycleBin.empty' },
+  { route: 'POST /api/v1/data/:object/recycle-bin/:entryId/restore', family: 'recycle-bin', source: 'route-manager', disposition: 'sdk', client: 'recycleBin.restore' },
+  { route: 'DELETE /api/v1/data/:object/recycle-bin/:entryId', family: 'recycle-bin', source: 'route-manager', disposition: 'sdk', client: 'recycleBin.purge' },
+
   // ── search ────────────────────────────────────────────────────────────────
   // #13216 — the body's `pages` member (published-page hits) landed with the
   // command-palette page indexing; the note below describes it without the id

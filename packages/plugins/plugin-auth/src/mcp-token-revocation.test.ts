@@ -530,3 +530,85 @@ describe('a grant is revoked in its own organization only', () => {
     expect((await r.refresh(clientId, raced!.body.refresh_token)).status).toBe(400);
   }, 60_000);
 });
+
+describe('[objectstack-ai/cloud#3820, card 2] a disabled client\'s tokens are refused on their next call', () => {
+  /**
+   * The write `POST /auth/admin/oauth2/toggle-disabled` makes (`auth-plugin.ts`):
+   * the `disabled` column of the client's `sys_oauth_application` row, in the
+   * system context. The route's own gate and the `/mcp` door's 401 are pinned
+   * over HTTP in `@objectstack/dogfood` `authorized-client-withdraw.dogfood.test.ts`.
+   */
+  async function setDisabled(r: Awaited<ReturnType<typeof rig>>, clientId: string, disabled: boolean): Promise<void> {
+    const [app] = (await r.rowsAtRest('sys_oauth_application')).filter((row) => row.client_id === clientId);
+    expect(app, `the client ${clientId} has a row`).toBeDefined();
+    await (r.engine as any).update('sys_oauth_application', { id: app!.id, disabled }, SYS);
+  }
+
+  it('⭐ a token minted before the disable is refused; the provider refuses its refresh; enabling the client again serves the same grant', async () => {
+    const r = await rig();
+    const { clientId, refresh_token, access_token } = await r.connect();
+    expect(await r.manager.verifyMcpAccessToken(access_token), 'the control: the bearer verifies before the disable')
+      .toMatchObject({ clientId });
+
+    await setDisabled(r, clientId, true);
+
+    expect(await r.manager.verifyMcpAccessToken(access_token), 'the bearer minted before the disable is refused').toBeNull();
+    const refused = await r.refresh(clientId, refresh_token);
+    expect(refused, 'the provider refuses the disabled client a new token').toMatchObject({
+      status: 400, body: { error: 'invalid_client', error_description: 'client is disabled' },
+    });
+    // A pause, not an end: the grant itself is untouched.
+    expect(await r.rowsAtRest('sys_oauth_consent')).toHaveLength(1);
+    expect(await r.rowsAtRest('sys_oauth_refresh_token')).toHaveLength(1);
+
+    await setDisabled(r, clientId, false);
+
+    expect(await r.manager.verifyMcpAccessToken(access_token), 'enabled again, the same grant is served').toMatchObject({ clientId });
+    const renewed = await r.refresh(clientId, refresh_token);
+    expect(renewed.status, JSON.stringify(renewed.body)).toBe(200);
+    expect(await r.manager.verifyMcpAccessToken(renewed.body.access_token)).toMatchObject({ clientId });
+  }, 60_000);
+
+  it('a disabled `skip_consent` client is refused too: the client is read before the consent', async () => {
+    const r = await rig();
+    const clientId = await r.registerClient();
+    const [app] = (await r.rowsAtRest('sys_oauth_application')).filter((row) => row.client_id === clientId);
+    await (r.engine as any).update('sys_oauth_application', { id: app!.id, skip_consent: true }, SYS);
+    const { code } = await r.authorize(clientId, await r.signUp('ops@acme.example.com'));
+    const { access_token } = await r.exchange(clientId, code);
+    expect(await r.manager.verifyMcpAccessToken(access_token), 'the control').toMatchObject({ clientId });
+
+    await setDisabled(r, clientId, true);
+
+    expect(await r.manager.verifyMcpAccessToken(access_token)).toBeNull();
+  }, 60_000);
+
+  it('a token whose client row is gone is refused', async () => {
+    const r = await rig();
+    const { clientId, access_token } = await r.connect();
+    const [app] = (await r.rowsAtRest('sys_oauth_application')).filter((row) => row.client_id === clientId);
+
+    await (r.engine as any).delete('sys_oauth_application', { where: { id: app!.id }, ...SYS });
+
+    expect(await r.rowsAtRest('sys_oauth_application')).toEqual([]);
+    expect(await r.rowsAtRest('sys_oauth_consent'), 'the consent alone does not admit the token').toHaveLength(1);
+    expect(await r.manager.verifyMcpAccessToken(access_token)).toBeNull();
+  }, 60_000);
+
+  it('a store error in the client read refuses the bearer (fail closed)', async () => {
+    const r = await rig();
+    const { clientId, access_token } = await r.connect();
+    const failOnClient = (method: 'find' | 'findOne') => {
+      const original = (r.driver as any)[method].bind(r.driver);
+      return vi.spyOn(r.driver as any, method).mockImplementation(async (object: unknown, ...rest: unknown[]) => {
+        if (object === 'sys_oauth_application') throw new Error('client store unreachable');
+        return original(object, ...rest);
+      });
+    };
+    const failing = [failOnClient('find'), failOnClient('findOne')];
+
+    expect(await r.manager.verifyMcpAccessToken(access_token)).toBeNull();
+    for (const spy of failing) spy.mockRestore();
+    expect(await r.manager.verifyMcpAccessToken(access_token), 'the control: the store answers again').toMatchObject({ clientId });
+  }, 60_000);
+});

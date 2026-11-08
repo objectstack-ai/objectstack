@@ -1335,6 +1335,16 @@ export class SqlDriver implements IDataDriver {
    */
   protected oracleRawUuidFieldsByObject = new Map<string, ReadonlySet<string>>();
 
+  /**
+   * SQL Server (#31395): the REMOTE columns of a federated table that the
+   * remote catalog reports as `uniqueidentifier`, per object. Filled lazily by
+   * {@link primeMssqlGuidColumns} the first time a read compiles a text
+   * operator (`$contains` and its siblings, `$like` / `$ilike`) against the
+   * object; the filter compiler reads it to match such a column as its
+   * lower-case text. An object with no entry is matched as before.
+   */
+  protected mssqlGuidColumnsByObject = new Map<string, ReadonlySet<string>>();
+
   /** Deferred-DDL mode (#3917) — see {@link setDeferredDdl}. */
   protected deferredDdl = false;
 
@@ -1873,6 +1883,31 @@ export class SqlDriver implements IDataDriver {
     role: OracleUuidBindingRole,
   ): unknown {
     return FilterHelpersFacet.oracleUuidBinding.call(filterHelpersHost.of(this), object, field, value, role);
+  }
+
+  /**
+   * SQL Server (#31395): learn, once per object, which of a federated table's
+   * columns are `uniqueidentifier`, read from the remote catalog
+   * (`INFORMATION_SCHEMA.COLUMNS`), before a read compiles a text operator
+   * against it.
+   *
+   * Why the driver reads it rather than being told: a federated object
+   * declares a `uniqueidentifier` column as a `text` (or `lookup`) field, so
+   * nothing in the binding says the column is a GUID, and the comparand's shape
+   * is no evidence of the column's type. SQL Server renders a GUID as
+   * upper-case text while this driver reads one back lower-case
+   * (`lowerCaseGuids`), so a substring or pattern match must know which
+   * columns to match as their lower-case text, or a fragment copied from a
+   * read matches nothing.
+   *
+   * Asked only when `where` holds a text operator, for the object and for every
+   * composed `ReadableIds` leaf's object in it (their subqueries compile the
+   * same operators against their own tables). A failed catalog read records
+   * nothing, so the next read asks again; until then the columns are matched as
+   * before.
+   */
+  protected async primeMssqlGuidColumns(object: string, where: unknown): Promise<void> {
+    return FieldMappingFacet.primeMssqlGuidColumns.call(fieldMappingHost.of(this), object, where);
   }
 
   /**
@@ -7123,9 +7158,9 @@ export class SqlDriver implements IDataDriver {
     return FilterHelpersFacet.compileFilters.call(filterHelpersHost.of(this), builder, filters, options);
   }
 
-  private applyContainsLike(builder: any, method: string, field: string, value: unknown): void {
+  private applyContainsLike(builder: any, method: string, field: string, value: unknown, guidColumn = false): void {
     // [#29520 codemod] The body moved to `sql-driver-filter-helpers.ts`, its docblock with it (see `FilterHelpersHost`).
-    return FilterHelpersFacet.applyContainsLike.call(filterHelpersHost.of(this), builder, method, field, value);
+    return FilterHelpersFacet.applyContainsLike.call(filterHelpersHost.of(this), builder, method, field, value, guidColumn);
   }
 
   /**
@@ -7267,13 +7302,14 @@ export class SqlDriver implements IDataDriver {
     shape: TextMatchShape,
     negate = false,
     fold = false,
+    guidColumn = false,
   ): void {
     // [#25521 cut 16] The body moved to `sql-driver-predicate-emitters.ts` (see `PredicateEmitterHost`).
     const readDialectName = () => this.dialectName;
     const host: ThisParameterType<typeof applyLike> = {
       get dialectName() { return readDialectName(); },
     };
-    return applyLike.call(host, builder, method, field, value, shape, negate, fold);
+    return applyLike.call(host, builder, method, field, value, shape, negate, fold, guidColumn);
   }
 
   /**
@@ -7292,13 +7328,14 @@ export class SqlDriver implements IDataDriver {
     field: string,
     pattern: string,
     fold: boolean,
+    guidColumn = false,
   ): void {
     // [#25521 cut 16] The body moved to `sql-driver-predicate-emitters.ts` (see `PredicateEmitterHost`).
     const readDialectName = () => this.dialectName;
     const host: ThisParameterType<typeof applyLikePattern> = {
       get dialectName() { return readDialectName(); },
     };
-    return applyLikePattern.call(host, builder, method, field, pattern, fold);
+    return applyLikePattern.call(host, builder, method, field, pattern, fold, guidColumn);
   }
 
   /**
@@ -9143,11 +9180,13 @@ export class SqlDriver implements IDataDriver {
       foldEmptyAggregateAnswers: (...a) => driver.foldEmptyAggregateAnswers(...a),
       get fractionalNumericFields() { return driver.fractionalNumericFields; },
       get getBuilder() { return driver.getBuilder.bind(driver); },
+      get isMssql() { return driver.isMssql; },
       get isOracle() { return driver.isOracle; },
       get knex() { return driver.knex; },
       mapAggregateFunc: (...a) => driver.mapAggregateFunc(...a),
       get numericFields() { return driver.numericFields; },
       presentReadColumns: (...a) => driver.presentReadColumns(...a),
+      primeMssqlGuidColumns: (...a) => driver.primeMssqlGuidColumns(...a),
       primeOracleRawUuidColumns: (...a) => driver.primeOracleRawUuidColumns(...a),
       readPresentationKind: (...a) => driver.readPresentationKind(...a),
       remoteColumn: (...a) => driver.remoteColumn(...a),
@@ -9171,6 +9210,7 @@ export class SqlDriver implements IDataDriver {
       keepSuppliedUpdatedAt: (...a) => driver.keepSuppliedUpdatedAt(...a),
       get knex() { return driver.knex; },
       oracleUuidBinding: (...a) => driver.oracleUuidBinding(...a),
+      primeMssqlGuidColumns: (...a) => driver.primeMssqlGuidColumns(...a),
       primeOracleRawUuidColumns: (...a) => driver.primeOracleRawUuidColumns(...a),
       readBackInsertedRows: (...a) => driver.readBackInsertedRows(...a),
       resyncSequenceToDataMax: (...a) => driver.resyncSequenceToDataMax(...a),
@@ -9246,6 +9286,7 @@ export class SqlDriver implements IDataDriver {
       mapSortField: (...a) => driver.mapSortField(...a),
       oracleUuidBinding: (...a) => driver.oracleUuidBinding(...a),
       orderKeysFor: (...a) => driver.orderKeysFor(...a),
+      primeMssqlGuidColumns: (...a) => driver.primeMssqlGuidColumns(...a),
       primeMssqlPagingKey: (...a) => driver.primeMssqlPagingKey(...a),
       primeOracleRawUuidColumns: (...a) => driver.primeOracleRawUuidColumns(...a),
       readBackInsertedRows: (...a) => driver.readBackInsertedRows(...a),
@@ -9319,8 +9360,10 @@ export class SqlDriver implements IDataDriver {
       coercionKey: (...a) => driver.coercionKey(...a),
       distinctBackendFault: (...a) => driver.distinctBackendFault(...a),
       get getBuilder() { return driver.getBuilder.bind(driver); },
+      get isMssql() { return driver.isMssql; },
       get isOracle() { return driver.isOracle; },
       presentReadValue: (...a) => driver.presentReadValue(...a),
+      primeMssqlGuidColumns: (...a) => driver.primeMssqlGuidColumns(...a),
       primeOracleRawUuidColumns: (...a) => driver.primeOracleRawUuidColumns(...a),
       readPresentationKind: (...a) => driver.readPresentationKind(...a),
       remoteColumn: (...a) => driver.remoteColumn(...a),
@@ -9328,11 +9371,13 @@ export class SqlDriver implements IDataDriver {
     fieldMappingHost.install((driver) => ({
       get columnFieldByObject() { return driver.columnFieldByObject; },
       get fieldColumnByObject() { return driver.fieldColumnByObject; },
+      introspectColumns: (...a) => driver.introspectColumns(...a),
       introspectPrimaryKeys: (...a) => driver.introspectPrimaryKeys(...a),
       get isOracle() { return driver.isOracle; },
       get knex() { return driver.knex; },
       get logger() { return driver.logger; },
       get managedObjectFields() { return driver.managedObjectFields; },
+      get mssqlGuidColumnsByObject() { return driver.mssqlGuidColumnsByObject; },
       get mssqlPagingKeyByObject() { return driver.mssqlPagingKeyByObject; },
       get nondeterministicPagingWarned() { return driver.nondeterministicPagingWarned; },
       get oracleRawUuidFieldsByObject() { return driver.oracleRawUuidFieldsByObject; },
@@ -9378,6 +9423,7 @@ export class SqlDriver implements IDataDriver {
       get managedObjectFields() { return driver.managedObjectFields; },
       mapSortField: (...a) => driver.mapSortField(...a),
       get mediaFields() { return driver.mediaFields; },
+      get mssqlGuidColumnsByObject() { return driver.mssqlGuidColumnsByObject; },
       needsLegacyDatetimeRepair: (...a) => driver.needsLegacyDatetimeRepair(...a),
       needsLegacyTimeRepair: (...a) => driver.needsLegacyTimeRepair(...a),
       get numericFields() { return driver.numericFields; },
@@ -9447,12 +9493,14 @@ export class SqlDriver implements IDataDriver {
       applyTenantScope: (...a) => driver.applyTenantScope(...a),
       get config() { return driver.config; },
       get getBuilder() { return driver.getBuilder.bind(driver); },
+      get isMssql() { return driver.isMssql; },
       get isMysql() { return driver.isMysql; },
       get isOracle() { return driver.isOracle; },
       get isPostgres() { return driver.isPostgres; },
       get isSqlite() { return driver.isSqlite; },
       get knex() { return driver.knex; },
       mapSortField: (...a) => driver.mapSortField(...a),
+      primeMssqlGuidColumns: (...a) => driver.primeMssqlGuidColumns(...a),
       primeOracleRawUuidColumns: (...a) => driver.primeOracleRawUuidColumns(...a),
     }));
     rotationHost.install((driver) => ({
@@ -9620,9 +9668,11 @@ export class SqlDriver implements IDataDriver {
       buildWindowFunction: (...a) => driver.buildWindowFunction(...a),
       formatOutput: (...a) => driver.formatOutput(...a),
       get getBuilder() { return driver.getBuilder.bind(driver); },
+      get isMssql() { return driver.isMssql; },
       get isOracle() { return driver.isOracle; },
       get knex() { return driver.knex; },
       mapSortField: (...a) => driver.mapSortField(...a),
+      primeMssqlGuidColumns: (...a) => driver.primeMssqlGuidColumns(...a),
       primeOracleRawUuidColumns: (...a) => driver.primeOracleRawUuidColumns(...a),
     }));
   }

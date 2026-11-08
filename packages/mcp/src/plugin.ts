@@ -32,7 +32,7 @@ import { readEnvWithDeprecation, isMcpServerEnabled, resolveMcpStdioAutoStart } 
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { TenancyPosture } from '@objectstack/spec/security';
 import type { IAIService, IAuthService, IDataEngine, IMetadataService } from '@objectstack/spec/contracts';
-import { MCPServerRuntime, setRuntimeObjectView } from './mcp-server-runtime.js';
+import { MCPServerRuntime, setRuntimeObjectView, setRuntimeStdioPrincipal } from './mcp-server-runtime.js';
 import { PACKAGE_VERSION, DEFAULT_SERVER_VERSION } from './package-version.js';
 import type { MCPServerRuntimeConfig, McpMergedMetadataRead } from './mcp-server-runtime.js';
 import type { ToolRegistry } from './types.js';
@@ -810,6 +810,11 @@ export class MCPServerPlugin implements Plugin {
         );
       };
       schemaPrincipal = resolvePrincipal;
+      // [#31605] The same per-call identity for the AI tools bridged above
+      // (their execution context) and for a tool-call interceptor (the
+      // principal of every stdio call). Bound after `bridgeTools` ran, which is
+      // why the runtime reads it at each call rather than at registration.
+      setRuntimeStdioPrincipal(this.runtime, resolvePrincipal);
       ctx.logger.info(
         `[MCP] stdio transport principal-bound to OS_MCP_STDIO_API_KEY identity ${initial.userId} (RLS/FLS/tenant applied)`,
       );

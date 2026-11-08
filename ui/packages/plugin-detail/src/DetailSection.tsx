@@ -35,6 +35,7 @@ import {
   useRecordPagePreferences,
 } from '@object-ui/react';
 import { resolveFieldAffordance, isDeadlineSettled } from '@object-ui/core';
+import { withHomeAmountSource } from '@object-ui/i18n';
 import { usePermissions } from '@object-ui/permissions';
 import {
   BooleanCellRenderer,
@@ -470,7 +471,13 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
     // like select options, currency code, lookup target, etc. are
     // available in either mode.
     const objectDefField = objectSchema?.fields?.[field.name];
-    const enrichedField = enrichDetailField(field as Record<string, any>, objectDefField);
+    // A home field (ADR-0144 D5) also carries the amount, rate and document
+    // date that produced it, so its read face says which rate it was converted at.
+    const enrichedField = withHomeAmountSource(
+      enrichDetailField(field as Record<string, any>, objectDefField),
+      objectSchema?.fields,
+      field.name,
+    );
     if (objectName && Array.isArray(enrichedField.options) && enrichedField.options.length > 0) {
       enrichedField.options = translateOptions(objectName, field.name, enrichedField.options as any);
     }

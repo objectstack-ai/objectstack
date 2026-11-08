@@ -35,6 +35,8 @@
  *     bound action whose object nobody registers: `422 PLUGIN_REGISTER_FAILED`
  *     in the declared envelope with the engine's sentence, nothing registered,
  *     the ledger exactly as before the call;
+ *   - a multi-package artifact whose second member is refused, on the cloud
+ *     and on the inline branch: neither member registered (#31564);
  *   - an upgrade refused by a registry refusal and by a sealed-vocabulary one:
  *     the same `422`, the installed version still registered and ledgered;
  *   - the remedy a sealed-vocabulary refusal names: once the package that
@@ -279,12 +281,11 @@ const CASES = [
     },
     {
         title: 'an object name two packages of one artifact define',
-        // Only the refused member: the manifest service registers an artifact's
-        // packages one by one, so `com.acme.crm`, registered before
-        // `com.acme.crm.billing` was refused, stays in the RUNNING kernel —
-        // unledgered, so gone at the restart. Measured the same on the inline
-        // branch; not this door's to withdraw, and not pinned here.
-        versionId: 'v1-artifact-object', manifestId: 'com.acme.crm-suite', registered: ['com.acme.crm.billing'],
+        // BOTH members: `com.acme.crm` registered before `com.acme.crm.billing`
+        // was refused, and the engine's `manifest` service puts back every
+        // member of a refused artifact, so the running kernel holds neither —
+        // as the ledger holds neither. The inline branch: below.
+        versionId: 'v1-artifact-object', manifestId: 'com.acme.crm-suite', registered: ['com.acme.crm', 'com.acme.crm.billing'],
         says: 'Object name conflict inside one release artifact: object "crm_account"',
     },
     {
@@ -342,6 +343,22 @@ describe('install-local cloud branch refuses a register the engine refuses, befo
             expect(ledger()).toContain(`${INCOMING_ID}@1.0.0`);
         });
     }
+
+    it('the inline branch: a multi-package artifact whose second member is refused leaves neither member registered', async () => {
+        const { ql, install, installHolder } = await bootPlugin();
+        await installHolder();
+        const before = ledger();
+
+        const res = await install({ manifest: collidingArtifact() });
+
+        expect(res.status, JSON.stringify(res.payload)).toBe(422);
+        expect(res.payload.error.code).toBe('PLUGIN_REGISTER_FAILED');
+        expect(res.payload.error.message).toContain('Object name conflict inside one release artifact: object "crm_account"');
+        expect(ql.registry.getPackage('com.acme.crm')).toBeUndefined();
+        expect(ql.registry.getPackage('com.acme.crm.billing')).toBeUndefined();
+        expect(ql.registry.getObjectOwner('crm_account')).toBeUndefined();
+        expect(ledger()).toEqual(before);
+    });
 
     it('the remedy a bound action\'s refusal names: once the object\'s package is installed, the same install succeeds at once', async () => {
         serveVersions(VERSIONS);

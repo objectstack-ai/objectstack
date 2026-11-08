@@ -34,7 +34,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 
 const PACKAGE_ID = 'app.hcpl';
-const DRAFTS = `/api/v1/meta/_drafts?packageId=${encodeURIComponent(PACKAGE_ID)}`;
+const DRAFTS = `/api/v1/meta/_drafts?package=${encodeURIComponent(PACKAGE_ID)}`;
 
 /** The scripted thread the mocked transport serves. */
 const chat = vi.hoisted(() => {
@@ -128,6 +128,9 @@ vi.mock('../../preview/DraftChangesPanel', () => ({
 
 import { uiMessagesToChatMessages } from '@object-ui/plugin-chatbot';
 import { I18nProvider } from '@object-ui/i18n';
+// The console's preview and authoring code loads `@objectstack/lint` lazily;
+// warmed here so its first load is paid at import, not inside a test's clock.
+import '@objectstack/lint';
 import { StudioDesignSurface } from './StudioDesignSurface';
 import { subscribeMetadataRefresh } from '../../assistant/assistantBus';
 

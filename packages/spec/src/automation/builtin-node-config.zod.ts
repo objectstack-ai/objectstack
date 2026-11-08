@@ -954,11 +954,15 @@ export const ScreenFieldConfigSchema = lazySchema(() => strictObject({
    * Input type — an open widget hint (`text`, `number`, `select`, …) the client
    * maps to a control.
    *
-   * Four members are also VALUE domains, which the resume enforces
+   * Nine members are also VALUE domains, which the resume enforces
    * (`validateScreenInputs`): the three numeric kinds `'number'` (ruling A′),
    * `'currency'` and `'percent'` (the same rule, by a later ruling) take a
-   * finite JSON number, a numeric string refused and ⛔ never coerced; and
-   * `'file'` (#25801). A `'file'` field renders the platform upload widget; the
+   * finite JSON number, a numeric string refused and ⛔ never coerced; the
+   * five string kinds `'text'`, `'textarea'`, `'email'`, `'url'` and `'phone'`
+   * (ruling A+, #31491) take a JSON string, an object, number, boolean or array
+   * refused and ⛔ never coerced (only the shape is checked, not the format of
+   * an email, URL or phone number); and `'file'` (#25801). A refused value
+   * leaves the run paused, so a corrected resume continues it. A `'file'` field renders the platform upload widget; the
    * upload goes through the file service and lands as a `sys_file` no record
    * owns yet, and the resume carries that file's id — ADR-0104 D3's stored
    * form, and nothing else. A later node writes the id into an object's `file`
@@ -980,7 +984,8 @@ export const ScreenFieldConfigSchema = lazySchema(() => strictObject({
    */
   type: z.string().optional().describe(
     'Input type — an open widget hint (text, number, select, …); `number`, `currency` and `percent` take a finite '
-    + 'number on resume (a numeric string is refused); `file` renders the platform upload widget and '
+    + 'number on resume (a numeric string is refused); `text`, `textarea`, `email`, `url` and `phone` take a string '
+    + 'on resume (any other JSON type is refused, never coerced); `file` renders the platform upload widget and '
     + "the screen resumes with the uploaded file's id, which a later node writes into a `file` field; "
     + '`record_link` shows the `reference` record whose id `defaultValue` evaluates to, by its display name, as a '
     + 'link to its record page, and takes no input',

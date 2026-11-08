@@ -44,7 +44,7 @@ describe('fetchPendingDrafts — response-shape tolerance', () => {
     const fn = stubFetch([]);
     await fetchPendingDrafts('app.k9qk');
     expect(fn).toHaveBeenCalledWith(
-      '/api/v1/meta/_drafts?packageId=app.k9qk',
+      '/api/v1/meta/_drafts?package=app.k9qk',
       expect.objectContaining({ credentials: 'include' }),
     );
   });

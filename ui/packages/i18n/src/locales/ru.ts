@@ -441,6 +441,10 @@ const ru = {
       available: 'Доступные',
       all: 'Все валюты (ISO 4217)',
     },
+    currencyHome: {
+      convertedAt: 'Пересчитано по курсу {{rate}} на {{date}}',
+      homeCurrency: 'В базовой валюте (курс 1)',
+    },
     boolean: {
       offBadge: "{{label}} — Выкл.",
       completed: "Выполнено",

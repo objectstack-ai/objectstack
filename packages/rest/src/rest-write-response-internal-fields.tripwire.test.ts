@@ -406,6 +406,13 @@ const DISPOSITIONS: Record<string, Disposition> = {
   // [#30205] The hand-over answers per-field counts and failed row ids, never a record.
   'POST /api/v1/security/users/:id/assigned-work/transfer': { kind: 'no-record-echo', why: 'Transfer report: per-field counts and failed row ids (id, code, refusal sentence), never a record body.' },
 
+  // [#30237] The recycle bin's acts answer receipts: the restore's is read
+  // field by field (`restoreReceipt`), so a row written back is named by its
+  // object and id, never served.
+  [`POST ${D}/:object/recycle-bin/:entryId/restore`]: { kind: 'no-record-echo', why: 'Restore receipt: the entry, the master row id, every row written back as { object, id }, and the re-linked count; never a record body.' },
+  [`DELETE ${D}/:object/recycle-bin/:entryId`]: { kind: 'no-record-echo', why: 'Purge receipt.' },
+  [`DELETE ${D}/:object/recycle-bin`]: { kind: 'no-record-echo', why: 'Empty receipt: the removed count.' },
+
   // Import: per-row RECEIPTS (row number, action, id, warnings/errors) plus
   // counts — measured, the written row is never spread into a result.
   [`POST ${D}/:object/import`]: { kind: 'no-record-echo', why: 'Import summary: counts + per-row receipts, never the written row.' },

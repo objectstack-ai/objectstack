@@ -72,6 +72,7 @@ export interface CrudHost {
   mapSortField: SqlDriver['mapSortField'];
   oracleUuidBinding: SqlDriver['oracleUuidBinding'];
   orderKeysFor: SqlDriver['orderKeysFor'];
+  primeMssqlGuidColumns: SqlDriver['primeMssqlGuidColumns'];
   primeMssqlPagingKey: SqlDriver['primeMssqlPagingKey'];
   primeOracleRawUuidColumns: SqlDriver['primeOracleRawUuidColumns'];
   readBackInsertedRows: SqlDriver['readBackInsertedRows'];
@@ -120,13 +121,15 @@ export class CrudFacet {
    * cited that as agreement, which it was not; objectstack#4419.) The
    * obligation the contract states is on `find`, and this keeps it there.
    */
-  static async findRows(this: Pick<CrudHost, 'applyFilters' | 'applyTenantScope' | 'backendStatementFault' | 'formatOutput' | 'getBuilder' | 'isMssql' | 'isOracle' | 'mapSortField' | 'orderKeysFor' | 'primeMssqlPagingKey' | 'primeOracleRawUuidColumns' | 'remoteColumn' | 'unresolvableFilterColumnRefusal'>, object: string, query: DriverQuery, options?: DriverOptions, singleRowLookup = false): Promise<any[]> {
+  static async findRows(this: Pick<CrudHost, 'applyFilters' | 'applyTenantScope' | 'backendStatementFault' | 'formatOutput' | 'getBuilder' | 'isMssql' | 'isOracle' | 'mapSortField' | 'orderKeysFor' | 'primeMssqlGuidColumns' | 'primeMssqlPagingKey' | 'primeOracleRawUuidColumns' | 'remoteColumn' | 'unresolvableFilterColumnRefusal'>, object: string, query: DriverQuery, options?: DriverOptions, singleRowLookup = false): Promise<any[]> {
     // [#31390] On Oracle a federated object's RAW(16) uuid columns are read from
     // the remote catalog before a comparand or a written value is bound.
     if (this.isOracle) await this.primeOracleRawUuidColumns(object);
     // [#31327] On SQL Server a federated object's paging key is read from the
     // remote catalog before the ORDER BY is decided (`primeMssqlPagingKey`).
     if (this.isMssql) await this.primeMssqlPagingKey(object);
+    // [#31395] …and which of its columns are GUIDs, before a text operator compiles.
+    if (this.isMssql) await this.primeMssqlGuidColumns(object, query.where);
     // The whole ORDER BY, decided once: the caller's keys plus whatever this
     // driver has to add to make a paged read deterministic. Derived out here
     // rather than inside `buildBase` so the recovery ladder below can ask

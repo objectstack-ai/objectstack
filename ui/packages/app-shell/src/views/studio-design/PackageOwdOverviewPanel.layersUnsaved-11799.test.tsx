@@ -89,7 +89,7 @@ async function serve(input: RequestInfo | URL, init?: RequestInit): Promise<Resp
     if (seg[0] === '_drafts') {
       body = {
         drafts: [...server.drafts.values()]
-          .filter((d) => (!q.get('type') || d.type === q.get('type')) && (!q.get('packageId') || d.packageId === q.get('packageId')))
+          .filter((d) => (!q.get('type') || d.type === q.get('type')) && (!q.get('package') || d.packageId === q.get('package')))
           .map((d) => ({ type: d.type, name: d.name, packageId: d.packageId, updatedAt: null, updatedBy: null })),
       };
     } else if (seg.length === 1) {

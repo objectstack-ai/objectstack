@@ -9,11 +9,11 @@
 - 含 describe/JSDoc、墓碑散文、错误 guidance、alias 表;其重生成的 references 产物归源 PR。
 - 含 `packages/spec/scripts/**`、`packages/spec/docs/**`。
 - 同含围着 spec 契约转的工具链:门禁、生成器、lint 规则、报错散文。
-- 一般开发工具面留 devx;`packages/spec` 文件归本席,唯下列搭车改动可随产品 PR。
+- 一般开发工具面留 devx;`packages/spec` 文件归本席,非元数据协议改动皆可随产品 PR 搭车。
 - 元数据协议改动归本席,走 spec 子卡:首触即立,产品卡带 `Blocked-by:` 该子卡。
 - 元数据协议 = 可编写元数据的形状:对象、字段、flow、视图、权限、设置清单等。
 - 接受集的放宽或收窄、属性的新增或退役,同属元数据协议改动。
-- 可搭产品 PR 的 spec 改动:错误码台账行、平台名注册表、`contracts/`、JSDoc/describe、测试。
+- 搭车如:台账行(错误码、liveness 引用)、平台名注册表、`contracts/`、JSDoc/describe、测试等。
 - 兜底:产品车道 PR 被自动挂上 `protocol:*` 标签即停,协议 hunk 移入 spec 子卡。
 - PR 自报的 `Metadata-protocol:` 行单独不作判据。
 

@@ -83,12 +83,12 @@ afterEach(() => {
 
 const fold = (artifact: unknown) => ({ objects: resolveStackCollection(artifact, 'objects'), data: resolveStackCollection(artifact, 'data') });
 
-async function mount(options: { installed?: Row; planUpgrade?: false; columns?: Row[]; registryPackages?: Row[]; driver?: unknown } = {}) {
+async function mount(options: { installed?: Row; planUpgrade?: false; columns?: Row[]; overrides?: unknown; registryPackages?: Row[]; driver?: unknown } = {}) {
     const register = vi.fn();
     const syncSchemas = vi.fn(async () => undefined);
     const planUpgrade = vi.fn(async (installed: unknown, incoming: unknown) => ({
         plan: comparePackageVersions(fold(installed), fold(incoming)),
-        environment: { columns: options.columns ?? [], removedObjects: [], seeds: [] },
+        environment: { columns: options.columns ?? [], removedObjects: [], seeds: [], ...('overrides' in options ? { overrides: options.overrides } : {}) },
     }));
     const rawApp = makeRawApp();
     const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
@@ -186,6 +186,54 @@ describe('dryRun: true answers the upgrade plan and writes nothing', () => {
         expect(res.payload.error.message).toMatch(/planUpgrade/);
         expect(door.register).not.toHaveBeenCalled();
         expect(ledgerFiles()).toEqual(before);
+    });
+});
+
+/**
+ * [ADR-0146 D2, as amended] The plan's advisory class — overrides in the
+ * base's paired `.custom` that hide a change of this upgrade, or are stale —
+ * rides the dry run's answer as the service read it, and is advice only: no
+ * install refuses on it, and no finding-set token covers it.
+ */
+describe('the advisory overrides: shown by the dry run, never a refusal', () => {
+    const VIEW = (label: string) => ({ object: 'acme_lead', listViews: { all: { type: 'grid', label, columns: ['company'] } } });
+    const withView = (body: Row, label: string): Row => ({ ...body, views: [VIEW(label)] });
+    const ADVISORY = {
+        hidesChange: [{
+            package: VENDOR, type: 'view', name: 'acme_lead.all', basedOn: '1.0.0',
+            installedVersion: '1.0.0', incomingVersion: '2.0.0', change: 'changed', next: 'Open it in Studio.',
+        }],
+        stale: [],
+    };
+
+    it('the dry run answers the class as the service read it', async () => {
+        const door = await mount({ installed: withView(V1, 'Leads'), overrides: ADVISORY });
+        const res = await door.install(makeC({ manifest: withView(V2, 'All leads'), dryRun: true }));
+        expect(res.status).toBe(200);
+        expect(res.payload.data.environment.overrides).toEqual(ADVISORY);
+    });
+
+    it('an upgrade whose only change is an overridden view installs: nothing is refused on the advice', async () => {
+        const v2 = withView(vendorBody('2.0.0', { company: { type: 'text' } }, V1.data as Row[]), 'All leads');
+        const door = await mount({ installed: withView(V1, 'Leads'), overrides: ADVISORY });
+        const res = await door.install(makeC({ manifest: v2 }));
+        expect(res.status).toBe(200);
+        expect(door.register).toHaveBeenCalledTimes(1);
+        expect(new LocalManifestSource(dir).read(VENDOR).entry?.version).toBe('2.0.0');
+    });
+
+    it('a schema refusal neither lists the advice nor changes its token for it', async () => {
+        const plain = await mount({ installed: V1 });
+        const plainToken = (await plain.install(makeC({ manifest: V2 }))).payload.error.details.findingSet;
+        rmSync(dir, { recursive: true, force: true });
+        dir = mkdtempSync(join(tmpdir(), 'mil-upgrade-plan-'));
+
+        const advised = await mount({ installed: V1, overrides: ADVISORY });
+        const res = await advised.install(makeC({ manifest: V2 }));
+        expect(res.status).toBe(409);
+        expect(res.payload.error.details.findingSet).toBe(plainToken);
+        expect(res.payload.error.details.findings.map((f: any) => f.kind)).toEqual(['suspected_rename']);
+        expect(JSON.stringify(res.payload.error)).not.toContain('acme_lead.all');
     });
 });
 

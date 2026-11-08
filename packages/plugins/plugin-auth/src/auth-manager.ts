@@ -263,6 +263,7 @@ import { buildPluginList, type PluginListHost } from './auth-manager-plugin-list
 import { resolveTurnstileKeys } from './turnstile-sign-up.js';
 import { assertTrustedAppSchemes, registeredAppSchemesOf } from './one-time-token-handoff.js';
 import type { MintScimConnectionCredentialInput, MintedScimConnectionCredential } from './scim-connection-service.js';
+import type { OrganizationBoundaryJudge } from './scim-group-projection.js';
 
 /**
  * Detect WebContainer (StackBlitz) environment.
@@ -792,6 +793,17 @@ export interface AuthManagerOptions extends Partial<AuthConfig> {
    * authority it is deliberately denied elsewhere.
    */
   invitationPlacement?: () => Promise<InvitationPlacementServiceLike | undefined>;
+
+  /**
+   * [ADR-0090 D12] Lazy accessor for the `security` service's
+   * `organizationBoundaryFailure` member (plugin-security). Wired by
+   * `AuthPlugin`; lazy because plugin-security starts after plugin-auth. The
+   * identity-provider group mapping door judges a mapped set by it at save, and
+   * the SCIM group projection re-judges at grant time. Absent (an embedding
+   * without plugin-security) ⇒ no set can be shown inside the boundary: a
+   * mapping save is refused and nothing is granted.
+   */
+  organizationBoundary?: () => Promise<OrganizationBoundaryJudge | undefined>;
 
   onInvitationAccepted?: (data: {
     invitationId?: string;
@@ -4655,6 +4667,10 @@ export class AuthManager {
    * the Console's withdraw (`authorized-clients-withdraw.ts`) revokes the same
    * grant the same way. A server-only
    * `skip_consent` client has no consent row and is admitted without one.
+   * The same read refuses a token whose client is disabled, or whose client
+   * row is gone (objectstack-ai/cloud#3820, card 2): disabling a client
+   * refuses its outstanding tokens on their next call, as the provider
+   * already refuses it new ones, and enabling it again serves them again.
    *
    * The caller (runtime dispatcher) maps the returned principal through
    * `resolveAuthzContext` — the single shared authorization resolver — so
@@ -6736,6 +6752,27 @@ export class AuthManager {
   ): Promise<MintedScimConnectionCredential> {
     const { mintScimConnectionCredential } = await import('./scim-connection-service.js');
     return mintScimConnectionCredential(engine as never, this.resolveAuthSecret(), input);
+  }
+
+  /** The `security` service's organization-boundary predicate ({@link AuthManagerOptions.organizationBoundary}), or `undefined`. */
+  public async organizationBoundaryJudge(): Promise<OrganizationBoundaryJudge | undefined> {
+    return (await this.config.organizationBoundary?.().catch(() => undefined)) ?? undefined;
+  }
+
+  /**
+   * Re-run the SCIM group projection for every user of one provisioning
+   * domain (the vendor's server-only `reconcileSCIMProjection`), so a saved or
+   * deleted `sys_idp_group_mapping` row reaches the members a group already
+   * has. The only caller is the platform-admin group-mapping door
+   * (`idp-group-mapping-admin.ts`).
+   */
+  public async reconcileScimProjectionDomain(provisioningDomainId: string): Promise<{ reconciledUsers: number }> {
+    const auth = await this.getOrCreateAuth();
+    const reconcile = (auth as { api?: { reconcileSCIMProjection?: (input: unknown) => Promise<unknown> } }).api
+      ?.reconcileSCIMProjection;
+    if (typeof reconcile !== 'function') throw new Error('[auth] SCIM projection reconcile is not mounted (SCIM is off)');
+    const result = (await reconcile({ body: { provisioningDomainId } })) as { reconciledUsers?: unknown };
+    return { reconciledUsers: Number(result?.reconciledUsers ?? 0) };
   }
 
   /**

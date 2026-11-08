@@ -63,6 +63,7 @@ export interface BulkOperationsHost {
   keepSuppliedUpdatedAt: SqlDriver['keepSuppliedUpdatedAt'];
   readonly knex: SqlDriver['knex'];
   oracleUuidBinding: SqlDriver['oracleUuidBinding'];
+  primeMssqlGuidColumns: SqlDriver['primeMssqlGuidColumns'];
   primeOracleRawUuidColumns: SqlDriver['primeOracleRawUuidColumns'];
   readBackInsertedRows: SqlDriver['readBackInsertedRows'];
   resyncSequenceToDataMax: SqlDriver['resyncSequenceToDataMax'];
@@ -284,7 +285,9 @@ export class BulkOperationsFacet {
   }
 
   /** The body of `SqlDriver#updateMany`; the method's docblock there is its contract. */
-  static async updateMany(this: Pick<BulkOperationsHost, 'applyFilters' | 'applyTenantScope' | 'applyWriteColumnMap' | 'auditMissingTenant' | 'formatInput' | 'getBuilder' | 'isOracle' | 'keepSuppliedUpdatedAt' | 'primeOracleRawUuidColumns' | 'rotationShardsOf' | 'stampsUpdatedAt' | 'updateWithPresumedTimestamp' | 'updatedAtStamp' | 'updatedAtStampIsPresumed'>, object: string, query: DriverQuery, data: any, options?: DriverOptions): Promise<number> {
+  static async updateMany(this: Pick<BulkOperationsHost, 'applyFilters' | 'applyTenantScope' | 'applyWriteColumnMap' | 'auditMissingTenant' | 'formatInput' | 'getBuilder' | 'isMssql' | 'isOracle' | 'keepSuppliedUpdatedAt' | 'primeMssqlGuidColumns' | 'primeOracleRawUuidColumns' | 'rotationShardsOf' | 'stampsUpdatedAt' | 'updateWithPresumedTimestamp' | 'updatedAtStamp' | 'updatedAtStampIsPresumed'>, object: string, query: DriverQuery, data: any, options?: DriverOptions): Promise<number> {
+    // [#31395] SQL Server: which columns are GUIDs, before a text operator compiles.
+    if (this.isMssql) await this.primeMssqlGuidColumns(object, query.where);
     // [#31390] On Oracle a federated object's RAW(16) uuid columns are read from
     // the remote catalog before a comparand or a written value is bound.
     if (this.isOracle) await this.primeOracleRawUuidColumns(object);
@@ -329,7 +332,9 @@ export class BulkOperationsFacet {
   }
 
   /** The body of `SqlDriver#deleteMany`; the method's docblock there is its contract. */
-  static async deleteMany(this: Pick<BulkOperationsHost, 'applyFilters' | 'applyTenantScope' | 'auditMissingTenant' | 'getBuilder' | 'isOracle' | 'primeOracleRawUuidColumns' | 'rotationShardsOf'>, object: string, query: DriverQuery, options?: DriverOptions): Promise<number> {
+  static async deleteMany(this: Pick<BulkOperationsHost, 'applyFilters' | 'applyTenantScope' | 'auditMissingTenant' | 'getBuilder' | 'isMssql' | 'isOracle' | 'primeMssqlGuidColumns' | 'primeOracleRawUuidColumns' | 'rotationShardsOf'>, object: string, query: DriverQuery, options?: DriverOptions): Promise<number> {
+    // [#31395] SQL Server: which columns are GUIDs, before a text operator compiles.
+    if (this.isMssql) await this.primeMssqlGuidColumns(object, query.where);
     // [#31390] On Oracle a federated object's RAW(16) uuid columns are read from
     // the remote catalog before a comparand or a written value is bound.
     if (this.isOracle) await this.primeOracleRawUuidColumns(object);
@@ -375,7 +380,9 @@ export class BulkOperationsFacet {
   }
 
   /** The body of `SqlDriver#count`; the method's docblock there is its contract. */
-  static async count(this: Pick<BulkOperationsHost, 'applyFilters' | 'applyTenantScope' | 'backendStatementFault' | 'getBuilder' | 'isOracle' | 'primeOracleRawUuidColumns' | 'unresolvableFilterColumnRefusal'>, object: string, query?: DriverQuery, options?: DriverOptions): Promise<number> {
+  static async count(this: Pick<BulkOperationsHost, 'applyFilters' | 'applyTenantScope' | 'backendStatementFault' | 'getBuilder' | 'isMssql' | 'isOracle' | 'primeMssqlGuidColumns' | 'primeOracleRawUuidColumns' | 'unresolvableFilterColumnRefusal'>, object: string, query?: DriverQuery, options?: DriverOptions): Promise<number> {
+    // [#31395] SQL Server: which columns are GUIDs, before a text operator compiles.
+    if (this.isMssql) await this.primeMssqlGuidColumns(object, query?.where);
     // [#31390] On Oracle a federated object's RAW(16) uuid columns are read from
     // the remote catalog before a comparand or a written value is bound.
     if (this.isOracle) await this.primeOracleRawUuidColumns(object);
