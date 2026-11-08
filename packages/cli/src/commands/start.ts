@@ -23,6 +23,7 @@ import {
 import { ServeRestartCoordinator } from '../utils/dev-restart.js';
 import { readEnvWithDeprecation } from '@objectstack/types';
 import { writeAuthSecretFileChannel } from '../utils/internal-auth-secret-channel.js';
+import { ceremonyDatabaseUrl, writeCeremonyDatabaseChannel } from '../utils/internal-ceremony-database-channel.js';
 import { applyCryptoKeyFileChannel } from '../utils/internal-crypto-key-file-channel.js';
 import { resolveStartHome } from '../utils/start-home.js';
 // The ONE port contract, shared with `dev` and with the `serve` child this
@@ -501,6 +502,11 @@ export default class Start extends Command {
       AUTH_SECRET: authSecret,
     };
     writeAuthSecretFileChannel(localEnv, persistedAuthSecret?.file);
+    // [#31488] A database reached through `-d` or a `--home` home is one the
+    // ceremony the ownership refusal names does not find on its own: the
+    // child names it in both commands, read from the resolution above — the
+    // one this boot serves — never re-resolved.
+    writeCeremonyDatabaseChannel(localEnv, ceremonyDatabaseUrl(resolvedDb, { homeFlag: flags.home }));
     // NODE_ENV is only forced to production when the user has not set it.
     // Allows `NODE_ENV=development objectstack start` to work for debugging.
     //
