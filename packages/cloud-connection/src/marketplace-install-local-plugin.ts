@@ -40,19 +40,19 @@
  *            gives (ADR-0087 D1, #21762), and nothing is registered or written.
  *            The answer's `hotLoaded` says whether the running kernel's
  *            `manifest.register` resolved (#22695). An inline manifest whose
- *            register throws is refused (`PLUGIN_REGISTER_FAILED`, 422); a
- *            cloud-fetched one is still installed (the lenient path) and answers
- *            `200` with `hotLoaded: false` and the register error's message as
- *            `hotLoadError` — in the ledger, loaded at the next restart —
- *            unless the registry refused it because another holder already
- *            holds a name the package claims: its namespace (#31392), a
- *            position, permission set or capability name (held by the
- *            environment catalog, #25366, or by another package or a
- *            built-in, #31392), or a bare name — a flow, a webhook, a
- *            dataset, … (#31296; `bare-name-one-holder.ts` in
- *            `@objectstack/objectql`). No restart clears any of these, so both
- *            branches refuse them (`PLUGIN_REGISTER_FAILED`, 422) and nothing
- *            is registered or written.
+ *            register throws is refused (`PLUGIN_REGISTER_FAILED`, 422), and
+ *            so is a cloud-fetched one whose register the engine REFUSED — a
+ *            throw declaring a 4xx status of its own (#31478): a name another
+ *            holder holds (its namespace, a position, permission set or
+ *            capability name, a bare name; #25366, #31296, #31392), a default
+ *            record page, an object another package owns, a picklist or a
+ *            bound action's object nobody declares, a body its schema refuses.
+ *            No restart heals a refusal, so nothing is registered or written.
+ *            A cloud-fetched register failure that declares no 4xx (the
+ *            runtime's own fault) takes the lenient path: still installed,
+ *            answering `200` with `hotLoaded: false` and the register error's
+ *            message as `hotLoadError` — in the ledger, loaded at the next
+ *            restart.
  *
  *          `installMode: 'managed' | 'unmanaged'` (ADR-0131 D6; absent means
  *          `managed`, the key parsed against `InstallModeSchema`) chooses
@@ -314,13 +314,18 @@ import {
     // the one the dry run and `os diff` read — which step 2c′'s verdict reads.
     comparePackageVersions,
     type PackageUpgradeSide,
-    type PackageUpgradePlan,
-    type UpgradeDriftCategory,
+    // [epic cloud#3652 Q3, #30884] The ONE schema upgrade verdict and its
+    // token — the rule a host's install door applies too, so both doors refuse
+    // the same pair of versions with the same findings and the same token.
+    schemaUpgradeVerdict,
+    installedRecordUnavailableVerdict,
+    SCHEMA_UPGRADE_CONFIRMATION_REQUIRED,
+    SCHEMA_UPGRADE_CONFIRMATION_STATUS,
+    type SchemaUpgradeVerdict,
 } from '@objectstack/metadata-core';
 import { resolveCloudUrl } from './cloud-url.js';
 import { resolveMarketplacePublicBaseUrl } from './marketplace-public-url.js';
 import { join } from 'node:path';
-import { createHash } from 'node:crypto';
 
 import {
     LocalManifestSource,
@@ -391,11 +396,6 @@ import {
 } from '@objectstack/metadata-protocol';
 import { resolveThrownHttpError } from '@objectstack/types';
 import { unknownQueryParamRefusalMessage } from '@objectstack/rest';
-// [#25366, #31296, #31392] The code the registry's namespace, security-catalog
-// and bare-name refusals share, compared with each class's `name` rather than
-// `instanceof`-tested: the engine keeps the classes unexported so a consumer
-// holding the other build realm's copy cannot misread them.
-import { NAMESPACE_CONFLICT_CODE } from '@objectstack/objectql';
 
 /** What the auth service's in-process session read answers, as `AuthSessionApi` declares it. */
 type SessionRead = Awaited<ReturnType<NonNullable<AuthSessionApi['getSession']>>>;
@@ -410,57 +410,46 @@ const ROUTE_BASE = '/api/v1/marketplace/install-local';
 export const SAMPLE_DATA_COUNT_QUERY_PARAMS: readonly string[] = Object.freeze([]);
 
 /**
- * [#25366, #31296, #31392] The registry's refusals of a name another holder
- * already holds in a deployment-wide namespace, by the `name` each class gives
- * itself (`registry.ts` in `@objectstack/objectql`). The three share
- * {@link NAMESPACE_CONFLICT_CODE}; the engine keeps the classes unexported, so
- * a consumer reads the code plus the name, never `instanceof`.
+ * [#31478] Whether a `manifest.register` failure is the engine REFUSING this
+ * package — a throw that declares a 4xx status of its own
+ * (`resolveThrownHttpError(err).declaredStatus`), never one this door
+ * supplies. Every refusal the registry's package door and the manifest
+ * service's seals raise declares one (`422`, ADR-0112): the held names
+ * (#25366, #31296, #31392), the default record page, a misplaced default page,
+ * an object another package owns, an object name two packages of one
+ * artifact or one shared namespace define, a picklist or a bound action's
+ * object no loaded package declares, a body its schema refuses. Each is judged
+ * before the refused package's own writes stand, and each is a verdict on the
+ * body against this environment, so it is the inline branch's answer on this
+ * branch too. (A multi-package artifact registers its packages one by one: a
+ * member refused after another registered leaves that earlier member in the
+ * running kernel, unledgered, exactly as on the inline branch.) Read by the
+ * declaration, never by a list of classes or codes, so a refusal the engine
+ * gains later is refused here without a change.
  *
- *   - `NamespaceConflictError` — the package's `manifest.namespace` is owned by
- *     another installed package that is not a co-owner of it (ADR-0048 Phase 1);
- *   - `SecurityCatalogNameConflictError` — a position, permission set or
- *     capability name it ships is held by another package, the environment
- *     catalog or a built-in (`security-catalog-namespace.ts`);
- *   - `BareNameConflictError` — an item of a bare-name type (a flow, a webhook,
- *     a dataset, …) is held by another package or the platform
- *     (`bare-name-one-holder.ts`).
+ * No restart heals any of them, so the lenient answer ("loads at the next
+ * restart") would be false. Measured on a real rehydrate (the `kernel:ready`
+ * seals run before it, so a ledger entry is judged as a late artifact):
+ *   - a refusal of the body itself (a misplaced default page, two objects of
+ *     one name in one artifact, a body its schema refuses) meets the same body
+ *     at every boot;
+ *   - a refusal naming a holder (an owned object, a default record page, a
+ *     held name) meets the same holder at every boot;
+ *   - a picklist or bound-action object nobody declares is healed only by
+ *     ANOTHER install that brings it — after which installing this package
+ *     again succeeds at once — and at a restart only when the ledger happens
+ *     to list the bringer first: the rehydrate sorts by declared
+ *     `dependencies`, and the reference this refusal names is one the package
+ *     did not declare. Declared, it is the pre-install dependency check's
+ *     `422` instead.
+ *
+ * What stays lenient is a failure that declares NO 4xx — an undeclared throw,
+ * or a declared 5xx: the runtime's own fault, not a verdict on the package,
+ * which the restart (of this build or a fixed one) can heal.
  */
-const NAME_HELD_ELSEWHERE_REFUSALS: ReadonlySet<string> = new Set([
-    'NamespaceConflictError',
-    'SecurityCatalogNameConflictError',
-    'BareNameConflictError',
-]);
-
-/**
- * [#25366, #31296, #31392] Whether a `manifest.register` failure is one of the
- * registry's refusals of a name another holder already holds
- * ({@link NAME_HELD_ELSEWHERE_REFUSALS}).
- *
- * Each is the ONE pre-write check for its rule: the registry's package door
- * raises it ahead of every mutation it makes, for every door that installs a
- * package, so this door asks it rather than keeping a second reading of who
- * holds a name. Recognised by the error's own brand, never by its types or
- * holders: which types a rule covers and who holds a name are the registry's
- * to decide, so a type a rule gains later is refused here without a change.
- *
- * No restart heals any of them, so the cloud branch's lenient answer ("loads
- * at the next restart") would be false for each:
- *   - an environment-held catalog name is loaded from `sys_metadata` at every
- *     boot, and the next load of the package meets it again;
- *   - a namespace or a catalog name another package holds, and a built-in
- *     catalog name, are judged again at every load, with no seal: the next
- *     boot meets the same holder and refuses the registration again;
- *   - a bare name is the other direction: the ledger entry is rehydrated
- *     BEFORE the cold boot seals the holders, so the boot ADMITS the clash with
- *     one warning (`BARE_NAME_COLD_BOOT_MODE`), and every consumer resolving
- *     the name is served one of the two packages' items by registration order.
- *
- * Under `OS_METADATA_COLLISION=warn` the registry downgrades the namespace gate
- * to a warning and throws nothing, so there is nothing here to recognise.
- */
-function refusesNameHeldElsewhere(err: unknown): boolean {
-    const e = err as { code?: unknown; name?: unknown } | null;
-    return e?.code === NAMESPACE_CONFLICT_CODE && typeof e.name === 'string' && NAME_HELD_ELSEWHERE_REFUSALS.has(e.name);
+function isDeclaredRegisterRefusal(err: unknown): boolean {
+    const declared = resolveThrownHttpError(err).declaredStatus;
+    return declared !== undefined && declared >= 400 && declared < 500;
 }
 
 /**
@@ -616,185 +605,26 @@ const ACCESS_UPGRADE_CONFIRMATION_STATUS = 409;
 const ACCESS_UPGRADE_CHECK_SERVICE = 'security.accessUpgradeCheck';
 
 /**
- * [epic cloud#3652 Q3 「默认拒绝，需显式映射（推荐）」, #30884] The refusal of a
- * managed upgrade whose package upgrade plan carries a change the additive
- * schema sync would make silently: a stored field removed while one is added
- * with no `renamedFrom` linking them (if it is a rename, the new field starts
- * empty and the data stays in the old column), or a type change the drift
- * categories call `needs_confirm` or `destructive`. 409, before any write,
- * until the same request carries the finding set's token
- * (`confirmSchemaUpgrade`). Its own code, beside
- * {@link ACCESS_UPGRADE_CONFIRMATION_REQUIRED}: its findings and its token are
- * its own, so neither confirmation answers the other's question.
- */
-const SCHEMA_UPGRADE_CONFIRMATION_REQUIRED = 'SCHEMA_UPGRADE_CONFIRMATION_REQUIRED';
-const SCHEMA_UPGRADE_CONFIRMATION_STATUS = 409;
-
-/** The token's topic: a finding set token reads as what it confirms. */
-const SCHEMA_UPGRADE_TOPIC = 'schema-upgrade';
-
-/**
- * The drift categories a type change must be confirmed under (ruling record
- * 6709061297, (ii)). A `safe` change — the installed field had no stored
- * column — loses nothing and is reported by the dry run, never refused.
- */
-const SCHEMA_UPGRADE_CONFIRMED_CATEGORIES: ReadonlySet<UpgradeDriftCategory> = new Set(['needs_confirm', 'destructive']);
-
-/**
- * One finding of the schema upgrade verdict, as the 409 (and the 501) name it
- * in `details.findings`: what the comparison found, one readable sentence,
- * and — when this runtime's `manifest` service answers `planUpgrade` — the
- * rows holding a value in the installed column (`null`: the reading failed).
- */
-type SchemaUpgradeFinding =
-    | {
-        kind: 'suspected_rename';
-        object: string;
-        /** The removed (installed) key. */
-        field: string;
-        type?: string;
-        candidates: Array<{ field: string; type?: string }>;
-        describe: string;
-        rows?: number | null;
-    }
-    | {
-        kind: 'type_change';
-        object: string;
-        /** The key in the incoming version. */
-        field: string;
-        from: string;
-        to: string;
-        category: UpgradeDriftCategory;
-        /** Set when the change rides on a declared rename: the installed key. */
-        renamedFrom?: string;
-        describe: string;
-        rows?: number | null;
-    }
-    | {
-        /** The ledger file exists and would not parse: no installed side to compare. */
-        kind: 'installed_record_unreadable';
-        /** The ledger file's basename. */
-        file: string;
-        /** The thrower's own words. */
-        cause: string;
-        describe: string;
-    }
-    | {
-        /**
-         * No installed body to compare: the ledger entry parses but carries no
-         * package body, or the registry serves the package while the ledger
-         * holds no record of it (an orphaned install) and its row carries none.
-         */
-        kind: 'installed_record_missing';
-        describe: string;
-    };
-
-/**
- * [epic cloud#3652 Q3, #30884] The verdict step 2c′ gives, read from the
- * pure comparison alone (ruling record 6709061297, C3): which declared renames
- * which findings need the installer's confirmation, and the token of that
- * finding set. Nothing here reads the
- * environment: whether an upgrade is refused is decided by the two package
- * bodies, never by a reading that could fail.
- *
- * - A declared rename (`renamedFrom`) is no finding: the column is carried
- *   (#30885, {@link planInstallDeclaredRenames}), or the install is refused
- *   before this verdict is asked (step 2c″).
- * - A suspected rename always needs confirming.
- * - A type change needs confirming when its category is `needs_confirm` or
- *   `destructive` — on a declared rename too: a declared rename never stands
- *   in for a type-change confirmation (scope note 6685166393).
- * - Removed fields, removed objects, `safe` type changes and seed changes are
- *   reported by the dry run and refused by nothing.
- *
- * The token ({@link schemaUpgradeFindingSet}) is a digest of the package id
- * and the findings' identities (never of their sentences or readings),
- * order-free, so the same two versions always yield the same token and any
- * change to the finding set yields another.
- */
-function schemaUpgradeVerdict(manifestId: string, plan: PackageUpgradePlan): {
-    findings: SchemaUpgradeFinding[];
-    findingSet: string;
-} {
-    const findings: SchemaUpgradeFinding[] = [];
-    for (const s of plan.suspectedRenames) {
-        const candidates = s.candidates.map((c) => ({ field: c.field, ...(c.type !== undefined ? { type: c.type } : {}) }));
-        const added = candidates.map((c) => `${s.object}.${c.field}${c.type ? ` (${c.type})` : ''}`).join(', ');
-        findings.push({
-            kind: 'suspected_rename',
-            object: s.object,
-            field: s.field,
-            ...(s.type !== undefined ? { type: s.type } : {}),
-            candidates,
-            describe: `${s.object}.${s.field}${s.type ? ` (${s.type})` : ''} is removed while ${added} `
-                + `${candidates.length === 1 ? 'is' : 'are'} added, and no \`renamedFrom\` links them: if this is a rename, `
-                + 'the new field starts empty and the data stays in the old column, which nothing reads any more.',
-        });
-    }
-    for (const t of plan.typeChanges) {
-        if (!SCHEMA_UPGRADE_CONFIRMED_CATEGORIES.has(t.category)) continue;
-        const what = t.category === 'destructive'
-            ? 'the new type stores no column, so the values the existing column holds are no longer read'
-            : 'the existing column keeps its type under the new declaration, and nothing converts the values it holds';
-        findings.push({
-            kind: 'type_change',
-            object: t.object,
-            field: t.field,
-            from: t.from,
-            to: t.to,
-            category: t.category,
-            ...(t.renamedFrom !== undefined ? { renamedFrom: t.renamedFrom } : {}),
-            describe: `${t.object}.${t.field}${t.renamedFrom !== undefined ? ` (renamed from ${t.renamedFrom})` : ''} `
-                + `changes type ${t.from} → ${t.to} (${t.category}): ${what}.`,
-        });
-    }
-    return { findings, findingSet: schemaUpgradeFindingSet(manifestId, findings) };
-}
-
-/**
- * The finding set's token: `schema-upgrade:` and 32 hex of a SHA-256 over the
- * package id and the findings' identities, string-sorted — never their
- * sentences or row counts. The package id is in the digest, so a token issued
- * for one package never confirms the same findings on another.
- */
-function schemaUpgradeFindingSet(manifestId: string, findings: readonly SchemaUpgradeFinding[]): string {
-    const identities = findings
-        .map((f) => JSON.stringify(
-            f.kind === 'suspected_rename'
-                ? [f.kind, f.object, f.field, f.type ?? null, f.candidates.map((c) => [c.field, c.type ?? null]).sort()]
-                : f.kind === 'type_change'
-                    ? [f.kind, f.object, f.field, f.from, f.to, f.category, f.renamedFrom ?? null]
-                    : f.kind === 'installed_record_unreadable'
-                        ? [f.kind, f.file]
-                        : [f.kind],
-        ))
-        .sort();
-    const digest = createHash('sha256').update(JSON.stringify([manifestId, identities])).digest('hex').slice(0, 32);
-    return `${SCHEMA_UPGRADE_TOPIC}:${digest}`;
-}
-
-/**
- * [epic cloud#3652 Q3, #30884] The verdict when there is no installed side to
- * compare: the ledger file would not parse, its entry carries no package body,
- * or neither the ledger nor the registry (an orphaned install's row) holds
- * one. The upgrade's renames and type changes against the installed version
- * cannot be known, and a comparison that did not run is never taken for "no
- * finding" (2a, 2b and 2c answer the same way): the one finding names what is
- * missing, and its token admits the re-install — the re-install that rewrites
- * the record — confirmed and recorded, one round trip, never silently.
+ * [epic cloud#3652 Q3, #30884] The verdict when the ledger holds no installed
+ * side to compare: the ledger file would not parse, its entry carries no
+ * package body, or neither the ledger nor the registry (an orphaned install's
+ * row) holds one. The platform's rule ({@link installedRecordUnavailableVerdict},
+ * `@objectstack/metadata-core`) makes it one confirmable finding, never "no
+ * finding" (2a, 2b and 2c answer the same way); this door writes the finding's
+ * sentence, naming the ledger file it could not read.
  *
  * A rename the incoming version declares is judged before this verdict
  * (step 2c″), on the physical table: with no installed record it is taken as
  * pending, so a transport that cannot carry it refuses, and an extension's
  * rename is refused, since whose earlier key it names cannot be told.
  */
-function installedRecordUnavailableVerdict(
+function ledgerRecordUnavailableVerdict(
     manifestId: string,
     failure: { file: string; cause: unknown } | undefined,
-): { findings: SchemaUpgradeFinding[]; findingSet: string } {
+): SchemaUpgradeVerdict {
     const consequence = 'so this upgrade cannot be checked for fields it renames or retypes: confirming installs it '
         + 'unchecked, and the install rewrites the record.';
-    const finding: SchemaUpgradeFinding = failure
+    return installedRecordUnavailableVerdict(manifestId, failure
         ? {
             kind: 'installed_record_unreadable',
             file: failure.file,
@@ -806,11 +636,7 @@ function installedRecordUnavailableVerdict(
             kind: 'installed_record_missing',
             describe: `This runtime holds no package body of the installed "${manifestId}" (neither its install record `
                 + `nor the registry carries one), ${consequence}`,
-        };
-    return {
-        findings: [finding],
-        findingSet: schemaUpgradeFindingSet(manifestId, [finding]),
-    };
+        });
 }
 
 /** One side of the comparison, a multi-package artifact folded as `planUpgrade` folds it. */
@@ -3129,8 +2955,8 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             const registerError = String(err?.message ?? err);
             // For offline file imports we treat a register failure as a hard
             // failure (don't persist). Cloud installs historically tolerated
-            // this (the on-disk record survives a restart), so keep that path
-            // lenient for backwards compatibility.
+            // this (the on-disk record survives a restart), so that path stays
+            // lenient for a fault — never for a refusal (#31478, below).
             // [#30885] Whatever the branch, the version that still serves is
             // the installed one: the columns step 2f carried go back to it.
             await reverseInstallDeclaredRenames(carried, reverseFailed);
@@ -3141,30 +2967,30 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                     error: { code: 'PLUGIN_REGISTER_FAILED', message: `Failed to register imported manifest: ${registerError}` },
                 }, 422);
             }
-            // [#25366, #31296, #31392] …EXCEPT the registry's refusals of a
-            // name another holder already holds: the package's namespace, a
-            // position, permission set or capability name, or a bare name (a
-            // flow, a webhook, a dataset, …), held by another package, the
-            // environment catalog or the platform. No restart heals any of them
-            // (see {@link refusesNameHeldElsewhere}), so the lenient answer
-            // ("loads at the next restart") would be false. Measured for the
-            // environment-held catalog name on a real restart: the boot runs,
-            // the rehydrate logs the refusal, and the package is not loaded at
-            // all — its earlier version neither, since the ledger entry that
-            // named it was overwritten. The registry's package door refused
-            // before any of its own writes, and nothing of this door's is
-            // written yet, so the cloud branch refuses exactly as the inline
-            // branch does — `422 PLUGIN_REGISTER_FAILED`, the registry's
-            // sentence naming both holders — and the installer renames and
-            // retries.
-            if (refusesNameHeldElsewhere(err)) {
+            // [#25366, #31296, #31392, #31478] …EXCEPT a refusal: a register
+            // failure that declares a 4xx status of its own is the engine's
+            // verdict on this body against this environment (see
+            // {@link isDeclaredRegisterRefusal}), and no restart heals it, so
+            // the lenient answer ("loads at the next restart") would be false.
+            // Measured on a real restart (#25366, #31478): the rehydrate logs
+            // the same refusal and the package is not loaded at all — its
+            // earlier version neither, since the ledger entry that named it
+            // was overwritten.
+            // The engine refused before any of its own writes stood, and
+            // nothing of this door's is written yet, so the cloud branch
+            // refuses exactly as the inline branch does — `422
+            // PLUGIN_REGISTER_FAILED` with the engine's sentence — and the
+            // installer corrects the body or the environment and retries.
+            if (isDeclaredRegisterRefusal(err)) {
                 return c.json({
                     success: false,
                     error: { code: 'PLUGIN_REGISTER_FAILED', message: `Package '${manifestId}' cannot be installed: ${registerError}` },
                 }, 422);
             }
-            // [#22695] The lenient path stays lenient — whether it should is a
-            // separate decision, ⛔ not made here. What changes is that the
+            // [#22695, #31478] The lenient path is what remains: a register
+            // failure that declares no 4xx — an undeclared throw or a declared
+            // 5xx, the runtime's own fault rather than a verdict on the
+            // package — is ledgered and loads at the next restart, and the
             // caller is TOLD: the answer carries `hotLoaded: false` and this
             // message, so a reader can say "installed, loads at the next
             // restart" instead of a false success.
@@ -4344,7 +4170,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         // other, never "no finding".
         const installed = this.installedPackageSide(ctx, manifestId, previous);
         const verdict = installed === undefined
-            ? installedRecordUnavailableVerdict(manifestId, previous.failure)
+            ? ledgerRecordUnavailableVerdict(manifestId, previous.failure)
             : schemaUpgradeVerdict(manifestId, comparePackageVersions(packageUpgradeSideOf(installed), packageUpgradeSideOf(converted)));
         const { findingSet } = verdict;
         if (verdict.findings.length === 0) return {};
@@ -5043,10 +4869,10 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         // operator in the log.
         let copyRecordFailure: string | undefined;
         let copyRecordSaid: string | undefined;
-        const tie = await this.unmanagedCopyInstance(ctx, result.targetPackageId);
+        const tie = this.unmanagedCopyInstance(ctx, result.targetPackageId, result.baseInstance);
         if ('failure' in tie) {
             copyRecordFailure = tie.failure;
-            copyRecordSaid = 'the package store did not answer with the new base\'s row';
+            copyRecordSaid = 'the import did not answer with the new base\'s stored row';
         } else {
             try {
                 this.unmanagedCopies.write({
@@ -6066,34 +5892,32 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
     };
 
     /**
-     * [#30808] The base instance a new copy's record is tied to: the package
-     * store's row of `baseId` ({@link readUnmanagedCopyInstance}). No
-     * `instance` on a runtime with no `package` service (the record's reach is
-     * then by id alone — the residual its module docblock states); a
-     * `failure`, and so no record, when the store holds no readable row —
-     * which is also what a passing store error reads as, since the store
-     * answers `null` for it. That copy stays unrecorded (`copyRecord` says
-     * so); no door records it later. The copy is still installed, and
-     * reseed, count and purge answer 404 for it (#31425 measured: the store's
-     * `null` cannot be told from "no row" here; a follow-up has the import
-     * answer the base row's stamp itself).
+     * [#30808, #31530] The base instance a new copy's record is tied to: the
+     * base's `sys_packages` row (`version`, `created_at`) as the import's own
+     * write answered it (`baseInstance`), never a read of the store after
+     * the import. A read could meet a passing store fault, which the store's
+     * `get` answers as `null`, and leave the copy unrecorded for good (#31425).
+     * No `instance` on a runtime with no `package` service (the record's
+     * reach is then by id alone: the residual its module docblock states). A
+     * `failure`, and so no record, when there is a `package` service but the
+     * import named no stored row (a package service that states no stamp):
+     * the copy then stays unrecorded and `copyRecord` says so, failing closed
+     * as before. The purge, reseed and count doors read the row again and
+     * compare it with this instance ({@link readUnmanagedCopyInstance}).
      */
-    private unmanagedCopyInstance = async (
+    private unmanagedCopyInstance = (
         ctx: PluginContext,
         baseId: string,
-    ): Promise<{ instance?: UnmanagedCopyInstance } | { failure: string }> => {
+        stored: { version?: unknown; createdAt?: unknown } | undefined,
+    ): { instance?: UnmanagedCopyInstance } | { failure: string } => {
+        if (typeof stored?.version === 'string' && stored.version !== ''
+            && typeof stored.createdAt === 'string' && stored.createdAt !== '') {
+            return { instance: { version: stored.version, createdAt: stored.createdAt } };
+        }
         let store: Partial<UnmanagedCopyPackageStore> | undefined;
         try { store = ctx.getService<Partial<UnmanagedCopyPackageStore>>('package'); } catch { return {}; /* no package store */ }
         if (typeof store?.get !== 'function') return {};
-        let held: UnmanagedCopyInstance | null | undefined;
-        try {
-            held = await readUnmanagedCopyInstance(store as UnmanagedCopyPackageStore, baseId);
-        } catch (err: any) {
-            return { failure: `the package store could not be read for '${baseId}': ${err?.message ?? err}` };
-        }
-        if (held === null) return { failure: `the package store holds no row of '${baseId}'` };
-        if (held === undefined) return { failure: `the package store's row of '${baseId}' carries no readable version and created_at` };
-        return { instance: held };
+        return { failure: `the import named no stored row of '${baseId}' (its package store stated no version and created_at)` };
     };
 
     /**

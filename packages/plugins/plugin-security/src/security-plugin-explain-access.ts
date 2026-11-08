@@ -135,7 +135,11 @@ type RlsFilterOptions = NonNullable<Parameters<SecurityPlugin['computeLayeredRls
  * creates and removes), or [D12] holds a delegated `adminScope` covering
  * `userId`. Each check fails closed on any error, and each reads the
  * organization the caller's sets were resolved in, never another. It answers
- * `false` for an id no user has, as for one the caller may not manage: what
+ * `false` for an id no user has, as for one the caller may not manage — and,
+ * where only a delegated scope could admit the caller, for a user the caller
+ * cannot read: a delegated scope covers no user the caller's own read does
+ * not return (`DelegatedAdminGate.scopesCoverUser`), so the delegated answer
+ * about such a user does not depend on its existence or memberships. What
  * each caller does about a user that does not exist is decided after it.
  */
 export async function mayDescribeAnotherUser(

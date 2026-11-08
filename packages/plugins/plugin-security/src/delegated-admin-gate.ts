@@ -583,43 +583,98 @@ function mayName(t: DelegatedTarget, side: 'next' | 'prev', column: string): boo
   return t.reads.has(column);
 }
 
-/** The direct-grant holder column, and the object it references. */
-const GRANT_HOLDER_FIELD = 'user_id';
-const GRANT_HOLDER_OBJECT = 'sys_user';
+/** The object a target user is a row of: what a direct grant's `user_id` references. */
+const TARGET_USER_OBJECT = 'sys_user';
 
 /**
- * Does the write NAME the grant's holder — an insert's row, or an update whose
- * payload points the grant at a different user than the row stores? A holder
- * the row already stores is not named: the engine's reference check forgives
- * a value the row stores, and the grant-holder membership hook judges it as
- * stored (`grant-holder-membership-refusal.ts`, `onUpdate`).
+ * [ADR-0090 D12; ruling on #26059, Q3] Does the gate judge a target user
+ * through the caller's own read ({@link DelegatedAdminGate.callerReadsUser})?
+ * Wherever that read can be asked at all: `sys_user` is registered on the
+ * engine, and the engine offers a `find` to ask it with. Then a delegated
+ * answer about a user the caller cannot read does not depend on that user's
+ * existence or memberships: such a user holds no business unit a subtree
+ * covers, exactly as an id naming no user holds none
+ * ({@link DelegatedAdminGate.targetUserUnits}). Anywhere else, an engine that
+ * hands over no schema included, no user is readable to ask about, and a
+ * target user is judged on its memberships alone.
+ *
+ * The test is the gate's own reason, never the schema shape of a grant's
+ * `user_id`, and it holds for every target user the gate judges: the holder a
+ * direct-grant write names (an insert, an update pointing the grant at another
+ * user), the holder a stored grant keeps (a delete, an update that leaves
+ * `user_id` as stored), and the user the explain doors ask about
+ * ({@link DelegatedAdminGate.scopesCoverUser}). Were it the column's shape,
+ * the answer about one unreadable user would change with whether `user_id` is
+ * still a writable lookup.
+ *
+ * Two other doors ask the caller's read about a grant's holder, each only for
+ * a holder the write NAMES. The engine's reference check asks it of a
+ * `user_id` a write names when the live schema's `user_id` is a
+ * non-`readonly` `lookup` / `user` reference to a registered `sys_user`
+ * (`assertReferencesResolve`, `@objectstack/objectql`), and forgives a value
+ * the row already stores. The grant-holder membership hook asks it through
+ * `callerReadsHolder` and steps aside for the reference check on that same
+ * test (`referenceCheckAsksCaller`), and judges a holder the row stores on its
+ * membership, as stored (`grant-holder-membership-refusal.ts`, `onUpdate`).
+ * That "as stored" mirror does not hold for this gate. Those doors validate
+ * the value a write stores, and a value already stored was validated when it
+ * was written; this gate JUDGES the target user — is it inside the caller's
+ * subtree? — and that answer is about the user, whichever write shape carries
+ * it, so a holder the row stores is asked of the caller's read too.
  */
-function namesTargetUser(t: DelegatedTarget): boolean {
-  if (!t.next) return false;
-  if (!t.prev) return true;
-  const norm = (v: unknown) => (v === undefined || v === null || v === '' ? null : String(v));
-  return norm(t.next[GRANT_HOLDER_FIELD]) !== norm(t.prev[GRANT_HOLDER_FIELD]);
+function judgesTargetUserThroughCallerRead(ql: any): boolean {
+  return typeof ql?.find === 'function'
+    && typeof ql?.getSchema === 'function'
+    && Boolean(ql.getSchema(TARGET_USER_OBJECT));
 }
 
 /**
- * Does the engine's reference check ask the caller's own read door about the
- * holder `object`'s write names, and refuse one it does not return? It asks
- * when the live schema's `user_id` is a non-`readonly` `lookup` / `user`
- * reference to `sys_user` and `sys_user` is registered
- * (`assertReferencesResolve`, `@objectstack/objectql`; the grant-holder
- * membership hook's `referenceCheckAsksCaller` steps aside on the same test).
- * The direct-grant object declares that reference itself
- * (`sys-user-permission-set.object.ts`), so its target is not resolved again
- * here: the test reads only what a composition can still change, whether
- * `sys_user` is registered and whether the live field is still a writable
- * lookup. Anywhere else, an engine that hands over no schema included, it
- * answers no, and the holder is judged on its memberships alone: the gate
- * refuses no named holder the write would not be refused for anyway.
+ * [ADR-0090 D12, amended 2026-10-17] Is permission set `setName` inside the
+ * organization boundary? `null` when it is; otherwise the reason, naming the
+ * set and the condition it fails:
+ *
+ * - by name — {@link ORGANIZATION_BOUNDARY_DENYLIST};
+ * - (a) its `objects['*']` entry carries `viewAllRecords` or `modifyAllRecords`;
+ * - (b) it carries an `adminScope`;
+ * - (c) a name in its `systemPermissions` is not a capability declared
+ *   `scope: 'org'` in the security catalog (a name no declaration carries is
+ *   not an organization capability).
+ *
+ * A set the catalog does not hold cannot be shown inside, and is not.
+ *
+ * Exported so a second save door that distributes permission sets judges them by
+ * THIS predicate and never by a copy of its list: plugin-auth's identity-provider
+ * group mapping refuses, at save, any set this answers a reason for.
  */
-function referenceCheckAsksCallerAboutUser(ql: any, object: string): boolean {
-  if (typeof ql?.getSchema !== 'function' || !ql.getSchema(GRANT_HOLDER_OBJECT)) return false;
-  const def = ql.getSchema(object)?.fields?.[GRANT_HOLDER_FIELD];
-  return Boolean(def) && def.readonly !== true && (def.type === 'lookup' || def.type === 'user');
+export async function organizationBoundaryFailure(
+  catalog: SecurityCatalogReader | undefined,
+  setName: string,
+): Promise<string | null> {
+  if (ORGANIZATION_BOUNDARY_DENYLIST.has(setName)) {
+    return `permission set '${setName}', which is outside the organization boundary by name (platform and organization administration and the agent ceilings are never assigned by an organization administrator)`;
+  }
+  const entry = catalog ? await catalog.resolve('permission', setName) : undefined;
+  if (!catalog || !entry) {
+    return `permission set '${setName}', which is not in the security catalog, so it cannot be shown to be inside the organization boundary`;
+  }
+  const definition: any = entry.definition;
+  const wildcard = (parseMaybeJson(definition.objects) ?? {})?.['*'];
+  for (const bit of ['viewAllRecords', 'modifyAllRecords'] as const) {
+    if (wildcard?.[bit] === true) {
+      return `permission set '${setName}', which fails condition (a) of the organization boundary: its objects['*'] entry carries the superuser bit '${bit}'`;
+    }
+  }
+  if (parseMaybeJson(definition.adminScope ?? definition.admin_scope)) {
+    return `permission set '${setName}', which fails condition (b) of the organization boundary: it carries an adminScope`;
+  }
+  const capabilities = parseMaybeJson(definition.systemPermissions);
+  for (const capability of Array.isArray(capabilities) ? capabilities : []) {
+    const declared = await catalog.resolve('capability', String(capability));
+    if (declared?.definition.scope !== 'org') {
+      return `permission set '${setName}', which fails condition (c) of the organization boundary: its capability '${String(capability)}' is ${declared ? "not declared scope 'org'" : "declared nowhere, so it is not an organization capability"}`;
+    }
+  }
+  return null;
 }
 
 export class DelegatedAdminGate {
@@ -796,6 +851,14 @@ export class DelegatedAdminGate {
    * `callerContext` supplies the organization the scopes resolve in. Omitted,
    * or naming no organization, it covers nobody: a delegated scope held in a
    * context that names no organization covers nothing ({@link resolveHeldScopes}).
+   *
+   * [ADR-0090 D12] It covers the user only through a business unit the write
+   * gate would judge it by ({@link targetUserUnits}): a user the caller's own
+   * read, under `callerContext`, does not return is covered by no scope, as an
+   * id naming no user is not. So the answer about a user the caller cannot
+   * read does not depend on that user's existence or memberships. That read is
+   * asked only once a scope has resolved, so a context that names no
+   * organization asks it nothing.
    */
   async scopesCoverUser(
     sets: PermissionSet[],
@@ -804,7 +867,7 @@ export class DelegatedAdminGate {
   ): Promise<boolean> {
     const held = await this.resolveHeldScopes(sets, callerOrganizationId(callerContext));
     if (held.length === 0) return false;
-    const userBUs = await this.businessUnitsOfUser(targetUserId);
+    const userBUs = await this.targetUserUnits(callerContext, targetUserId);
     if (userBUs.size === 0) return false;
     for (const s of held) {
       for (const bu of userBUs) if (s.subtree.has(bu)) return true;
@@ -1178,26 +1241,49 @@ export class DelegatedAdminGate {
    * grant-holder membership hook asks before it
    * (`grant-holder-membership-refusal.ts`, `callerReadsHolder`): one `sys_user`
    * read WHERE `id` equals the value, projected to `id`, under the caller's
-   * own context, so every read visibility and wall answers it, and only a row
-   * whose id IS the value counts. A user it does not return is a user the
-   * caller cannot read, answered as a user that does not exist (the
-   * platform's rule for every user a non-system write names). A read the read
-   * door REFUSES (a declared 4xx) returns no user either; a store fault
-   * propagates as raised, as for the gate's other reads: an outage is neither
-   * an answer nor a refusal.
+   * own `context` — a write's `opCtx.context`, the explain doors'
+   * `callerContext`, never the system's — so every read visibility and wall
+   * answers it, and only a row whose id IS the value counts. A user it does
+   * not return is a user the caller cannot read, answered as a user that does
+   * not exist (the platform's rule for every user a non-system write names,
+   * and the gate's for every target user it judges,
+   * {@link judgesTargetUserThroughCallerRead}). A read the read door REFUSES
+   * (a declared 4xx) returns no user either; a store fault propagates as
+   * raised, as for the gate's other reads: an outage is neither an answer nor
+   * a refusal.
    */
-  private async callerReadsUser(opCtx: any, userId: string): Promise<boolean> {
+  private async callerReadsUser(context: any, userId: string): Promise<boolean> {
     const ql = this.deps.ql;
     if (!ql?.find) return false;
     let rows: unknown;
     try {
-      rows = await ql.find(GRANT_HOLDER_OBJECT, { where: { id: userId }, fields: ['id'], context: opCtx.context });
+      rows = await ql.find(TARGET_USER_OBJECT, { where: { id: userId }, fields: ['id'], context });
     } catch (e) {
       const status = declaredHttpStatus(e);
       if (status !== undefined && status < 500) return false;
       throw e;
     }
     return (Array.isArray(rows) ? rows : []).some((r: any) => r?.id != null && String(r.id) === userId);
+  }
+
+  /**
+   * [ADR-0090 D12; ruling on #26059, Q3] The business units through which a
+   * delegated subtree may cover target user `userId`, as answered to the
+   * caller whose own context is `context`: the user's memberships
+   * ({@link businessUnitsOfUser}, read by the system) when the caller's own
+   * read returns the user ({@link callerReadsUser}), and none when it does
+   * not. A user the caller cannot read thus holds no unit any subtree covers,
+   * exactly as an id naming no user holds none, so every delegated answer
+   * about it — the write gate's refusal, the explain doors' coverage — is the
+   * answer about no user. Asked wherever the gate judges a target through the
+   * caller's read ({@link judgesTargetUserThroughCallerRead}); elsewhere the
+   * memberships alone. A store fault in the caller's read propagates.
+   */
+  private async targetUserUnits(context: any, userId: string): Promise<Set<string>> {
+    if (judgesTargetUserThroughCallerRead(this.deps.ql) && !(await this.callerReadsUser(context, userId))) {
+      return new Set<string>();
+    }
+    return this.businessUnitsOfUser(userId);
   }
 
   /**
@@ -1243,47 +1329,9 @@ export class DelegatedAdminGate {
     return [...new Set(listed)];
   }
 
-  /**
-   * [ADR-0090 D12, amended 2026-10-17] Is permission set `setName` inside the
-   * organization boundary? `null` when it is; otherwise the reason, naming the
-   * set and the condition it fails:
-   *
-   * - by name — {@link ORGANIZATION_BOUNDARY_DENYLIST};
-   * - (a) its `objects['*']` entry carries `viewAllRecords` or `modifyAllRecords`;
-   * - (b) it carries an `adminScope`;
-   * - (c) a name in its `systemPermissions` is not a capability declared
-   *   `scope: 'org'` in the security catalog (a name no declaration carries is
-   *   not an organization capability).
-   *
-   * A set the catalog does not hold cannot be shown inside, and is not.
-   */
-  private async organizationBoundaryFailure(setName: string): Promise<string | null> {
-    if (ORGANIZATION_BOUNDARY_DENYLIST.has(setName)) {
-      return `permission set '${setName}', which is outside the organization boundary by name (platform and organization administration and the agent ceilings are never assigned by an organization administrator)`;
-    }
-    const catalog = this.catalog();
-    const entry = catalog ? await catalog.resolve('permission', setName) : undefined;
-    if (!catalog || !entry) {
-      return `permission set '${setName}', which is not in the security catalog, so it cannot be shown to be inside the organization boundary`;
-    }
-    const definition: any = entry.definition;
-    const wildcard = (parseMaybeJson(definition.objects) ?? {})?.['*'];
-    for (const bit of ['viewAllRecords', 'modifyAllRecords'] as const) {
-      if (wildcard?.[bit] === true) {
-        return `permission set '${setName}', which fails condition (a) of the organization boundary: its objects['*'] entry carries the superuser bit '${bit}'`;
-      }
-    }
-    if (parseMaybeJson(definition.adminScope ?? definition.admin_scope)) {
-      return `permission set '${setName}', which fails condition (b) of the organization boundary: it carries an adminScope`;
-    }
-    const capabilities = parseMaybeJson(definition.systemPermissions);
-    for (const capability of Array.isArray(capabilities) ? capabilities : []) {
-      const declared = await catalog.resolve('capability', String(capability));
-      if (declared?.definition.scope !== 'org') {
-        return `permission set '${setName}', which fails condition (c) of the organization boundary: its capability '${String(capability)}' is ${declared ? "not declared scope 'org'" : "declared nowhere, so it is not an organization capability"}`;
-      }
-    }
-    return null;
+  /** [ADR-0090 D12] {@link organizationBoundaryFailure}, against this gate's catalog. */
+  private organizationBoundaryFailure(setName: string): Promise<string | null> {
+    return organizationBoundaryFailure(this.catalog(), setName);
   }
 
   /** Is business unit `id` a unit of `organizationId`? Fail-closed on an unreadable unit. */
@@ -1595,15 +1643,13 @@ export class DelegatedAdminGate {
       const row = t.next ?? t.prev ?? {};
       const { setRow, setName, unresolved, setNamed } = await this.directGrantSet(t, row);
       const targetUserId = row.user_id ? String(row.user_id) : null;
-      // A target user the write NAMES, where the engine's reference check asks
-      // the caller's read door about it, is first asked of that door
-      // ({@link callerReadsUser}): a user it does not return is answered as a
-      // user that does not exist, which holds no business unit the subtree can
-      // cover. So an unreadable target is outside the subtree, whatever it is.
+      // A target user — one the write names, or one the grant stores — is first
+      // asked of the caller's own read door ({@link targetUserUnits}): a user it
+      // does not return is answered as a user that does not exist, which holds
+      // no business unit the subtree can cover. So an unreadable target is
+      // outside the subtree, whatever it is and whichever write carries it.
       const userBUs = targetUserId
-        && (!namesTargetUser(t) || !referenceCheckAsksCallerAboutUser(this.deps.ql, opCtx.object)
-          || (await this.callerReadsUser(opCtx, targetUserId)))
-        ? await this.businessUnitsOfUser(targetUserId)
+        ? await this.targetUserUnits(opCtx.context, targetUserId)
         : new Set<string>();
       // [ruling of record 6649064874] Named only when the caller
       // wrote or reads it ({@link mayName}); the verdict is the stored row's.
@@ -1621,11 +1667,11 @@ export class DelegatedAdminGate {
         // [ADR-0090 D12; ruling on #26059, Q3] A target user is inside the
         // subtree only through a business unit of the subtree. A user holding
         // no business-unit membership has none, and neither has an id naming
-        // no user, nor a named user the caller cannot read (above): each is
-        // outside the subtree, exactly as a user whose units all lie elsewhere
-        // is. So the refusal is one reason, one class, one sentence and one set
-        // of details for all of them, whether or not the target exists or
-        // holds a membership.
+        // no user, nor a user the caller cannot read, named or stored (above):
+        // each is outside the subtree, exactly as a user whose units all lie
+        // elsewhere is. So the refusal is one reason, one class, one sentence
+        // and one set of details for all of them, whether or not the target
+        // exists or holds a membership.
         if (![...userBUs].some((bu) => s.subtree.has(bu))) {
           return outsideScope(userNamed
             ? `target user '${targetUserId}' is outside the delegated subtree`

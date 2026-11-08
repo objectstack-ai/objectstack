@@ -208,6 +208,15 @@ export interface AppEndpointStepInput {
      */
     policy?: EndpointPolicyContext;
     /**
+     * The host's environment-membership check for this request
+     * (`HttpDispatcher.environmentMembershipRefusal`), asked once the policy
+     * chain admitted the caller and before anything runs: the check
+     * `dispatch()` runs after the same request resolution. Its answer, when it
+     * gives one, is the step's answer. A host without environment scoping, or
+     * a direct caller, omits it.
+     */
+    membership?: () => Promise<{ status: number; body: unknown } | null>;
+    /**
      * Execution wiring (#5040 E5b). Threaded by the same seam that threads
      * {@link policy}; without it a policed request that PASSED still ends in a
      * 501 that says so, which is the honest answer for a host that mounted the
@@ -270,6 +279,12 @@ export async function runAppEndpointStep(
     // ── Everything past this line has been through the policy chain ──────
     // The ONLY place execution can be called from: this branch is unreachable
     // without a policy context, and a denial short-circuits before it.
+
+    // The environment-membership check, after the policy chain so a miss keeps
+    // its `404` and an anonymous caller of an `authRequired` endpoint its
+    // `401`, and before the body is read or anything runs.
+    const membershipRefusal = input.membership ? await input.membership() : null;
+    if (membershipRefusal) return { status: membershipRefusal.status, body: membershipRefusal.body };
     if (!input.execution) {
         return notImplemented(match, method, path,
             'Policies (authRequired / rateLimit / cacheTtlSeconds) were enforced and this request passed them, but no '

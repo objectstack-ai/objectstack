@@ -12,6 +12,8 @@ import {
   dedupeFilters,
   listWorkspacePackages,
   moduleSpecifiers,
+  PATH_WALKER,
+  PATH_WALKER_FILE,
   outsideTreeReasons,
   packageClosures,
   parseWorkspaceGlobs,
@@ -47,6 +49,15 @@ function fixture(files: Record<string, string>): { root: string; tracked: string
   }
   return { root, tracked: Object.keys(files).sort() };
 }
+
+/** A test source that reads `args` (joined onto its own directory) with `fs`. */
+const reader = (read: string, extraImports = '') =>
+  "import { readFileSync } from 'node:fs';\n" +
+  "import { dirname, join } from 'node:path';\n" +
+  "import { fileURLToPath } from 'node:url';\n" +
+  extraImports +
+  'const HERE = dirname(fileURLToPath(import.meta.url));\n' +
+  `${read};\n`;
 
 const manifest = (name: string, deps: Record<string, string> = {}) =>
   JSON.stringify({ name, version: '0.0.0', dependencies: deps });
@@ -107,6 +118,16 @@ function workspace() {
     'packages/c/src/helpers/tree.ts': "import fs from 'node:fs';\nexport const t = fs.existsSync('.');\n",
     'packages/c/src/undeclared.test.ts': "import { a } from '@fx/a';\n",
     'packages/c/src/reach.test.ts': "import { b } from '../../b/src/index';\n",
+    'packages/c/src/own-read.test.ts': reader("readFileSync(join(HERE, '..', 'fixtures', 'x.json'), 'utf8')"),
+    'packages/c/src/other-read.test.ts': reader("readFileSync(join(HERE, '..', '..', 'a', 'src', 'index.ts'), 'utf8')"),
+    'packages/c/src/cwd-read.test.ts': reader("readFileSync(join(process.cwd(), 'x.json'), 'utf8')"),
+    'packages/c/src/var-read.test.ts': reader('const files = [HERE];\nfor (const f of files) readFileSync(f)'),
+    'packages/c/src/aliased-read.test.ts': "import { readFileSync as rf } from 'node:fs';\nrf(new URL('./x.json', import.meta.url));\n",
+    'packages/c/src/ts-read.test.ts': reader("readFileSync(join(HERE, 'x.json'), 'utf8')", "import ts from 'typescript';\n"),
+    'packages/c/src/passed-read.test.ts': reader("readFileSync(join(HERE, 'x.json'), 'utf8');\n[HERE].map(readFileSync)"),
+    'packages/c/src/rebound-read.test.ts': reader(
+      "readFileSync(join(HERE, 'x.json'), 'utf8');\nconst r = readFileSync;\nr('/etc/hosts')",
+    ),
     'packages/c/src/escapes.test.ts': "import '../../../scripts/helper.mjs';\n",
     'packages/heavy-user/package.json': manifest('@fx/heavy-user'),
     'packages/heavy-user/src/heavy.test.tsx': 'export {};\n',
@@ -217,6 +238,56 @@ describe('select-affected-tests — attributed test files (objectstack#31520)', 
     const v = affected(root, tracked, ['packages/c/src/index.ts']);
     expect(v.filters).toContain('packages/c/');
     expect(v.attributed).toEqual([]);
+  });
+});
+
+describe('select-affected-tests — bounded disk readers (objectstack#31520)', () => {
+  // Each `packages/c` reader below reads through `fs`. Only a read the walker
+  // names inside a workspace package frees the test; everything else keeps it
+  // always-on, which is the answer every disk reader had before.
+  const { root, tracked } = workspace();
+  const docsOnly = affected(root, tracked, ['content/page.md']);
+  const why = new Map(docsOnly.alwaysOn.map((a) => [a.file, a.why]));
+
+  it('the walker is loaded here, nested as ui/ of objectstack', () => {
+    expect(typeof PATH_WALKER).toBe('function');
+  });
+
+  it('frees a test whose reads stay in its own package, and selects it with that package', () => {
+    expect(why.has('packages/c/src/own-read.test.ts')).toBe(false);
+    expect(docsOnly.filters.some((f) => f.includes('own-read.test'))).toBe(false);
+    expect(affected(root, tracked, ['packages/c/src/index.ts']).filters).toContain('packages/c/');
+    expect(affected(root, tracked, ['packages/a/src/index.ts']).filters.some((f) => f.includes('own-read.test'))).toBe(false);
+  });
+
+  it('frees a test that reads another package by a named path, and selects it when that package changes', () => {
+    expect(why.has('packages/c/src/other-read.test.ts')).toBe(false);
+    const v = affected(root, tracked, ['packages/a/src/index.ts']);
+    expect(v.filters).toContain('packages/c/src/other-read.test.ts');
+    expect(new Map(v.attributed.map((a) => [a.file, a.via])).get('packages/c/src/other-read.test.ts')).toEqual(['@fx/a']);
+    expect(affected(root, tracked, ['packages/registry/src/index.ts']).filters.some((f) => f.includes('other-read.test'))).toBe(
+      false,
+    );
+  });
+
+  it('keeps a test whose read goes through process.cwd(), an unnamed argument, an aliased import or a disk-reading library', () => {
+    for (const file of ['cwd-read', 'var-read', 'aliased-read', 'ts-read']) {
+      expect(why.get(`packages/c/src/${file}.test.ts`), file).toBe('reads the disk or spawns a process');
+    }
+  });
+
+  it('keeps a test that passes or re-binds a named fs read, even beside a bounded read', () => {
+    for (const file of ['passed-read', 'rebound-read']) {
+      expect(why.get(`packages/c/src/${file}.test.ts`), file).toBe('reads the disk or spawns a process');
+    }
+  });
+
+  it('keeps every disk reader always-on when the walker is absent (a standalone tree)', () => {
+    const v = selectAffectedTests({ root, tracked, changed: ['content/page.md'], walker: null });
+    expect(v.mode).toBe('affected');
+    const standalone = new Map((v as Affected).alwaysOn.map((a) => [a.file, a.why]));
+    expect(standalone.get('packages/c/src/own-read.test.ts')).toBe('reads the disk or spawns a process');
+    expect(standalone.get('packages/c/src/other-read.test.ts')).toBe('reads the disk or spawns a process');
   });
 });
 
@@ -435,6 +506,20 @@ describe('select-affected-tests — the live tree', () => {
     expect(heavy.tests.filter((t) => !tracked.has(t))).toEqual([]);
   });
 
+  it('a change to the imported path walker selects what a change to the selector itself does (objectstack#31520)', () => {
+    // The walker lives outside ui/, so a change there arrives as `outside`. It
+    // must keep reaching this file's own tests, or an edit to it could narrow
+    // the selection with nothing here running to notice.
+    const self = 'scripts/__tests__/select-affected-tests.test.ts';
+    const walker = selectAffectedTests({ changed: [], outside: [PATH_WALKER_FILE] });
+    const selector = selectAffectedTests({ changed: ['scripts/select-affected-tests.mjs'] });
+    expect(walker.mode).toBe(selector.mode);
+    if (walker.mode === 'affected' && selector.mode === 'affected') {
+      expect(walker.filters).toEqual(selector.filters);
+      expect(walker.filters).toContain(self);
+    }
+  });
+
   it('reaches a verdict from the command line, and an empty change still selects the always-on set', () => {
     const out = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'select-affected-cli-')), 'filters.txt');
     tmpRoots.push(path.dirname(out));
@@ -485,8 +570,22 @@ describe("the root ci.yml's Test UI job wires the selector fail-open (objectui#1
     expect(step).not.toMatch(/\$\(node ui\/scripts\/select-affected-tests\.mjs/);
   });
 
-  it('checks out the history the diff base needs', () => {
-    expect(job).toMatch(/uses: actions\/checkout@\S+\n\s+with:\n\s+fetch-depth: 0\n/);
+  // objectstack#22034: the checkout is depth 1 and a step of its own fetches
+  // HEAD's whole ancestry and the base branch, not `fetch-depth: 0`'s every
+  // head and tag. Without it the select step below finds no origin/<base> and
+  // no merge base, and quietly runs the full suite.
+  it('fetches the history the diff base needs before it selects', () => {
+    const checkout = job.indexOf('uses: actions/checkout@');
+    const fetch = job.indexOf("- name: Fetch this commit's history and the base branch");
+    const select = job.indexOf('- name: Select the tests this change affects');
+    expect(checkout).toBeGreaterThan(-1);
+    expect(fetch).toBeGreaterThan(checkout);
+    expect(select).toBeGreaterThan(fetch);
+    const step = job.slice(fetch, select);
+    expect(step).toContain('deepen=(--unshallow)');
+    expect(step).toContain('git fetch --no-tags "${deepen[@]}" origin "$head" "${refspecs[@]}"');
+    expect(step).toContain("refspecs=('+refs/heads/main:refs/remotes/origin/main')");
+    expect(step).toContain('refspecs+=("+refs/heads/$PR_BASE_REF:refs/remotes/origin/$PR_BASE_REF")');
   });
 
   it('keeps the matrix width and the full-suite command for the full battery', () => {

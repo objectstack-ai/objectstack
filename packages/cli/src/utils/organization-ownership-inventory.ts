@@ -792,6 +792,18 @@ export const ORGANIZATION_OWNERSHIP_INVENTORY: readonly InventoryEntry[] = [
       `${CENSUS_MAIN}: systemFields.tenant: false; ${D7}: the deployment's one cloud binding credential, read by its ` +
       'fixed slot under the system context, never by organization',
   },
+  // #30959 (ruling record 6718345088, fork 1 (a)) — an identity-provider group
+  // mapping is saved by the platform administrator for one SCIM connection and
+  // always carries the organization that owns the connection's credential (the
+  // save refuses a connection whose credential names none), so a NULL row has
+  // no producer.
+  {
+    object: 'sys_idp_group_mapping',
+    census: PMAIN,
+    fate: 'attribution',
+    citation: `${CENSUS_MAIN} (in reach, added since the first census; one row per SCIM connection, in the organization that owns it); ${D10_SINGLE}`,
+    anchors: [],
+  },
   // ADR-0143 D3 — a connector connection is made by an organization's
   // administrator and dispatched with by that organization's runs (Q1 = A):
   // every row is written with the organization that connected it, so a NULL

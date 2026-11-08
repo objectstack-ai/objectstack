@@ -3819,6 +3819,37 @@ function rearmThroughProxy(args) {
   return null;
 }
 
+/**
+ * Every refusal a body meets before any route is resolved — the stamp contract, the signature, and per mode the
+ * claim/record keyed lines and decision facets (`comment`) or the vacant ledger (`body`) — as ONE function, so a
+ * sender that folds a comment into a wider stroke (`label-write.mjs --comment-file`) judges it on exactly the path
+ * `main` does, never a copy. `options.mode` is `comment` or `body`; `nowMs` is the clock the stamp substitutes;
+ * `tool` names the sender in the signature refusal. Answers `{ ok: true, rendered }`, or `{ ok: false, rendered,
+ * text }` — `text` is what the caller prints before it exits refused with nothing written. Pure.
+ */
+export function judgeBody(input, options = {}, nowMs = Date.now(), tool = 'post-stamped') {
+  const rendered = renderBody(input, nowMs);
+  // The signature (#27113), judged BESIDE the render rather than behind it, on both modes: one exit, and a body that
+  // breaks the stamp contract AND carries no signature is told both. An empty body is told it is empty, once.
+  const unsigned = rendered.kind === 'empty' ? null : signatureRefusal(input);
+  if (!rendered.ok || unsigned !== null) {
+    return { ok: false, rendered, text: [...(rendered.ok ? [] : [rendered.error]), ...(unsigned === null ? [] : [signatureRefusalText(unsigned, { tool })])].join('\n\n') };
+  }
+  // ⛔ Comments only: a claim IS a comment, and a seat POST's body carries a `Seat:` line of its own that no claim reader judges.
+  const keyed = options.mode === 'comment' ? claimKeyedLineRefusals(rendered.body) : [];
+  if (keyed.length > 0) return { ok: false, rendered, text: keyedLineRefusalText(keyed) };
+  // The record's line, on the same act and with the same scope: a record IS a comment.
+  const record = options.mode === 'comment' ? recordKeyedLineRefusals(rendered.body) : [];
+  if (record.length > 0) return { ok: false, rendered, text: recordLineRefusalText(record) };
+  // ⛔ Comments only: a decision analysis is anchored on its card AS A COMMENT, and the handover check reads comments.
+  const facets = options.mode === 'comment' ? decisionFacetRefusals(rendered.body) : [];
+  if (facets.length > 0) return { ok: false, rendered, text: decisionFacetRefusalText(facets) };
+  // ⛔ Bodies only: a VACANT seat post's ledger holds pointers, never obligations (#23396).
+  const vacant = options.mode === 'body' ? vacantLedgerRefusals(rendered.body) : [];
+  if (vacant.length > 0) return { ok: false, rendered, text: vacantLedgerRefusalText(vacant) };
+  return { ok: true, rendered };
+}
+
 const USAGE = [
   'post-stamped — write a seat artefact to GitHub with a stamp this act read, never one typed from memory.',
   '',
@@ -3894,41 +3925,14 @@ async function main(argv) {
     return EXIT_USAGE;
   }
 
-  const rendered = renderBody(input);
-  // The signature (#27113), judged BESIDE the render rather than behind it, on both modes: one exit, and a body that
-  // breaks the stamp contract AND carries no signature is told both. An empty body is told it is empty, once.
-  const unsigned = rendered.kind === 'empty' ? null : signatureRefusal(input);
-  if (!rendered.ok || unsigned !== null) {
-    console.error([...(rendered.ok ? [] : [rendered.error]), ...(unsigned === null ? [] : [signatureRefusalText(unsigned, { tool: 'post-stamped' })])].join('\n\n'));
+  // Every body refusal on ONE path (`judgeBody`, which `label-write.mjs --comment-file` calls too), before the
+  // transport, so a dry run is refused exactly as a live write is.
+  const judged = judgeBody(input, options);
+  if (!judged.ok) {
+    console.error(judged.text);
     return EXIT_REFUSED;
   }
-
-  // ⛔ Comments only: a claim IS a comment, and a seat POST's body carries a `Seat:` line of its own that no claim reader judges.
-  const keyed = options.mode === 'comment' ? claimKeyedLineRefusals(rendered.body) : [];
-  if (keyed.length > 0) {
-    console.error(keyedLineRefusalText(keyed));
-    return EXIT_REFUSED;
-  }
-  // The record's line, on the same act and with the same scope: a record IS a comment.
-  const record = options.mode === 'comment' ? recordKeyedLineRefusals(rendered.body) : [];
-  if (record.length > 0) {
-    console.error(recordLineRefusalText(record));
-    return EXIT_REFUSED;
-  }
-  // ⛔ Comments only: a decision analysis is anchored on its card AS A COMMENT, and the handover check reads comments.
-  // Before the transport, so a dry run is refused exactly as a live write is.
-  const facets = options.mode === 'comment' ? decisionFacetRefusals(rendered.body) : [];
-  if (facets.length > 0) {
-    console.error(decisionFacetRefusalText(facets));
-    return EXIT_REFUSED;
-  }
-  // ⛔ Bodies only: a VACANT seat post's ledger holds pointers, never obligations (#23396). Before the transport,
-  // so a dry run is refused exactly as a live write is.
-  const vacant = options.mode === 'body' ? vacantLedgerRefusals(rendered.body) : [];
-  if (vacant.length > 0) {
-    console.error(vacantLedgerRefusalText(vacant));
-    return EXIT_REFUSED;
-  }
+  const rendered = judged.rendered;
 
   // The transport, decided and SAID before anything leaves. A dry run makes no
   // request, so a route that cannot be resolved is a note there, not a refusal.
@@ -4112,6 +4116,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the relay transport: the same act as one op, the comment found on the board, the exit register kept apart': 13,
   "the size route: over the relay's body cap under auto THIS write goes direct with one line naming bytes, cap and identity; at or under it the relay; explicit dispatch refuses naming the bytes; nothing else re-routes": 13,
   'the signature: every body opens with LANE#N · ACCOUNT · SESSION or is refused, beside the stamp contract; one leading signature changes no reading': 11,
+  'the one judge: every body refusal on ONE path — `main` and `label-write.mjs --comment-file` call `judgeBody`, never a copy': 8,
 });
 const SELF_TEST_BATTERY_FLOOR = 18;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
@@ -4493,7 +4498,7 @@ export function selfTest() {
   // Structural: a predicate nobody is told about is a predicate nobody can act
   // on, so the verdict reaches `$?`, the dry run, `--json` and the read-back.
   const stampSource = readFileSync(SELF_PATH, 'utf8');
-  t('structural: a refused render — or an unsigned body, beside it — returns EXIT_REFUSED from the CLI, with nothing written', /if \(!rendered\.ok \|\| unsigned !== null\) \{\n\s+console\.error\(\[\.\.\.\(rendered\.ok \? \[\] : \[rendered\.error\]\)[^\n]*\n\s+return EXIT_REFUSED;/u.test(stampSource));
+  t('structural: a refused render — or an unsigned body, beside it — returns EXIT_REFUSED from the CLI, with nothing written', /if \(!rendered\.ok \|\| unsigned !== null\) \{\n\s+return \{ ok: false, rendered, text: \[\.\.\.\(rendered\.ok \? \[\] : \[rendered\.error\]\)[^\n]*\n/u.test(stampSource) && /const judged = judgeBody\(input, options\);\n\s+if \(!judged\.ok\) \{\n\s+console\.error\(judged\.text\);\n\s+return EXIT_REFUSED;/u.test(stampSource));
   t('structural: the DRY RUN line names the verdict, so a caller reads it BEFORE a write', /Stamp verdict: \$\{rendered\.verdict\}/u.test(stampSource));
   t('structural: `--json` carries the verdict and the token count for a script to read', /stamp_verdict: rendered\.verdict,/u.test(stampSource) && /verbatim_tokens: rendered\.verbatimTokens,/u.test(stampSource));
   t('structural: the read-back is HANDED the counts its line needs, never left to guess', /verbatimTokens: rendered\.verbatimTokens,/u.test(stampSource));
@@ -5623,8 +5628,32 @@ export function selfTest() {
     // The slice the size-route battery takes: main, up to the self-test's banner.
     const ownText = readFileSync(SELF_PATH, 'utf8');
     const mainSource = ownText.slice(ownText.indexOf('async function main(argv)'), ownText.indexOf('// --self-test — offline'));
-    t('structural: the signature is judged on BOTH modes, before the keyed lines and before the route is resolved', /const unsigned = rendered\.kind === 'empty' \? null : signatureRefusal\(input\);/u.test(mainSource) && mainSource.indexOf('signatureRefusal(input)') < mainSource.indexOf('claimKeyedLineRefusals(') && mainSource.indexOf('signatureRefusal(input)') < mainSource.indexOf('await resolveRoute('));
+    const judgeSource = ownText.slice(ownText.indexOf('export function judgeBody('), ownText.indexOf('const USAGE = ['));
+    t('structural: the signature is judged on BOTH modes, before the keyed lines and before the route is resolved', /const unsigned = rendered\.kind === 'empty' \? null : signatureRefusal\(input\);/u.test(judgeSource) && judgeSource.indexOf('signatureRefusal(input)') < judgeSource.indexOf('claimKeyedLineRefusals(') && mainSource.indexOf('judgeBody(input, options)') > 0 && mainSource.indexOf('judgeBody(input, options)') < mainSource.indexOf('await resolveRoute('));
     t('the usage says it, with the shape', USAGE.includes('signature') && USAGE.includes(SEAT_SIGNATURE_SHAPE));
+  }
+
+  // ── the one judge: a sender that folds a comment into a wider stroke judges it HERE ──
+  battery('the one judge: every body refusal on ONE path — `main` and `label-write.mjs --comment-file` call `judgeBody`, never a copy');
+  {
+    const SIG = 'domain:skills#2 · os-justin · session_01QSeKYmhU5KEj1nukYhp1Tg';
+    const ok = judgeBody(`${SIG}\nClaim: PM loop round 1 · {{NOW}}\nSeat: \`domain:skills#2\``, { mode: 'comment' }, NOW_MS);
+    t('⭐ a signed, stamped claim passes and comes back RENDERED — the clock this act read is in it', ok.ok && ok.rendered.substituted === 1 && ok.rendered.body.includes(ok.rendered.stamp) && !ok.rendered.body.includes(STAMP_TOKEN));
+    const unsigned = judgeBody('Claim: PM loop round 1 · {{NOW}}', { mode: 'comment' }, NOW_MS, 'label-write');
+    t('⭐ an unsigned comment is refused, and the refusal names the SENDER it was handed', !unsigned.ok && unsigned.text.startsWith('label-write: REFUSED') && unsigned.text.includes('opens with no signature line'));
+    const typed = judgeBody(`${SIG}\nClaim: PM loop round 1 · 2026-09-10T06:37Z`, { mode: 'comment' }, NOW_MS);
+    t('⭐ a typed stamp on the act\'s own line is refused — the one-clock rule rides the fold unchanged', !typed.ok && typed.text.includes('positional'));
+    const keyed = judgeBody(`${SIG}\nClaim: PM loop round 1 · {{NOW}}\nClause-②: YES`, { mode: 'comment' }, NOW_MS);
+    t('a claim whose keyed line its owner cannot read is refused with that owner\'s text', !keyed.ok && keyed.text === keyedLineRefusalText(claimKeyedLineRefusals(keyed.rendered.body)));
+    const ANALYSIS = [SIG, 'Decision record: who lands the gate {{NOW}}', '', '- **A**: the seat lands it', '- **B**: the maintainer lands it', '', 'This seat recommends **A**.'].join('\n');
+    t('a decision analysis with no facet marker is refused as a COMMENT, and passes as a card BODY — the modes keep their scopes', !judgeBody(ANALYSIS, { mode: 'comment' }, NOW_MS).ok && judgeBody(ANALYSIS, { mode: 'body' }, NOW_MS).ok);
+    t('an empty body is told it is empty, once', !judgeBody('  \n', { mode: 'comment' }, NOW_MS).ok && !judgeBody('  \n', { mode: 'comment' }, NOW_MS).text.includes('signature'));
+    const own = readFileSync(SELF_PATH, 'utf8');
+    const mainOnly = own.slice(own.indexOf('async function main(argv)'), own.indexOf('// --self-test — offline'));
+    t('structural: main reaches every body refusal through judgeBody alone, ⛔ no inline copy beside it', (mainOnly.match(/judgeBody\(/gu) ?? []).length === 1 && !/signatureRefusal\(|claimKeyedLineRefusals\(|decisionFacetRefusals\(|vacantLedgerRefusals\(/u.test(mainOnly));
+    let lw = '';
+    try { lw = readFileSync(new URL('./label-write.mjs', import.meta.url), 'utf8'); } catch { lw = ''; }
+    t('↔ structural: label-write imports judgeBody and judges its folded comment with it, ⛔ no reader of its own', /\bjudgeBody\b[^;]*from '\.\/post-stamped\.mjs'/u.test(lw) && /judgeBody\(text, \{ mode: 'comment' \}/u.test(lw) && !/function\s+(signatureRefusal|claimKeyedLineRefusals|decisionFacetRefusals)\b/u.test(lw));
   }
 
   // The floor, evaluated last: a battery that stops running names itself here.

@@ -107,3 +107,58 @@ describe('ImportWizard mapping step — the disabled Next is described by its re
     expect(next.parentElement).not.toHaveAttribute('data-disabled-reason');
   });
 });
+
+describe('ImportWizard mapping step — the disabled "Save current" template button gives its reason', () => {
+  const REASON = 'Map at least one column to save a template.';
+  // Neither column header matches a field, so both stay Skip and nothing is mapped.
+  const UNMAPPED_ROWS = 'foo\tbar\nx\t1\ny\t2';
+
+  it('with nothing mapped, a focusable wrapper is described by the reason, and so is the button', async () => {
+    renderWizard();
+    pasteRows(UNMAPPED_ROWS);
+
+    const save = await screen.findByTestId('import-template-save-btn');
+    expect(save).toBeDisabled();
+    const reason = describedBy(save);
+    expect(reason).toHaveTextContent(REASON);
+
+    const wrapper = save.parentElement as HTMLElement;
+    expect(wrapper).toHaveAttribute('data-disabled-reason');
+    expect(wrapper).toHaveAttribute('tabindex', '0');
+    expect(describedBy(wrapper)).toBe(reason);
+  });
+
+  it('a keyboard user reaches it: Tab from the template select lands on the wrapper, which opens the tooltip', async () => {
+    const user = userEvent.setup();
+    renderWizard();
+    pasteRows(UNMAPPED_ROWS);
+    await screen.findByTestId('import-template-save-btn');
+
+    screen.getByTestId('import-template-select').focus();
+    await user.tab();
+    const wrapper = screen.getByTestId('import-template-save-btn').parentElement as HTMLElement;
+    expect(wrapper).toHaveFocus();
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(REASON);
+  });
+
+  it('hovering the wrapper shows the reason in a tooltip', async () => {
+    const user = userEvent.setup();
+    renderWizard();
+    pasteRows(UNMAPPED_ROWS);
+
+    const save = await screen.findByTestId('import-template-save-btn');
+    await user.hover(save.parentElement as HTMLElement);
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(REASON);
+  });
+
+  it('CONTROL — with one column mapped, Save current is a plain enabled button with no wrapper', async () => {
+    renderWizard();
+    pasteRows('Name\nAcme');
+
+    const save = await screen.findByTestId('import-template-save-btn');
+    expect(save).toBeEnabled();
+    expect(save).not.toHaveAttribute('aria-describedby');
+    expect(save.parentElement).not.toHaveAttribute('data-disabled-reason');
+    expect(screen.queryByText(REASON)).not.toBeInTheDocument();
+  });
+});

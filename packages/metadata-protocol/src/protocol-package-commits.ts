@@ -28,7 +28,6 @@
 import { ImportUnmanagedPackageRequestSchema } from '@objectstack/spec/api';
 import type {
     ImportUnmanagedPackageRequest,
-    ImportUnmanagedPackageResponse,
     InstallPackageRequest,
 } from '@objectstack/spec/api';
 import { packageScopedRowWhere } from './sys-metadata-repository.js';
@@ -75,6 +74,7 @@ import { isNonCanonicalStoredType } from './protocol-stored-overlay-types.js';
 import type { RollbackMetaItemRequest } from './protocol-door-requests.js';
 import { withRefusalAudit } from './protocol-refusal-audit.js';
 import type { ProtocolHost } from './protocol-host.js';
+import type { ImportUnmanagedPackageAnswer, InstallPackageStoredRowHook, StoredPackageRow } from './protocol-package-install.js';
 
 /**
  * [#30319] The grant keys of a stored permission set's `objects` map: what a
@@ -551,7 +551,7 @@ export class ProtocolPackageCommitsFacet {
     }
 
     /** The body of `ObjectStackProtocolImplementation#importUnmanagedPackage`; the method's docblock there is its contract. */
-    static async importUnmanagedPackage(host: Pick<ProtocolHost, 'convertStoredItem' | 'engine' | 'installPackage' | 'isRuntimeCreateAllowed' | 'refuseOrganizationScopedWrite' | 'resolveFlowCanonicalizer' | 'rollBackUnmanagedImport' | 'saveMetaItem' | 'unmanagedImportCollisions'>, request: ImportUnmanagedPackageRequest & { actor?: string; seedData?: boolean },): Promise<ImportUnmanagedPackageResponse> {
+    static async importUnmanagedPackage(host: Pick<ProtocolHost, 'convertStoredItem' | 'engine' | 'installPackage' | 'isRuntimeCreateAllowed' | 'refuseOrganizationScopedWrite' | 'resolveFlowCanonicalizer' | 'rollBackUnmanagedImport' | 'saveMetaItem' | 'unmanagedImportCollisions'>, request: ImportUnmanagedPackageRequest & { actor?: string; seedData?: boolean },): Promise<ImportUnmanagedPackageAnswer> {
         const rawSourceId = (request as { manifest?: { id?: unknown } } | undefined)?.manifest?.id;
         const sourceLabel = typeof rawSourceId === 'string' && rawSourceId !== '' ? rawSourceId : '(unnamed)';
         // 1. FIRST, as on every package write verb.
@@ -694,7 +694,12 @@ export class ProtocolPackageCommitsFacet {
 
         // The base. Not best-effort: a refusal here is the import's, and
         // `installPackage` leaves nothing behind when it refuses.
-        await host.installPackage({ manifest: plan.baseManifest } as InstallPackageRequest);
+        // [#31530] The base row as its own write answered it, door-only beside
+        // the published request: the answer's `baseInstance`, so a caller that
+        // ties a record to the row instance never reads the row back.
+        let baseInstance: StoredPackageRow | undefined;
+        const onStoredRow = (row: StoredPackageRow): void => { baseInstance = row; };
+        await host.installPackage({ manifest: plan.baseManifest, onStoredRow } as InstallPackageRequest & InstallPackageStoredRowHook);
 
         const copied: Array<{ type: string; name: string }> = [];
         for (const item of prepared) {
@@ -732,6 +737,7 @@ export class ProtocolPackageCommitsFacet {
             // Planned before the base existed; every item was written, so every
             // lock listed was dropped from a copy that now exists.
             strippedLocks: plan.strippedLocks,
+            ...(baseInstance !== undefined ? { baseInstance } : {}),
         };
     }
 

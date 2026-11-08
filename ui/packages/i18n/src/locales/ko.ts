@@ -703,6 +703,7 @@ const ko = {
       noSavedTemplates: "저장된 템플릿 없음",
       noneOption: "— 없음 —",
       saveCurrent: "현재 저장",
+      saveCurrentNeedsMapping: "템플릿을 저장하려면 열을 하나 이상 매핑하세요.",
       templateName: "템플릿 이름",
       save: "저장",
       deleteTemplate: "템플릿 삭제",

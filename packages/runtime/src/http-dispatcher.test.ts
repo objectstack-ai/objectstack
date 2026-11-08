@@ -11,6 +11,7 @@ import type { IAuthService, IAutomationService } from '@objectstack/spec/contrac
 // hook -- both of which vitest clocks, while collection is clocked against nothing. See
 // `scripts/check-test-source-alias.mjs` (the clocked-window rule) and #10115 / PR #10120,
 // where the same shape cost 30 ejected merge-queue builds in one night.
+import '@objectstack/metadata';
 import '@objectstack/metadata-protocol';
 
 /**
@@ -4039,13 +4040,36 @@ describe('HttpDispatcher', () => {
                 userId: 'staff-1',
                 orgId: PLATFORM_ORG_ID,
             });
-            const ctx: any = { request: { headers: {} }, environmentId: 'proj-any' };
+            // The organization the request's resolution vetted, as `dispatch()`
+            // writes it before this gate runs.
+            const ctx: any = {
+                request: { headers: {} },
+                environmentId: 'proj-any',
+                executionContext: { userId: 'staff-1', tenantId: PLATFORM_ORG_ID },
+            };
             const result = await (d as any).enforceProjectMembership(
                 ctx,
                 '/api/v1/environments/proj-any/data/task',
             );
             expect(result).toBeNull();
             expect(memberQL.find).not.toHaveBeenCalled();
+        });
+
+        it('reads the platform org only from a resolution of the same user', async () => {
+            const { dispatcher: d, memberQL } = buildDispatcher({
+                memberRows: [],
+                userId: 'staff-1',
+                orgId: PLATFORM_ORG_ID,
+            });
+            for (const executionContext of [undefined, { userId: 'someone-else', tenantId: PLATFORM_ORG_ID }, { userId: 'staff-1' }]) {
+                memberQL.find.mockClear();
+                const ctx: any = { request: { headers: {} }, environmentId: 'proj-any', executionContext };
+                const result = await (d as any).enforceProjectMembership(ctx, '/api/v1/environments/proj-any/data/task');
+                expect(result?.status).toBe(403);
+                expect(memberQL.find).toHaveBeenCalledWith('sys_environment_member', expect.objectContaining({
+                    where: { environment_id: 'proj-any', user_id: 'staff-1' },
+                }));
+            }
         });
 
         it('caches positive results so repeat calls skip the DB lookup', async () => {

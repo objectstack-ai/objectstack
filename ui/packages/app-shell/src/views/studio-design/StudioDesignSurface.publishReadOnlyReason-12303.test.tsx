@@ -16,6 +16,13 @@
  * other half of the row, is pinned in
  * `StudioDesignSurface.automationsReadOnly-11124.test.tsx`.
  *
+ * objectstack#31495 — the other disabled state, a writable package with
+ * nothing pending ("No drafts pending publish"), kept the `title` on the
+ * disabled button: no wrapper, no tooltip on hover, and Tab skipped Publish.
+ * It now takes the same wrapper, described by the same `sr-only` reason
+ * (`publish-none-reason`); with a draft pending Publish is a plain enabled
+ * button again. Pinned in the last block below.
+ *
  * The REAL `StudioDesignSurface` over a fetch stub (the harness of
  * `StudioDesignSurface.interfacePolish.test.tsx`); only the package list's
  * `writable` differs between the case and its control.
@@ -28,10 +35,15 @@ import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { I18nProvider } from '@object-ui/i18n';
+// The surface loads the linter lazily; pay that load at collection, not inside
+// a case's clocked window.
+import '@objectstack/lint';
 
 const PACKAGE_ID = 'com.acme.app';
 
 const pkg = vi.hoisted(() => ({ writable: false }));
+/** The draft ledger `/meta/_drafts` answers. */
+let drafts: Array<{ type: string; name: string; packageId: string }> = [];
 
 vi.mock('./packages-io', async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
@@ -73,6 +85,7 @@ window.matchMedia = ((query: string) => ({
   };
 
 const REASON = t('engine.studio.pkg.readonlyHint', 'en-US');
+const NONE_PENDING = t('engine.studio.publishNoneTitle', 'en-US');
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -80,11 +93,12 @@ function json(body: unknown, status = 200) {
 
 beforeEach(() => {
   pkg.writable = false;
+  drafts = [];
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: unknown) => {
       const path = new URL(String(input), 'http://localhost').pathname;
-      if (path === '/api/v1/meta/_drafts') return json([]);
+      if (path === '/api/v1/meta/_drafts') return json(drafts);
       if (path === '/api/v1/meta/app') return json([{ name: 'acme_app', label: 'Acme' }]);
       if (path === '/api/v1/meta/app/acme_app/layers') {
         return json({ code: null, overlay: null, overlayScope: null, effective: { name: 'acme_app', label: 'Acme', navigation: [] } });
@@ -120,18 +134,26 @@ const describedBy = (el: HTMLElement) => {
   return id ? document.getElementById(id) : null;
 };
 
-/** Publish once the package list has said the package is read-only. */
-async function readOnlyPublish(): Promise<HTMLElement> {
+/**
+ * Publish once its wrapper gives `reason`. The wrapper alone is not enough to
+ * wait on: before the package list answers, an empty ledger already wraps
+ * Publish in the "nothing pending" reason (objectstack#31495).
+ */
+async function wrappedPublish(reason: string): Promise<HTMLElement> {
   renderWorkbench();
   return waitFor(
     () => {
       const btn = publish();
       expect(btn.parentElement).toHaveAttribute('data-disabled-reason');
+      expect(describedBy(btn.parentElement as HTMLElement)).toHaveTextContent(reason);
       return btn;
     },
     { timeout: 8000 },
   );
 }
+
+/** Publish once the package list has said the package is read-only. */
+const readOnlyPublish = () => wrappedPublish(REASON);
 
 describe('Studio header Publish on a read-only package — the reason reaches the author (objectui#12303)', () => {
   it('Publish is described by the reason, carries no `title`, and its wrapper is described by it too', async () => {
@@ -160,7 +182,7 @@ describe('Studio header Publish on a read-only package — the reason reaches th
     expect(await screen.findByRole('tooltip')).toHaveTextContent(REASON);
   });
 
-  it('CONTROL — a writable package: Publish has no read-only reason and no wrapper', async () => {
+  it('CONTROL — a writable package: Publish gives no read-only reason', async () => {
     pkg.writable = true;
     renderWorkbench();
     // Read after the package list has answered `writable: true`.
@@ -170,8 +192,68 @@ describe('Studio header Publish on a read-only package — the reason reaches th
     });
     const btn = publish();
     expect(btn).not.toHaveAttribute('title', REASON);
-    expect(btn.parentElement).not.toHaveAttribute('data-disabled-reason');
+    // An empty ledger still wraps it, in its own reason (objectstack#31495).
+    expect(describedBy(btn.parentElement as HTMLElement)).toHaveTextContent(NONE_PENDING);
     expect(describedBy(btn)).not.toHaveTextContent(REASON);
     expect(screen.queryByText(REASON)).toBeNull();
+  });
+});
+
+describe('Studio header Publish with nothing pending — the reason reaches the author (objectstack#31495)', () => {
+  beforeEach(() => {
+    pkg.writable = true;
+  });
+
+  /** Publish on a writable package once the empty ledger has wrapped it. */
+  const nonePendingPublish = () => wrappedPublish(NONE_PENDING);
+
+  it('the wrapper is a tab stop, and it and the button are described by "No drafts pending publish"', async () => {
+    const btn = await nonePendingPublish();
+    expect(btn).toBeDisabled();
+    // The disabled button cannot show a `title`; the reason is the wrapper's.
+    expect(btn).not.toHaveAttribute('title');
+    expect(btn).toHaveAccessibleDescription(NONE_PENDING);
+    const wrapper = btn.parentElement as HTMLElement;
+    expect(wrapper).toHaveAttribute('tabindex', '0');
+    expect(wrapper).toHaveAccessibleDescription(NONE_PENDING);
+    // One reason element, the `sr-only` one both point at.
+    expect(describedBy(wrapper)).toBe(screen.getByTestId('publish-none-reason'));
+    expect(describedBy(btn)).toBe(describedBy(wrapper));
+    // The wrapper takes the hover: the disabled button lets it through.
+    expect(btn.className).toMatch(/(^|\s)disabled:pointer-events-none(\s|$)/);
+  });
+
+  it('hovering Publish opens a tooltip with the reason', async () => {
+    const user = userEvent.setup();
+    const btn = await nonePendingPublish();
+    await user.hover(btn.parentElement as HTMLElement);
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(NONE_PENDING);
+  });
+
+  it('a keyboard user reaches the reason: Tab from "Changes" lands on Publish’s wrapper, which opens the tooltip', async () => {
+    const user = userEvent.setup();
+    const btn = await nonePendingPublish();
+    screen.getByRole('button', { name: /^Changes/ }).focus();
+    await user.tab();
+    expect(btn.parentElement).toHaveFocus();
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(NONE_PENDING);
+  });
+
+  it('CONTROL — a draft pending: a plain enabled Publish, no wrapper and no reason', async () => {
+    drafts = [{ type: 'dashboard', name: 'acme_dashboard', packageId: PACKAGE_ID }];
+    renderWorkbench();
+    const btn = await waitFor(
+      () => {
+        const b = publish();
+        expect(b).toBeEnabled();
+        return b;
+      },
+      { timeout: 8000 },
+    );
+    expect(btn.parentElement).not.toHaveAttribute('data-disabled-reason');
+    expect(btn).not.toHaveAttribute('aria-describedby');
+    expect(btn.className).not.toMatch(/(^|\s)disabled:pointer-events-none(\s|$)/);
+    expect(screen.queryByTestId('publish-none-reason')).toBeNull();
+    expect(screen.queryByText(NONE_PENDING)).toBeNull();
   });
 });

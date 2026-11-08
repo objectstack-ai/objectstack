@@ -14,6 +14,7 @@ import { mountsAiServicePlugin, resolveAiServiceLoad, resolveOptionalPluginLoad 
 import { registerInstalledPlugins } from '../utils/installed-plugins-boot.js';
 import { readInternalArtifactPath, readInternalConfigOutputPath } from '../utils/internal-artifact-channel.js';
 import { readAuthSecretFileChannel } from '../utils/internal-auth-secret-channel.js';
+import { readCeremonyConnectionChannel, readCeremonyDatabaseChannel } from '../utils/internal-ceremony-database-channel.js';
 import { compileForDevBoot, devCompilesAtBoot } from '../utils/dev-compile-at-boot.js';
 import { makeDirectorySync } from '../utils/make-directory.js';
 // The precedence's last rung — whether the cwd config takes part — decided by
@@ -4215,10 +4216,16 @@ export default class Serve extends Command {
         // ceremony boots the way this one did (its secret, .env* files and
         // `telemetry` sibling). A boot `os start` supervises with the secret it
         // persisted in its home names that file, so the ceremony runs with the
-        // secret this server composes its security plugin with.
+        // secret this server composes its security plugin with. A boot on a
+        // database the ceremony would not find by default (`os start -d` or
+        // `--home`, #31488; `os dev -d`, #31547) names it, so the commands plan
+        // this database, with the driver and token its parent's flags chose.
+        const ceremonyDatabase = readCeremonyDatabaseChannel(process.env);
         await kernel.use(new OrganizationOwnershipBootGuardPlugin({
           dev: isDev,
           authSecretFile: readAuthSecretFileChannel(process.env),
+          ...(ceremonyDatabase ? { databaseUrl: ceremonyDatabase } : {}),
+          ...readCeremonyConnectionChannel(process.env),
         }));
         trackPlugin('OrganizationOwnershipBootGuard');
       }
