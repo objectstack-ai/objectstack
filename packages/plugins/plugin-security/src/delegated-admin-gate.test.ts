@@ -1843,8 +1843,11 @@ describe('[#26189] DelegatedAdminGate — a scope violation answers DELEGATION_S
 //    target outside it is refused with ONE reason, whether or not the user
 //    exists or holds a business-unit membership: the same class, code, status,
 //    sentence and details, on the thrown value and on the REST door's
-//    classification (`mapDataError`). One target id, three stored states, and
-//    every write shape that names a target user.
+//    classification (`mapDataError`). A target user the write NAMES is first
+//    asked of the caller's own read door, as the engine's reference check asks
+//    it: one the caller cannot read is answered as one that does not exist, so
+//    it is outside the subtree too. One target id, its stored states, and every
+//    write shape that judges a target user.
 
 describe('[ADR-0090 D12] a delegated refusal names one reason for a target user outside the subtree, whether or not the user exists or holds a business-unit membership', () => {
   const TARGET = 'u_target';
@@ -1853,46 +1856,72 @@ describe('[ADR-0090 D12] a delegated refusal names one reason for a target user 
     'a user with no business-unit membership',
     'a user whose business unit is outside the subtree',
   ] as const;
-  type TargetState = (typeof STATES)[number];
+  /** A state only a write that NAMES the target meets: the caller's read door is asked about it. */
+  const UNREADABLE_INSIDE = 'a user with a business unit inside the subtree whom the caller cannot read';
+  const READABLE_INSIDE = 'a user with a business unit inside the subtree whom the caller reads';
+  type TargetState = (typeof STATES)[number] | typeof UNREADABLE_INSIDE | typeof READABLE_INSIDE;
 
-  /** A fresh harness with `TARGET` in `state`. */
-  function harnessWith(state: TargetState | 'a user whose business unit is inside the subtree'): ReturnType<typeof makeHarness> {
+  /**
+   * A fresh harness with `TARGET` in `state`, over the engine the gate meets in
+   * a real composition: `sys_user` registered and the grant's `user_id` a
+   * lookup to it (the conditions under which the engine's reference check asks
+   * the caller's read door), and a caller read of `sys_user` that returns no
+   * row for a user the caller cannot read. A system read returns every row.
+   */
+  function harnessWith(state: TargetState): ReturnType<typeof makeHarness> {
     const harness = makeHarness();
+    const unreadable = new Set<string>();
+    const { find, findOne } = harness.ql;
+    const served = (object: string, opts: any, row: any) =>
+      !(object === 'sys_user' && !opts?.context?.isSystem && unreadable.has(row?.id));
+    harness.ql.find = async (object: string, opts: any) =>
+      (await find.call(harness.ql, object, opts)).filter((row: any) => served(object, opts, row));
+    harness.ql.findOne = async (object: string, opts: any) => {
+      const row = await findOne.call(harness.ql, object, opts);
+      return row && served(object, opts, row) ? row : null;
+    };
+    const SCHEMAS: Record<string, unknown> = {
+      sys_user: { name: 'sys_user', fields: {} },
+      sys_user_permission_set: { name: 'sys_user_permission_set', fields: { user_id: { type: 'lookup', reference: 'sys_user' } } },
+    };
+    harness.ql.getSchema = (name: string) => SCHEMAS[name];
     if (state === 'an id naming no user') return harness;
     harness.tables.sys_user.push({ id: TARGET });
     if (state === 'a user whose business unit is outside the subtree') {
       harness.tables.sys_business_unit_member.push({ id: 'm_target', business_unit_id: 'bu_west', user_id: TARGET });
     }
-    if (state === 'a user whose business unit is inside the subtree') {
+    if (state === UNREADABLE_INSIDE || state === READABLE_INSIDE) {
       harness.tables.sys_business_unit_member.push({ id: 'm_target', business_unit_id: 'bu_es', user_id: TARGET });
     }
+    if (state === UNREADABLE_INSIDE) unreadable.add(TARGET);
     return harness;
   }
 
   /**
-   * Every write shape that names a target user, as `[operation, write]`: a new
-   * grant, a stored grant pointed at the target, a stored grant of the target
-   * removed. Each write is the gate's own `assert`, never an engine double.
+   * Every write shape that judges a target user, as `[operation, write, names]`:
+   * a new grant and a stored grant pointed at the target NAME it; a stored
+   * grant of the target removed holds it as stored. Each write is the gate's
+   * own `assert`, never an engine double.
    */
-  const WRITES: ReadonlyArray<readonly [string, (harness: ReturnType<typeof makeHarness>) => Promise<void>]> = [
+  const WRITES: ReadonlyArray<readonly [string, (harness: ReturnType<typeof makeHarness>) => Promise<void>, boolean]> = [
     ['insert', (harness) => harness.gate.assert({
       object: 'sys_user_permission_set', operation: 'insert',
       data: { user_id: TARGET, permission_set: 'sales_user' }, context: harness.ctxOf('delegate'),
-    })],
+    }), true],
     ['update', (harness) => {
       harness.tables.sys_user_permission_set = [{ id: 'g_east', user_id: 'u_east_1', permission_set: 'sales_user' }];
       return harness.gate.assert({
         object: 'sys_user_permission_set', operation: 'update',
         data: { id: 'g_east', user_id: TARGET }, context: harness.ctxOf('delegate'),
       });
-    }],
+    }, true],
     ['delete', (harness) => {
       harness.tables.sys_user_permission_set = [{ id: 'g_target', user_id: TARGET, permission_set: 'sales_user' }];
       return harness.gate.assert({
         object: 'sys_user_permission_set', operation: 'delete',
         options: { where: { id: 'g_target' } }, context: harness.ctxOf('delegate'),
       });
-    }],
+    }, false],
   ];
 
   /** Everything a caller is told by a refusal: the thrown value and the REST door's envelope. */
@@ -1907,11 +1936,12 @@ describe('[ADR-0090 D12] a delegated refusal names one reason for a target user 
     wire: mapDataError(err, 'sys_user_permission_set'),
   });
 
-  for (const [shape, write] of WRITES) {
-    it(`${shape}: the three target states answer the same scope-violation refusal`, async () => {
+  for (const [shape, write, names] of WRITES) {
+    const states: TargetState[] = names ? [...STATES, UNREADABLE_INSIDE] : [...STATES];
+    it(`${shape}: the ${states.length} target states answer the same scope-violation refusal`, async () => {
       const answers: Array<ReturnType<typeof answerOf>> = [];
-      for (const state of STATES) answers.push(answerOf(await refusalOf(() => write(harnessWith(state)))));
-      for (const [i, answer] of answers.entries()) expect(answer, STATES[i]).toEqual(answers[0]);
+      for (const state of states) answers.push(answerOf(await refusalOf(() => write(harnessWith(state)))));
+      for (const [i, answer] of answers.entries()) expect(answer, states[i]).toEqual(answers[0]);
       // The one answer is the caller's own scope: the target outside the subtree.
       const err = await refusalOf(() => write(harnessWith('an id naming no user')));
       expectScopeViolation(err, 'sys_user_permission_set',
@@ -1920,9 +1950,9 @@ describe('[ADR-0090 D12] a delegated refusal names one reason for a target user 
     });
   }
 
-  it('CONTROL: the same target with a business unit inside the subtree is admitted, on every write shape', async () => {
+  it('CONTROL: the same target with a business unit inside the subtree, read by the caller, is admitted on every write shape', async () => {
     for (const [shape, write] of WRITES) {
-      await expect(write(harnessWith('a user whose business unit is inside the subtree')), shape).resolves.toBeUndefined();
+      await expect(write(harnessWith(READABLE_INSIDE)), shape).resolves.toBeUndefined();
     }
   });
 });
