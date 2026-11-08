@@ -11,8 +11,12 @@ import type { SemanticMigration } from '../../types.js';
 // no master is read by its owner and by View All on the detail; a row that
 // names one is read through its master, as before. An OMITTED `required` keeps
 // its meaning where the spec sees the omission (the builder force and the D2
-// conversion cbp-master-detail-required-defaulted, both unchanged). No D2
-// conversion: nothing is rewritten.
+// conversion cbp-master-detail-required-defaulted, both unchanged). A raw
+// parse cannot see it: the field default writes `false` first, so an object
+// written directly in `defineStack`, or saved through a save door, reads an
+// omitted `required` as the optional master. That divergence is ruled, not a
+// gap: maintainer ruling A on #30905 (ruling record 6687830530) chose it over
+// refusing the omission at every door. No D2 conversion: nothing is rewritten.
 //
 // The write side followed under ADR-0055 §3 as amended (same ruling A, PR
 // #31082), and the `replacement` below records it beside the read side: a
@@ -37,8 +41,11 @@ export const entry: SemanticMigration = {
     + 'master is unchanged: a row whose stored required master reference is empty is still refused with '
     + '`422 MISSING_REQUIRED_FIELD`. Declare `required: true` when every row must name its master; an '
     + 'omitted `required` keeps meaning '
-    + 'required through `ObjectSchema.create()` and on stored rows, and `os lint` reports it at `error` so the '
-    + 'author writes one of the two.',
+    + 'required through `ObjectSchema.create()` and on stored rows. Through a raw parse (an object written '
+    + 'directly in `defineStack`, or saved through a save door) it does not: `required` defaults to `false` '
+    + 'before the object is judged, so an omitted `required` there is read as the optional master, as the '
+    + 'maintainer ruled rather than refusing the omission at every door. `os lint` reports the omission at '
+    + '`error` so the author writes one of the two.',
   reason:
     'The rule "a rep sees the contacts of the accounts they own; a contact need not have an account" had no '
     + 'declarative form: `controlled_by_parent` refused a `master_detail` that is not required at the builder '
@@ -60,5 +67,7 @@ export const entry: SemanticMigration = {
     + '"resolves no master relation" line), a member who can read a master reads that master\'s rows, the '
     + 'owner of a row with an empty master reads that row, a holder of View All on the object reads every '
     + 'row with an empty master, and nobody else reads one. An object whose `master_detail` omits `required` '
-    + 'is still forced to `required: true` by the builder and converted to it on stored rows.',
+    + 'is still forced to `required: true` by the builder and converted to it on stored rows; through a raw '
+    + 'parse (`ObjectSchema.safeParse`, an object written directly in `defineStack`, a save door) the same '
+    + 'omission is admitted as the optional master, its field parsed as `required: false`.',
 };
