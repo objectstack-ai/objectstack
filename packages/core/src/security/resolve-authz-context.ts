@@ -65,7 +65,7 @@ import { SystemObjectName } from '@objectstack/spec/system';
 import type { AuthzPosture, TenancyPosture } from '@objectstack/spec/security';
 import { postureEnforcesWall } from '@objectstack/spec/security';
 import { isValueDomainMember } from '@objectstack/spec/shared';
-import type { AuthSessionApi } from '@objectstack/spec/contracts';
+import type { AuthSessionApi, EffectivePermissionSetOrigin } from '@objectstack/spec/contracts';
 
 import { ApiKeyLifecycleRefusalError, resolveApiKeyAdmission } from './api-key.js';
 import type { ApiKeyLifecyclePolicySource, ApiKeyRefusalReason } from './api-key.js';
@@ -879,6 +879,21 @@ export interface UserAuthzGrants {
   audience?: 'external';
   /** The user's unique email (`sys_user`), for `current_user.email` owner RLS. */
   email?: string;
+  /**
+   * [ADR-0090 D6] Where each name in `permissions` came from, keyed by name —
+   * present only when the caller asked for it
+   * ({@link ResolveUserAuthzGrantsOptions.withPermissionOrigins}). Recorded at
+   * the derivation sites themselves, so it cannot disagree with them: `direct`
+   * where an applying grant row of the user's own names an active set (the
+   * `directPermissions` channel), `position` / `default` where a held
+   * position's definition in force names it (`default` for the `everyone`
+   * audience anchor, whose bindings are the default ones), and `derived` where
+   * the configured platform administrators (§6b-config) or the `ai_access` flag
+   * (§7) confer the name. Every name in `permissions` the resolution derived has
+   * at least one origin, each origin listed once, in the order the resolution
+   * reached it; a `seedPermissions` name the caller supplied has none.
+   */
+  permissionOrigins?: Record<string, EffectivePermissionSetOrigin[]>;
 }
 
 export interface ResolveUserAuthzGrantsOptions {
@@ -920,6 +935,16 @@ export interface ResolveUserAuthzGrantsOptions {
    * would then trust.
    */
   bypassGrantsCache?: boolean;
+  /**
+   * [ADR-0090 D6] Record where each permission-set name came from, in
+   * {@link UserAuthzGrants.permissionOrigins}. For a surface that DESCRIBES a
+   * user's access (`ISecurityService.describeEffectiveAccess`), never for
+   * enforcement: the envelope is otherwise byte-identical to a resolution
+   * without it. It implies {@link bypassGrantsCache}, for the explainer's ruled
+   * reason: a description is what an administrator reads to verify a change
+   * took effect, and an origin map is recorded only by a resolution that ran.
+   */
+  withPermissionOrigins?: boolean;
 }
 
 /**
@@ -1839,11 +1864,28 @@ export async function resolveUserAuthzGrants(
   // read HERE, before any read of this resolution is issued. Outside that
   // scope (every direct caller of this function) it is `undefined` and nothing
   // changes.
-  const requestMemo = openRequestGrantsMemo(ql, userId, opts, readWriteEpoch(ql));
+  // [ADR-0090 D6] An origin map is recorded only by a resolution that runs, so
+  // asking for one is a fresh resolution (see `withPermissionOrigins`).
+  const cacheOpts = opts.withPermissionOrigins ? { ...opts, bypassGrantsCache: true } : opts;
+  const requestMemo = openRequestGrantsMemo(ql, userId, cacheOpts, readWriteEpoch(ql));
   if (requestMemo?.hit) return requestMemo.hit;
 
-  const grantsCache = openUserGrantsCache(ql, userId, opts);
+  const grantsCache = openUserGrantsCache(ql, userId, cacheOpts);
   if (grantsCache?.hit) return grantsCache.hit;
+
+  // [ADR-0090 D6] The origin record, when asked for: each origin once per name,
+  // in the order the derivation below reaches it.
+  const origins = opts.withPermissionOrigins ? new Map<string, EffectivePermissionSetOrigin[]>() : undefined;
+  const recordOrigin = (name: string, origin: EffectivePermissionSetOrigin): void => {
+    if (!origins) return;
+    const list = origins.get(name) ?? [];
+    const same = (o: EffectivePermissionSetOrigin): boolean =>
+      o.kind === origin.kind
+      && (o.kind !== 'position' || (origin.kind === 'position' && o.position === origin.position))
+      && (o.kind !== 'derived' || (origin.kind === 'derived' && o.source === origin.source));
+    if (!list.some(same)) list.push(origin);
+    origins.set(name, list);
+  };
 
   const { tenantId } = opts;
   const grants: UserAuthzGrants = {
@@ -2138,9 +2180,13 @@ export async function resolveUserAuthzGrants(
   if (disabled.positions.size > 0) {
     grants.positions = grants.positions.filter((n) => !disabled.positions.has(n));
   }
-  for (const setNames of setsInForceByPosition(grants.positions, namedByPosition, disabled).values()) {
+  for (const [positionName, setNames] of setsInForceByPosition(grants.positions, namedByPosition, disabled)) {
     for (const setName of setNames) {
       if (!boundSetNames.includes(setName)) boundSetNames.push(setName);
+      // [ADR-0090 D5] The `everyone` anchor's bindings are the default ones.
+      recordOrigin(setName, positionName === 'everyone'
+        ? { kind: 'default' }
+        : { kind: 'position', position: positionName });
     }
   }
 
@@ -2168,6 +2214,7 @@ export async function resolveUserAuthzGrants(
     // [#25799] The direct channel, as the explainer reads it: a name this
     // resolution confers through the user's own grant row.
     if (active && !grants.directPermissions.includes(name)) grants.directPermissions.push(name);
+    if (active) recordOrigin(name, { kind: 'direct' });
     // platform_admin (ADR-0068 D2) is DERIVED from the anchoring admin_full_access
     // USER grant — the single source of truth (no trusted stored boolean). The
     // set is the catalog's one `admin_full_access` (ADR-0131 D4); a grant the
@@ -2235,6 +2282,7 @@ export async function resolveUserAuthzGrants(
     // envelope a grant-derived one carries.
     hasPlatformAdminGrant = true;
     if (!grants.permissions.includes(ADMIN_FULL_ACCESS)) grants.permissions.push(ADMIN_FULL_ACCESS);
+    recordOrigin(ADMIN_FULL_ACCESS, { kind: 'derived', source: 'platform_admin_config' });
     for (const p of ADMIN_FULL_ACCESS_CAPABILITIES.systemPermissions ?? []) {
       if (!grants.systemPermissions.includes(p)) grants.systemPermissions.push(p);
     }
@@ -2282,9 +2330,26 @@ export async function resolveUserAuthzGrants(
 
   // 7. [cloud ADR-0024 §7] Env-side AI seat: synthesize the `ai_seat` capability from the
   //    boolean sys_user.ai_access (sqlite returns 1/0; memory returns boolean).
-  if (!grants.permissions.includes('ai_seat')) {
+  //    An origin record reads the flag even when another channel already named
+  //    `ai_seat`, so a name reached both ways carries both origins; the row is
+  //    the memoised one, and the envelope is unchanged.
+  if (!grants.permissions.includes('ai_seat') || origins) {
     const aiAccess = ((await getUserRow()) as { ai_access?: unknown } | undefined)?.ai_access;
-    if (aiAccess === true || aiAccess === 1 || aiAccess === '1') grants.permissions.push('ai_seat');
+    if (aiAccess === true || aiAccess === 1 || aiAccess === '1') {
+      if (!grants.permissions.includes('ai_seat')) grants.permissions.push('ai_seat');
+      recordOrigin('ai_seat', { kind: 'derived', source: 'ai_access' });
+    }
+  }
+
+  // [ADR-0090 D6] Only names the envelope holds keep an origin: a bound name
+  // the catalog holds no set for, or a switched-off set, confers nothing.
+  if (origins) {
+    const permissionOrigins: Record<string, EffectivePermissionSetOrigin[]> = {};
+    for (const name of grants.permissions) {
+      const list = origins.get(name);
+      if (list) permissionOrigins[name] = list;
+    }
+    grants.permissionOrigins = permissionOrigins;
   }
 
   // [#11971] Store the fresh envelope (miss path only; the argument list is
