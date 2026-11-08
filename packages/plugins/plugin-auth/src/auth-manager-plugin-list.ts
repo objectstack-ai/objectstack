@@ -770,11 +770,27 @@ export async function buildPluginList(this: PluginListHost): Promise<any[]> {
     // OFF by default, so the vendor's own register / update-provider doors
     // write them. `saml` hands the vendor its one IdP-initiated option as a
     // getter that answers the ACS request's own provider.
+    //
+    // IdP group → permission set (the same ruling, item 3; `sso-group-projection.ts`):
+    // every sign-in's group claim (`userInfo.groups`, filled by the provider's own
+    // `mapping.extraFields.groups`) is matched against the provider's
+    // `sys_idp_group_mapping` rows, the SCIM half's one model, and only ordinary
+    // permission sets inside the organization boundary are granted. On EVERY
+    // sign-in, so the grants follow the IdP's groups; a failure is logged and
+    // never fails the sign-in.
+    const { createSsoGroupProvisioner } = await import('./sso-group-projection.js');
     return sso({
       organizationProvisioning: { defaultRole: 'member' },
       ...(enabled.ssoDomainVerification ? { domainVerification: { enabled: true } } : {}),
       saml: ssoSamlOptions(),
       schema: { ssoProvider: { additionalFields: SSO_PROVIDER_SIGN_IN_FIELDS } },
+      provisionUser: createSsoGroupProvisioner({
+        getEngine: () => this.getDataEngine(),
+        boundary: async () => (await this.config.organizationBoundary?.().catch(() => undefined)) ?? undefined,
+        warn: (message) => this.config.logger?.warn?.(message),
+        error: (message) => this.config.logger?.error?.(message),
+      }),
+      provisionUserOnEveryLogin: true,
     });
     });
   }

@@ -49,6 +49,15 @@
  * vendor's `APIError` with its own status (`withValidationErrorMapping`): the
  * vendor passes an `APIError` through to the identity provider and turns any
  * other throw into a SCIM 500, which an IdP retries forever.
+ *
+ * ## One model, two sources
+ *
+ * An SSO provider's group claim reads the same `sys_idp_group_mapping` rows
+ * (`source_kind: 'sso'`, `source_id` = the provider id) through the same
+ * matcher, the same admission ({@link createMappingAdmission}) and the same
+ * reconcile ({@link reconcileMappedGrants}), with a marker of its own; see
+ * `sso-group-projection.ts`. Each source removes only the grants carrying its
+ * own marker, so neither ever takes away a grant the other made.
  */
 
 import type { IDataEngine } from '@objectstack/core';
@@ -64,12 +73,26 @@ const GRANT_OBJECT = 'sys_user_permission_set';
 /** The `source_kind` of a mapping row pushed by a SCIM connection. */
 export const SCIM_MAPPING_SOURCE_KIND = 'scim';
 
+/** The `source_kind` of a mapping row whose group arrives as an SSO provider's sign-in claim. */
+export const SSO_MAPPING_SOURCE_KIND = 'sso';
+
+/** What sends a mapped group: a SCIM connection, or an SSO provider at sign-in. */
+export type IdpGroupMappingSourceKind = typeof SCIM_MAPPING_SOURCE_KIND | typeof SSO_MAPPING_SOURCE_KIND;
+
 /** The machine prefix of every grant the projection writes. */
 export const SCIM_GROUP_PROJECTION_REASON_PREFIX = 'scim-group-projection';
 
 /** The `reason` a projected grant carries: the marker plus the provisioning domain it was projected for. */
 export function scimGroupProjectionReason(provisioningDomainId: string): string {
   return `${SCIM_GROUP_PROJECTION_REASON_PREFIX}: provisioning domain '${provisioningDomainId}'`;
+}
+
+/** The machine prefix of every grant an SSO provider's group claim projects. */
+export const SSO_GROUP_PROJECTION_REASON_PREFIX = 'sso-group-projection';
+
+/** The `reason` an SSO-projected grant carries: the marker plus the provider whose sign-in projected it. */
+export function ssoGroupProjectionReason(providerId: string): string {
+  return `${SSO_GROUP_PROJECTION_REASON_PREFIX}: provider '${providerId}'`;
 }
 
 /** The security service member that judges a set against the organization boundary. */
@@ -104,15 +127,23 @@ function rowsOf(result: unknown): Record<string, unknown>[] {
   return Array.isArray(result) ? (result as Record<string, unknown>[]) : [];
 }
 
-/** The mapping rows of one SCIM connection. */
-async function connectionMappings(engine: IDataEngine, connectionId: string): Promise<MappingRow[]> {
+/** The mapping rows of one source: a SCIM connection, or an SSO provider. */
+export async function sourceMappings(
+  engine: IDataEngine,
+  kind: IdpGroupMappingSourceKind,
+  sourceId: string,
+): Promise<MappingRow[]> {
   if (!registered(engine, IDP_GROUP_MAPPING_OBJECT)) return [];
   return rowsOf(
     await withSystemContext(engine).find(IDP_GROUP_MAPPING_OBJECT, {
-      where: { source_kind: SCIM_MAPPING_SOURCE_KIND, source_id: connectionId },
+      where: { source_kind: kind, source_id: sourceId },
     }),
   );
 }
+
+/** The mapping rows of one SCIM connection. */
+const connectionMappings = (engine: IDataEngine, connectionId: string) =>
+  sourceMappings(engine, SCIM_MAPPING_SOURCE_KIND, connectionId);
 
 /** Does mapping `row` name `group`? By external id when the row names one, else by display name. */
 export function mappingMatchesGroup(row: MappingRow, group: { externalId?: string; displayName: string }): boolean {
@@ -122,28 +153,34 @@ export function mappingMatchesGroup(row: MappingRow, group: { externalId?: strin
   return displayName !== '' && displayName === group.displayName;
 }
 
-/** Build the `projection` member of `scim({ … })`. */
-export function createScimGroupProjection(deps: ScimGroupProjectionDeps): SCIMProjection {
-  const warned = new Set<string>();
-  const engineOrThrow = (): IDataEngine => {
-    const engine = deps.getEngine();
-    if (!engine) throw new Error('[auth] SCIM group projection: no data engine to read mappings or write grants through');
-    return engine;
-  };
+/** How a refusal names a mapping's source, per kind. */
+const SOURCE_WORDS: Record<IdpGroupMappingSourceKind, { label: string; source: string; owner: string }> = {
+  scim: { label: 'SCIM', source: 'connection', owner: 'the connection\'s credential belongs to an organization' },
+  sso: { label: 'SSO', source: 'provider', owner: 'the provider belongs to an organization' },
+};
 
-  /**
-   * May mapping `row` grant now? Only a row that names an organization and a set
-   * still inside the organization boundary. Asked by `roles.exists` AND again by
-   * `reconcileUser` before every insert, so the boundary holds on any vendor
-   * path, whether or not it consulted `exists` first. A refusal grants nothing
-   * and is warned once per mapping.
-   */
-  const admits = async (row: MappingRow): Promise<boolean> => {
+/** The admission both sources ask before a mapping may grant: see {@link createMappingAdmission}. */
+export type MappingAdmission = (row: MappingRow) => Promise<boolean>;
+
+/**
+ * May mapping `row` grant now? Only a row that names an organization and a set
+ * still inside the organization boundary, judged by the `security` service's
+ * own predicate; with no such service, nothing is shown inside the boundary and
+ * nothing is granted (fail closed). A refusal grants nothing and is warned once
+ * per mapping.
+ */
+export function createMappingAdmission(
+  deps: Pick<ScimGroupProjectionDeps, 'boundary' | 'warn'>,
+  kind: IdpGroupMappingSourceKind,
+): MappingAdmission {
+  const warned = new Set<string>();
+  const words = SOURCE_WORDS[kind];
+  return async (row) => {
     const mappingId = text(row.id);
     let refusal: string | null;
     if (!text(row.organization_id)) {
       refusal = 'it names no organization, so its grant would belong to no organization. Delete the mapping and '
-        + 'save it again once the connection\'s credential belongs to an organization';
+        + `save it again once ${words.owner}`;
     } else {
       const judge = await deps.boundary();
       const failure = judge
@@ -156,10 +193,26 @@ export function createScimGroupProjection(deps: ScimGroupProjectionDeps): SCIMPr
     if (refusal === null) return true;
     if (!warned.has(mappingId)) {
       warned.add(mappingId);
-      deps.warn(`[auth] SCIM group mapping ${mappingId} (connection '${text(row.source_id)}') grants nothing: ${refusal}.`);
+      deps.warn(`[auth] ${words.label} group mapping ${mappingId} (${words.source} '${text(row.source_id)}') grants nothing: ${refusal}.`);
     }
     return false;
   };
+}
+
+/** Build the `projection` member of `scim({ … })`. */
+export function createScimGroupProjection(deps: ScimGroupProjectionDeps): SCIMProjection {
+  const engineOrThrow = (): IDataEngine => {
+    const engine = deps.getEngine();
+    if (!engine) throw new Error('[auth] SCIM group projection: no data engine to read mappings or write grants through');
+    return engine;
+  };
+
+  /**
+   * Asked by `roles.exists` AND again by `reconcileUser` before every insert,
+   * so the boundary holds on any vendor path, whether or not it consulted
+   * `exists` first.
+   */
+  const admits = createMappingAdmission(deps, SCIM_MAPPING_SOURCE_KIND);
 
   return {
     roles: {
@@ -179,22 +232,51 @@ export function createScimGroupProjection(deps: ScimGroupProjectionDeps): SCIMPr
 
 /**
  * Make the user's projected grants for this provisioning domain equal the
- * vendor's desired set. Reads first, then inserts, then deletes; every write
- * joins the SCIM request's transaction. A mapping `admits` refuses (no
- * organization, or a set outside the organization boundary) is not desired,
- * so its grant is not written, and one this projection made earlier is removed.
+ * vendor's desired set: {@link reconcileMappedGrants} with this domain's marker.
  */
 export async function reconcileProjectedGrants(
   engine: IDataEngine,
   state: SCIMProjectedUserState,
-  admits: (row: MappingRow) => Promise<boolean>,
+  admits: MappingAdmission,
 ): Promise<void> {
-  const reason = scimGroupProjectionReason(state.provisioningDomainId);
-  const mappingIds = [...new Set(state.grants.map((grant) => grant.role))];
+  await reconcileMappedGrants(
+    engine,
+    {
+      userId: state.userId,
+      reason: scimGroupProjectionReason(state.provisioningDomainId),
+      mappingIds: state.grants.map((grant) => grant.role),
+    },
+    admits,
+  );
+}
+
+/** One user's desired mapped grants from one source, and the marker that source's grants carry. */
+export interface MappedGrantState {
+  userId: string;
+  /** The `reason` every grant this source writes carries; only rows carrying it are ever removed. */
+  reason: string;
+  /** The `sys_idp_group_mapping` ids the user's current groups match. */
+  mappingIds: readonly string[];
+}
+
+/**
+ * Make the user's grants carrying `state.reason` equal the sets the matched
+ * mappings name. Reads first, then inserts, then deletes. A mapping `admits`
+ * refuses (no organization, or a set outside the organization boundary) is not
+ * desired, so its grant is not written, and one this source made earlier is
+ * removed. Inside a SCIM request every write joins its transaction.
+ */
+export async function reconcileMappedGrants(
+  engine: IDataEngine,
+  state: MappedGrantState,
+  admits: MappingAdmission,
+): Promise<void> {
+  const reason = state.reason;
+  const mappingIds = [...new Set(state.mappingIds)];
   const grantTable = registered(engine, GRANT_OBJECT);
   if (!grantTable) {
     if (mappingIds.length === 0) return; // nothing desired, nothing of ours can exist
-    throw new Error(`[auth] SCIM group projection: ${GRANT_OBJECT} is not registered, so mapped permission sets cannot be granted`);
+    throw new Error(`[auth] IdP group projection: ${GRANT_OBJECT} is not registered, so mapped permission sets cannot be granted`);
   }
   const reader = withSystemContext(engine);
   const writer = withValidationErrorMapping(withSystemContext(engine) as unknown as Record<string, any>) as unknown as IDataEngine;
