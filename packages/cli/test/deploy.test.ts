@@ -28,6 +28,7 @@ vi.mock('../src/utils/deploy-build.js', () => ({ compileForDeploy: (p: string) =
 const { default: Deploy, reportVerdict } = await import('../src/commands/deploy.js');
 const { waitUntilServed, interpretServedReport } = await import('../src/utils/served-version.js');
 const { devVersion } = await import('../src/utils/dev-version.js');
+const { default: PackageInstall } = await import('../src/commands/package/install.js');
 
 const CLOUD_PLANE = 'http://cloud.test';
 const MANAGED_ENV = ['OS_CLOUD_URL', 'OS_CLOUD_API_KEY', 'OS_TOKEN', 'OS_ENVIRONMENT_ID', 'OS_ORG_ID', 'OS_PACKAGE_MANIFEST_ID', 'OS_CLOUD_TIMEOUT_MS'] as const;
@@ -592,6 +593,26 @@ describe('os deploy — a self-hosted runtime as the active target (os environme
     expect(sent[1].body.confirmSchemaUpgrade).toBe('schema-upgrade:abc');
   });
 
+  it("the installation-wide uniques stop's retry names os deploy --confirm-global-uniques, and the confirmation passes through", async () => {
+    const uniquesRefusal = refused(409, 'UNIQUE_SCOPE_CONFIRMATION_REQUIRED', "acme_lead.email is unique: 'global'");
+    let sent = stubRuntime({ install: uniquesRefusal });
+    expect(await deploy()).toBe(1);
+    expect(sent).toHaveLength(2);
+    expect(text()).toContain('os deploy --confirm-global-uniques');
+
+    vi.unstubAllGlobals();
+    sent = stubRuntime({});
+    expect(await deploy(['--confirm-global-uniques']), text()).toBeUndefined();
+    expect(sent[0].body.confirmGlobalUniques).toBeUndefined();
+    expect(sent[1].body.confirmGlobalUniques).toBe(true);
+  });
+
+  it('declares every confirmation flag the embedded install prints as its retry', () => {
+    const confirmations = Object.keys(PackageInstall.flags).filter((name) => name.startsWith('confirm-'));
+    expect(confirmations).toContain('confirm-global-uniques');
+    for (const name of confirmations) expect(Object.keys(Deploy.flags), name).toContain(name);
+  });
+
   it('a package the running kernel could not load is not called live: exit 1', async () => {
     stubRuntime({ install: ok({ ...INSTALLED, hotLoaded: false, hotLoadError: 'boom' }) });
 
@@ -625,5 +646,15 @@ describe('os deploy — a self-hosted runtime as the active target (os environme
     expect(await deploy(['--confirm-upgrade', 'schema-upgrade:abc'])).toBe(1);
     expect(sent).toHaveLength(0);
     expect(compileForDeploy).not.toHaveBeenCalled();
+  });
+
+  it('--confirm-global-uniques is refused when the target is ObjectOS Cloud, before anything is sent', async () => {
+    await writeFile(join(home, '.objectstack', 'cloud.json'), JSON.stringify({ url: CLOUD_PLANE, token: 'cloud_tok', createdAt: 'now' }));
+    const sent = stubRuntime({});
+
+    expect(await deploy(['--confirm-global-uniques'])).toBe(1);
+    expect(sent).toHaveLength(0);
+    expect(compileForDeploy).not.toHaveBeenCalled();
+    expect(text()).toContain('`--confirm-global-uniques` confirms a self-hosted runtime');
   });
 });

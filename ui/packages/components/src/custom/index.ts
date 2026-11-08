@@ -64,10 +64,7 @@ export {
   type DataErrorStateProps,
 } from './view-states';
 export * from './empty-state-link';
-export {
-  MobileDialogContent,
-  type MobileDialogContentProps,
-} from './mobile-dialog-content';
+export { MobileDialogContent } from './mobile-dialog-content';
 export * from './dialog-viewport-gutter';
 export { HorizontalOverflowBox, type HorizontalOverflowBoxProps } from './horizontal-overflow';
 export { PINNED_RIGHT_SEAM_SHADOW_CLASSES } from './use-horizontal-overflow';

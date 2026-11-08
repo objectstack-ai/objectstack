@@ -158,6 +158,28 @@ describe('organization_id NOT NULL through the drift apply door', () => {
     expect(attempted).toBe(0);
   });
 
+  it('⭐ a declared table an earlier run tightened is already-not-null, never rebuilt again', async () => {
+    const target = {
+      isDeclared: (t: string) => t === 'crm_deal',
+      isNotNull: async (table: string, column: string) => !(await nullable(table, column)),
+      driverFor: () => driver as never,
+    };
+    expect(await applyNotNullThroughDrift(target, [{ table: 'crm_deal', column: 'organization_id' }])).toEqual([
+      { table: 'crm_deal', column: 'organization_id', outcome: 'applied' },
+    ]);
+    let attempted = 0;
+    const outcomes = await applyNotNullThroughDrift(
+      {
+        ...target,
+        driverFor: () => ({ applyMigrationEntries: async () => { attempted++; return { applied: [], skipped: [] }; } }) as never,
+      },
+      [{ table: 'crm_deal', column: 'organization_id' }],
+    );
+    expect(outcomes).toEqual([{ table: 'crm_deal', column: 'organization_id', outcome: 'already-not-null' }]);
+    expect(attempted).toBe(0);
+    expect(await nullable('crm_deal', 'organization_id')).toBe(false);
+  });
+
   it('no driver for the table\'s database fails, naming the database', async () => {
     const [outcome] = await applyNotNullThroughDrift(
       { isDeclared: () => true, driverFor: () => undefined },

@@ -96,7 +96,7 @@ Per client:
 
 | Client | How to connect |
 |---|---|
-| **Claude Code** | `claude mcp add --transport http objectstack https://<your-deployment>/api/v1/mcp` — a browser login opens on first use. Headless alternative: add `--header "x-api-key: osk_..."`. |
+| **Claude Code** | [`os mcp connect`](/docs/deployment/cli#os-mcp-connect) registers your ObjectOS Cloud environment; `os mcp connect --url <base>` registers a self-hosted or local server as `objectstack`. Without the CLI: `claude mcp add --transport http objectstack https://<your-deployment>/api/v1/mcp`. Either way a browser login opens on first use. Headless alternative: add `--header "x-api-key: osk_..."` to the `claude mcp add` line (`os mcp connect` stores no token). |
 | **Claude Desktop** | Settings → Connectors → *Add custom connector* → paste the MCP URL → sign in when prompted. Connects from Anthropic's servers — needs public HTTPS (see below). |
 | **claude.ai (web)** | Settings → Connectors → *Add custom connector* → paste the MCP URL. Connects from Anthropic's servers — needs public HTTPS (see below). |
 | **Other MCP clients** | Any client implementing MCP authorization discovers the flow automatically; header-based clients can send the API key instead. |

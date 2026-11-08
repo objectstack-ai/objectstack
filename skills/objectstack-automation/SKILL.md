@@ -288,6 +288,13 @@ write them right the first time:
    } });
    ```
 
+4. **A `select` is compared and written by its option `value`, never its label.**
+   The request speaks the label ("Lost"); the row stores the `value` (`lost`).
+   `condition: "record.status == 'Lost'"` parses, matches no row: the flow
+   stages clean and never fires; `fields: { status: 'Lost' }` / a `filter`
+   fails the run (`invalid_option`). Read the field's `options`; write the
+   `value` in the `condition` AND every `fields` / `filter` entry.
+
 ---
 
 → State Machines & Approvals: [references/state-machines-and-approvals.md](./references/state-machines-and-approvals.md) — its state-introspection route is `GET /api/v1/meta/object/:name/state/:field?from=:state`.

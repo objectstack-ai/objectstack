@@ -28,6 +28,7 @@
  * evaluation cycle. `index.ts` re-exports nothing from this module.
  */
 
+import { coreSqlDialectOf } from './sql-driver-oracle-dialect.js';
 import { emptyGroupValueFor } from '@objectstack/spec/data';
 import type { DriverOptions } from '@objectstack/spec/data';
 import type { DriverQuery } from '@objectstack/spec/contracts';
@@ -238,7 +239,7 @@ export class AggregationFacet {
         const dialect = this.dialectName;
         const argExpr = dialect === 'mssql'
           ? mssqlAggregandOperandSql(funcName, aggregandClass, '??')
-          : aggregandOperandSql(funcName, aggregandClass, dialect, '??');
+          : aggregandOperandSql(funcName, aggregandClass, coreSqlDialectOf(dialect), '??');
         const rawFunc = lowering.distinct
           ? `${lowering.sql}(distinct ${argExpr})`
           : `${lowering.sql}(${argExpr})`;

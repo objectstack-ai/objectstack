@@ -39,6 +39,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import '@objectstack/driver-turso';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -48,15 +49,12 @@ import {
   DATABASE_DRIVER_SELECTION_IDS,
   DRIVER_ID_ALIASES,
   driverHasLocalDefault,
-  driverIsFederationOnly,
+  isFederationOnlyDriver,
   resolveDatabaseDriverId,
   resolveDriverId,
 } from '@objectstack/spec/data';
 import { resolveStandaloneDatabase } from '@objectstack/runtime';
 import { resolveDriverType, resolveStorageDefinition, UnsupportedDriverError } from './storage-driver.js';
-// Paid at collection, not inside a clocked case: `storage-driver.ts` reaches
-// this optional driver through a dynamic import (check:test-source-alias).
-import '@objectstack/driver-turso';
 
 /** A URL whose scheme matches each canonical kind, so only the SPELLING varies. */
 const URL_FOR: Readonly<Record<string, string>> = {
@@ -78,6 +76,15 @@ const CONTRACT_ONLY_SPELLINGS = ['sqlite3', 'better-sqlite3', 'mariadb', 'inmemo
  * table so a fourth withdrawn spelling cannot escape the refuse rows.
  */
 const WITHDRAWN_MEMORY_SPELLINGS = ['memory', 'mingo', 'in-memory'] as const;
+/** The spellings of the federation-only rows, each to its id: a contract, never a selection. */
+const FEDERATION_ONLY_SPELLING_IDS = {
+  oracle: 'oracle',
+  oracledb: 'oracle',
+  mssql: 'mssql',
+  sqlserver: 'mssql',
+  tedious: 'mssql',
+} as const;
+const FEDERATION_ONLY_SPELLINGS = Object.keys(FEDERATION_ONLY_SPELLING_IDS) as (keyof typeof FEDERATION_ONLY_SPELLING_IDS)[];
 
 /** The engine's URL schemes, which both hosts recognise and refuse. */
 const WITHDRAWN_MEMORY_URLS = ['memory://', 'memory://named', 'mingo://', 'MINGO://upper'] as const;
@@ -210,38 +217,44 @@ describe('driver vocabulary parity: `os start` and `os migrate` answer alike (#6
   // the selection face, so the three spellings simply LEAVE them — these rows
   // are what keeps that from being a silent drop in coverage.
   it('the spec table withdrew exactly these spellings: contract face yes, selection face no', () => {
-    // A federation-only driver (#31327) is off the selection face by its own
-    // column, not withdrawn: the row below pins that separately.
     const withdrawn = Object.keys(DRIVER_ID_ALIASES)
-      .filter((alias) => !driverIsFederationOnly(DRIVER_ID_ALIASES[alias]!))
       .filter((alias) => !(DATABASE_DRIVER_SELECTION_IDS as readonly string[]).includes(DRIVER_ID_ALIASES[alias]!))
       .sort();
-    expect(withdrawn).toEqual([...WITHDRAWN_MEMORY_SPELLINGS, 'inmemory'].sort());
+    expect(withdrawn).toEqual([...WITHDRAWN_MEMORY_SPELLINGS, 'inmemory', ...FEDERATION_ONLY_SPELLINGS].sort());
     for (const spelling of withdrawn) {
-      expect(resolveDriverId(spelling), spelling).toBe('memory');
+      expect(resolveDriverId(spelling), spelling).toBe(
+        (FEDERATION_ONLY_SPELLING_IDS as Record<string, string>)[spelling] ?? 'memory',
+      );
       expect(resolveDatabaseDriverId(spelling), spelling).toBeUndefined();
     }
   });
 
-  // [#31327] A federation-only driver is a datasource contract, never a boot
-  // database: its spellings resolve on the contract face only, and `os start`
-  // refuses them in dev and prod even WITH a URL.
-  it('a federation-only driver resolves its contract but no host selects it', () => {
-    const federationOnly = Object.keys(DRIVER_ID_ALIASES)
-      .filter((alias) => driverIsFederationOnly(DRIVER_ID_ALIASES[alias]!))
-      .sort();
-    expect(federationOnly).toEqual(['mssql', 'sqlserver', 'tedious']);
-    for (const spelling of federationOnly) {
-      expect(resolveDriverId(spelling), spelling).toBe('mssql');
-      expect(resolveDatabaseDriverId(spelling), spelling).toBeUndefined();
+  // A federation-only dialect has a config contract (an external datasource
+  // reads through it) and was never a platform store, so neither host offers it.
+  it.each([...FEDERATION_ONLY_SPELLINGS])(
+    'both hosts REFUSE the federation-only spelling `%s` as the platform database',
+    (spelling) => {
       for (const isDev of [false, true]) {
         expect(
-          () => resolveStorageDefinition(resolveDriverType(spelling, undefined), { isDev, databaseUrl: 'mssql://h/db' }),
+          refusalMessage(() => resolveStorageDefinition(resolveDriverType(spelling, undefined), { isDev })),
           `os start (isDev=${isDev}) accepted '${spelling}'`,
-        ).toThrow(UnsupportedDriverError);
+        ).not.toBeNull();
+        // Even WITH a database URL: the refusal is the driver's, not the
+        // missing target's (#31327).
+        expect(
+          refusalMessage(() =>
+            resolveStorageDefinition(resolveDriverType(spelling, undefined), { isDev, databaseUrl: 'tcp://erp-db.internal/ERP' }),
+          ),
+          `os start (isDev=${isDev}, with a URL) accepted '${spelling}'`,
+        ).not.toBeNull();
       }
-    }
-  });
+      process.env.OS_DATABASE_DRIVER = spelling;
+      expect(
+        refusalMessage(() => resolveStandaloneDatabase({ artifactPath: '/nonexistent/objectstack.json' })),
+        `os migrate accepted '${spelling}'`,
+      ).not.toBeNull();
+    },
+  );
 
   it.each([...WITHDRAWN_MEMORY_SPELLINGS])(
     'both hosts REFUSE the withdrawn spelling `%s`, in dev AND prod, and both name the SQLite replacements',
@@ -366,9 +379,9 @@ describe('fork 2: no local default + no URL is refused on BOTH sides — all 8 c
   // fifth driver `hasLocalDefault: false`, this assertion fails until the matrix
   // below covers it, so the "8 cells" stay 8 only while 8 is the truth.
   it('the no-local-default set is exactly what the shared table says', () => {
-    // A federation-only driver also has no local default, but no host selects
-    // it at all (pinned above), so it is not a cell of this matrix.
-    const fromTable = BUILTIN_DRIVER_IDS.filter((id) => !driverHasLocalDefault(id) && !driverIsFederationOnly(id));
+    // A federation-only id has no local default either, but it is never a
+    // platform store, so it is refused by name above rather than in these cells.
+    const fromTable = BUILTIN_DRIVER_IDS.filter((id) => !driverHasLocalDefault(id) && !isFederationOnlyDriver(id));
     expect([...fromTable].sort()).toEqual([...NO_LOCAL_DEFAULT].sort());
   });
 

@@ -2,7 +2,7 @@
   "name": "@objectstack/driver-sql",
   "version": "18.3.0",
   "license": "Apache-2.0",
-  "description": "SQL Driver for ObjectStack - Supports PostgreSQL, MySQL, SQLite via Knex",
+  "description": "SQL Driver for ObjectStack - Supports PostgreSQL, MySQL, SQLite via Knex, and Oracle for federation",
   "type": "commonjs",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -38,11 +38,15 @@
   },
   "peerDependencies": {
     "mysql2": "^3.0.0",
+    "oracledb": ">=6.0.0",
     "pg": "^8.0.0",
     "tedious": "^18.0.0"
   },
   "peerDependenciesMeta": {
     "mysql2": {
+      "optional": true
+    },
+    "oracledb": {
       "optional": true
     },
     "pg": {
@@ -56,6 +60,7 @@
     "@objectstack/formula": "workspace:*",
     "@types/node": "^26.6.5",
     "better-sqlite3": "^13.0.3",
+    "oracledb": "^6.10.0",
     "typescript": "^6.0.3",
     "vitest": "^4.1.11"
   },
@@ -65,7 +70,8 @@
     "sql",
     "postgres",
     "mysql",
-    "sqlite"
+    "sqlite",
+    "oracle"
   ],
   "author": "ObjectStack",
   "repository": {

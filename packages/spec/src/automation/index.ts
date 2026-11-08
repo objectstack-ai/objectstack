@@ -48,6 +48,7 @@ export * from './time-relative-trigger.zod';
 export * from './flow-trigger-kind';
 // An `api` flow's hook secret named by reference — the deployment fills it.
 export * from './api-trigger-secret-ref.zod';
+export * from './flow-start-config-refusals';
 // A third-party sender's signature scheme on an `api` hook, keyed by `secretRef`.
 export * from './api-trigger-signature.zod';
 // The acting-organization declaration a time-triggered flow carries, and the

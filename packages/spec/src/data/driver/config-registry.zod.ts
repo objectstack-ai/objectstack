@@ -7,6 +7,7 @@ import { getMemoryConfigJsonSchema, MemoryConfigSchema } from './memory.zod';
 import { getMongoConfigJsonSchema, MongoConfigSchema } from './mongo.zod';
 import { getMssqlConfigJsonSchema, MssqlConfigSchema } from './mssql.zod';
 import { getMysqlConfigJsonSchema, MysqlConfigSchema } from './mysql.zod';
+import { getOracleConfigJsonSchema, OracleConfigSchema } from './oracle.zod';
 import { getPostgresConfigJsonSchema, PostgresConfigSchema } from './postgres.zod';
 import {
   getSqliteConfigJsonSchema,
@@ -105,8 +106,15 @@ import { getTursoConfigJsonSchema, TursoConfigSchema } from './turso.zod';
  * joined `inmemory` on the contract-only column — so every derived selection
  * face drops them and both hosts refuse them, while a stored
  * `datasource.driver: memory` still parses against {@link MemoryConfigSchema}.
- * `memory` is therefore the one id in {@link BUILTIN_DRIVER_IDS} that is not in
- * {@link DATABASE_DRIVER_SELECTION_IDS}.
+ * `memory` was therefore the first id in {@link BUILTIN_DRIVER_IDS} that is not
+ * in {@link DATABASE_DRIVER_SELECTION_IDS}.
+ *
+ * `oracle` is the second, for a different reason: it was never a platform store
+ * to withdraw. It is a federation-only dialect
+ * ({@link DriverVocabularyEntry.federationOnly}) — a datasource reads an Oracle
+ * system's own tables in place, and the platform emits no DDL there — so its
+ * spellings `oracle` / `oracledb` are contract-only from the row's first day,
+ * and the managed pairing is refused where the datasource is authored.
  *
  * ## `mongo` → `mongodb`, and turso becoming a real builtin (commit e2798fab7)
  *
@@ -211,24 +219,31 @@ export interface DriverVocabularyEntry {
    */
   readonly hasLocalDefault: boolean;
   /**
-   * Is this driver served for FEDERATION only — an ADR-0015 external
-   * datasource (`schemaMode: 'external'` / `'validate-only'`) over tables that
-   * already exist — and never as a store whose schema the platform builds?
+   * Does this driver serve FEDERATION only — `schemaMode: 'external'` /
+   * `'validate-only'` over a database another system owns — and never a
+   * platform-managed store?
    *
-   * `true` on a row whose dialect the SQL driver reads and writes but never
-   * emits DDL for. Three faces follow from it, each enforced where it lives:
+   * `true` on a row whose dialect the SQL driver models for reads (and the
+   * double-opt-in write path) but for which it emits no DDL: `oracle` and
+   * `mssql`. Three faces follow from it, each derived from this column rather
+   * than hand-listed at a consumer:
    *
-   *  - **authoring** — `DatasourceSchema` refuses `schemaMode: 'managed'`
-   *    (the default) on such a driver, naming the federation-only scope
-   *    ({@link FEDERATION_ONLY_DRIVER_IDS});
-   *  - **selection** — the selection tables are built without such a row,
-   *    so no boot host accepts it as the platform database even if it listed
-   *    {@link aliases}; by convention its spellings live on
-   *    {@link contractOnlyAliases}, which keeps the config contract;
+   *  - **authoring** — a datasource declaring the driver with
+   *    `schemaMode: 'managed'` (the default) is refused at parse
+   *    (`datasource.zod.ts`), naming the federation-only scope, rather than
+   *    failing at the first `CREATE TABLE` the sync would send.
+   *  - **selection** — the selection tables are built without such a row, so
+   *    no boot host accepts it as the platform database even if it listed
+   *    {@link aliases}: a boot host's `OS_DATABASE_DRIVER` selects the
+   *    platform's OWN store, which is managed by definition. By convention its
+   *    spellings sit on {@link contractOnlyAliases}, which keeps the config
+   *    contract. Both hosts refuse it as an unsupported selection, enumerating
+   *    the drivers that can hold the platform.
    *  - **driver** — the SQL driver refuses the DDL path for the dialect by
    *    name, so a hand-built managed driver meets the same boundary.
    *
-   * Absent means `false`.
+   * Absent (never `false`) on every other row; {@link FEDERATION_ONLY_DRIVER_IDS}
+   * is the projection.
    */
   readonly federationOnly?: true;
 }
@@ -262,6 +277,16 @@ const DRIVER_VOCABULARY = [
   { id: 'mysql', aliases: ['mysql', 'mysql2'], contractOnlyAliases: ['mariadb'], hasLocalDefault: false },
   { id: 'mongodb', aliases: ['mongodb'], retiredAliases: { mongo: MONGO_DRIVER_ID_RETIRED }, hasLocalDefault: false },
   { id: 'turso', aliases: ['turso', 'libsql'], hasLocalDefault: false },
+  // Federation only (ADR-0015 §4.6): driver-sql over knex `oracledb`,
+  // node-oracledb in Thin mode. Its spellings sit on the contract face alone —
+  // see `federationOnly` for why no boot host may select it.
+  {
+    id: 'oracle',
+    aliases: [],
+    contractOnlyAliases: ['oracle', 'oracledb'],
+    federationOnly: true,
+    hasLocalDefault: false,
+  },
   // Microsoft SQL Server, federation only (`driver-sql` over knex `mssql`).
   // No selection alias: it is never the platform database.
   {
@@ -300,6 +325,22 @@ export const BUILTIN_DRIVER_IDS = DRIVER_VOCABULARY.map((entry) => entry.id) as 
 >;
 
 export type BuiltinDriverId = (typeof DRIVER_VOCABULARY)[number]['id'];
+
+/**
+ * The ids whose row declares {@link DriverVocabularyEntry.federationOnly} —
+ * derived from the table, so a boot host's exhaustive switch over
+ * {@link DatabaseSelectionDriverId} never has to name one.
+ */
+export type FederationOnlyDriverId = Extract<(typeof DRIVER_VOCABULARY)[number], { federationOnly: true }>['id'];
+
+/**
+ * The ids a boot flag may select ({@link DATABASE_DRIVER_SELECTION_IDS}), at
+ * the type level: never a federation-only one, since the selection tables are
+ * built without those rows. It is not exactly as narrow as the value: a
+ * builtin with no selection alias of its own (`memory` today) still stays in
+ * the type.
+ */
+export type DatabaseSelectionDriverId = Exclude<BuiltinDriverId, FederationOnlyDriverId>;
 
 /**
  * Accepted spellings of each canonical driver id, matched case-insensitively.
@@ -427,10 +468,10 @@ export function resolveDriverId(driver: unknown): BuiltinDriverId | undefined {
 }
 
 /** Selection-face lookup, built once so {@link resolveDatabaseDriverId} is a hash hit. */
-const DATABASE_DRIVER_ALIASES: Readonly<Record<string, DatabaseDriverSelectionId>> = Object.freeze(
+const DATABASE_DRIVER_ALIASES: Readonly<Record<string, DatabaseSelectionDriverId>> = Object.freeze(
   Object.fromEntries(
     SELECTION_ROWS.flatMap((entry) => entry.aliases.map((alias) => [alias, entry.id] as const)),
-  ) as Record<string, DatabaseDriverSelectionId>,
+  ) as Record<string, DatabaseSelectionDriverId>,
 );
 
 /**
@@ -443,11 +484,12 @@ const DATABASE_DRIVER_ALIASES: Readonly<Record<string, DatabaseDriverSelectionId
  * because neither host accepted `OS_DATABASE_DRIVER=sqlite3` before commit e2798fab7 and
  * converging the two hosts is not a licence to widen the flag for both.
  */
-export function resolveDatabaseDriverId(driver: unknown): DatabaseDriverSelectionId | undefined {
+export function resolveDatabaseDriverId(driver: unknown): DatabaseSelectionDriverId | undefined {
   if (typeof driver !== 'string') return undefined;
   // The table is built from SELECTION_ROWS, so this face never answers a
-  // federation-only id (#31327); the return type says the same.
-  return lookupDriverId(DATABASE_DRIVER_ALIASES, driver) as DatabaseDriverSelectionId | undefined;
+  // federation-only id; the narrower type says the same, pinned in
+  // config-registry.test.ts.
+  return lookupDriverId(DATABASE_DRIVER_ALIASES, driver) as DatabaseSelectionDriverId | undefined;
 }
 
 /**
@@ -509,29 +551,11 @@ export function resolveDatabaseDriverId(driver: unknown): DatabaseDriverSelectio
  * {@link DriverVocabularyEntry.contractOnlyAliases}, so no selection alias
  * resolves to it and this projection drops it on its own.
  */
-export const DATABASE_DRIVER_SELECTION_IDS: readonly DatabaseDriverSelectionId[] = Object.freeze(
+export const DATABASE_DRIVER_SELECTION_IDS: readonly DatabaseSelectionDriverId[] = Object.freeze(
   DATABASE_DRIVER_SELECTION_ALIASES.filter(
-    (alias): alias is DatabaseDriverSelectionId => resolveDatabaseDriverId(alias) === alias,
+    (alias): alias is DatabaseSelectionDriverId => resolveDatabaseDriverId(alias) === alias,
   ),
 );
-
-/**
- * The canonical ids whose row declares {@link DriverVocabularyEntry.federationOnly}
- * — derived from the table's literal rows, so a row gaining the column is the
- * whole change. #31327.
- */
-export type FederationOnlyDriverId = Extract<(typeof DRIVER_VOCABULARY)[number], { federationOnly: true }>['id'];
-
-/**
- * The type of a {@link DATABASE_DRIVER_SELECTION_IDS} member: every builtin
- * except a federation-only one. The selection tables are built without the
- * federation-only rows, so no selection resolves to one at run time; the type
- * drops them too, so a boot host's exhaustive dispatch over the selection face
- * is not asked for an arm no selection can reach (#31327). It is not exactly as
- * narrow as the value: a builtin with no selection alias of its own (`memory`
- * today) still stays in the type.
- */
-export type DatabaseDriverSelectionId = Exclude<BuiltinDriverId, FederationOnlyDriverId>;
 
 /** Canonical id → whether it can be selected with no database URL at all. */
 const DRIVER_LOCAL_DEFAULT: Readonly<Record<BuiltinDriverId, boolean>> = Object.freeze(
@@ -555,27 +579,23 @@ export function driverHasLocalDefault(driver: unknown): boolean {
 }
 
 /**
- * The canonical ids served for FEDERATION only
- * ({@link DriverVocabularyEntry.federationOnly}), in table row order.
- *
- * `DatasourceSchema` reads it to refuse a `managed` datasource on one of these
- * drivers; read it through {@link driverIsFederationOnly} when the id came from
- * authored metadata.
+ * The canonical ids of the drivers that serve federation only — the rows that
+ * declare {@link DriverVocabularyEntry.federationOnly}. A datasource naming one
+ * must declare a non-`managed` `schemaMode`; `datasource.zod.ts` refuses the
+ * managed pairing at parse.
  */
 export const FEDERATION_ONLY_DRIVER_IDS: readonly FederationOnlyDriverId[] = Object.freeze(
-  DRIVER_VOCABULARY.filter((entry) => (entry as DriverVocabularyEntry).federationOnly === true).map(
-    (entry) => entry.id as FederationOnlyDriverId,
-  ),
+  VOCABULARY_ROWS.filter((entry) => entry.federationOnly === true).map((entry) => entry.id as FederationOnlyDriverId),
 );
 
 /**
- * Does an authored `datasource.driver` resolve to a federation-only builtin?
- * Follows every alias face ({@link resolveDriverId}); a plugin driver answers
- * `false` — its storage model is not ours to judge.
+ * Does this authored `driver` value resolve to a federation-only builtin?
+ * Follows every alias face, like {@link resolveDriverId}; `false` for a plugin
+ * driver and for anything that is not a string.
  */
-export function driverIsFederationOnly(driver: unknown): boolean {
+export function isFederationOnlyDriver(driver: unknown): boolean {
   const id = resolveDriverId(driver);
-  return id !== undefined && (FEDERATION_ONLY_DRIVER_IDS as readonly BuiltinDriverId[]).includes(id);
+  return id !== undefined && (FEDERATION_ONLY_DRIVER_IDS as readonly string[]).includes(id);
 }
 
 /** Canonical driver id → the schema its `datasource.config` must satisfy. */
@@ -587,6 +607,7 @@ export const DRIVER_CONFIG_SCHEMAS: Readonly<Record<BuiltinDriverId, z.ZodType>>
   mysql: MysqlConfigSchema,
   mongodb: MongoConfigSchema,
   turso: TursoConfigSchema,
+  oracle: OracleConfigSchema,
   mssql: MssqlConfigSchema,
 };
 
@@ -609,6 +630,7 @@ const DRIVER_CONFIG_JSON_SCHEMAS: Readonly<Record<BuiltinDriverId, () => Record<
   mysql: getMysqlConfigJsonSchema,
   mongodb: getMongoConfigJsonSchema,
   turso: getTursoConfigJsonSchema,
+  oracle: getOracleConfigJsonSchema,
   mssql: getMssqlConfigJsonSchema,
 };
 

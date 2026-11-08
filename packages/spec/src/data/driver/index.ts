@@ -17,6 +17,7 @@ export * from './memory.zod';
 export * from './mongo.zod';
 export * from './mssql.zod';
 export * from './mysql.zod';
+export * from './oracle.zod';
 export * from './postgres.zod';
 export * from './sqlite.zod';
 export * from './turso.zod';

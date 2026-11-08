@@ -49,6 +49,7 @@ export interface ManagedDriftHost {
   introspectIndexes: SqlDriver['introspectIndexes'];
   readonly isMssql: SqlDriver['isMssql'];
   readonly isMysql: SqlDriver['isMysql'];
+  readonly isOracle: SqlDriver['isOracle'];
   readonly isPostgres: SqlDriver['isPostgres'];
   readonly isSqlite: SqlDriver['isSqlite'];
   readonly knex: SqlDriver['knex'];
@@ -59,10 +60,11 @@ export interface ManagedDriftHost {
 /** The bodies of the "Managed-schema drift & reconcile (#2186)" section of `SqlDriver`: a stateless facet, called by the class's stubs. */
 export class ManagedDriftFacet {
   /** The body of `SqlDriver#dialectName`; the method's docblock there is its contract. */
-  static dialectName(this: Pick<ManagedDriftHost, 'isMssql' | 'isMysql' | 'isPostgres' | 'isSqlite'>): SqlDialectName {
+  static dialectName(this: Pick<ManagedDriftHost, 'isMssql' | 'isMysql' | 'isOracle' | 'isPostgres' | 'isSqlite'>): SqlDialectName {
     if (this.isSqlite) return 'sqlite';
     if (this.isPostgres) return 'postgres';
     if (this.isMysql) return 'mysql';
+    if (this.isOracle) return 'oracle';
     if (this.isMssql) return 'mssql';
     return 'unknown';
   }

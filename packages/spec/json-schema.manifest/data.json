@@ -122,6 +122,7 @@
     "data/ObjectFieldGroup",
     "data/ObjectOwnershipEnum",
     "data/ObjectRequiredPermissions",
+    "data/OracleConfig",
     "data/PerOperationRequiredPermissions",
     "data/PersistenceType",
     "data/Picklist",

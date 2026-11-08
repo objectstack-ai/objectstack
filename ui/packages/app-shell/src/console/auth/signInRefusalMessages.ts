@@ -20,8 +20,10 @@ import type { TranslateFn } from '@object-ui/i18n';
  */
 export function signInRefusalMessages(t: TranslateFn): Record<string, string> {
   return {
+    // ADR-0069 D2: by default the server refuses a locked account with this
+    // same code, so the copy names the pause and the way out of it.
     INVALID_EMAIL_OR_PASSWORD: t('auth.login.errors.invalidCredentials', {
-      defaultValue: 'Invalid email or password. Please try again.',
+      defaultValue: 'Invalid email or password. After several failed attempts, sign-in is paused for a while. Forgot your password? Reset it to sign in right away.',
     }),
     EMAIL_NOT_VERIFIED: t('auth.login.errors.emailNotVerified', {
       defaultValue: 'Please verify your email address before signing in.',

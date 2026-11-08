@@ -820,6 +820,48 @@ async function mssqlServerVersion(driver: any): Promise<string | undefined> {
 }
 
 /**
+ * Build the node-oracledb connection for an `oracle` datasource (ADR-0015
+ * §4.6): `connectString` verbatim, else the Easy Connect string
+ * `host:port/serviceName` composed from the discrete keys. The password is the
+ * bound secret only — `OracleConfigSchema` refuses one inline.
+ */
+function buildOracleConnection(spec: DatasourceConnectionSpec): Record<string, unknown> {
+  const cfg = (spec.config ?? {}) as Record<string, unknown>;
+  const connectString = typeof cfg.connectString === 'string' && cfg.connectString
+    ? cfg.connectString
+    : `${cfg.host}:${typeof cfg.port === 'number' ? cfg.port : 1521}/${cfg.serviceName}`;
+  return {
+    connectString,
+    ...(typeof cfg.username === 'string' ? { user: cfg.username } : {}),
+    ...(spec.secret ? { password: spec.secret } : {}),
+  };
+}
+
+/**
+ * The last door's copy of the spec's oracle `ssl`-block refusal, for a stored
+ * row written before the refusal existed: node-oracledb Thin reads TLS from the
+ * connect string and has no slot for the block, so it would be dropped.
+ */
+function assertOracleSslNotDeclared(spec: DatasourceConnectionSpec): void {
+  // The spec's predicate: the block's defaults (`enabled: false`,
+  // `rejectUnauthorized: true`) ask for nothing; a key that asks for TLS or
+  // shapes it is refused. The `config.ssl` shorthand is not an oracle config
+  // key, so the contract refuses it before this door.
+  const block = spec.ssl as
+    | { enabled?: boolean; rejectUnauthorized?: boolean; ca?: string; cert?: string; key?: string }
+    | undefined;
+  if (!block) return;
+  const asks = block.enabled === true || block.rejectUnauthorized === false || !!block.ca || !!block.cert || !!block.key;
+  if (!asks) return;
+  throw new Error(
+    `datasource '${spec.name ?? 'default'}': the oracle driver does not read a datasource \`ssl\` block — TLS ` +
+      "to Oracle is chosen by the connect string. Write `config.connectString: 'tcps://host:2484/service_name'` " +
+      'and remove the `ssl` block; the server is verified against the host\'s trusted certificate authorities, ' +
+      'or, for a private certificate authority, against the PEM wallet `?wallet_location=/path/to/wallet` names.',
+  );
+}
+
+/**
  * Host-composition keys the CLI/standalone stack stamps into a `default`
  * datasource's `config` for the SQL builders (#3826). They are not memory-driver
  * config, so they are stripped before the rest of `config` is handed through.
@@ -1187,6 +1229,26 @@ export function createDefaultDatasourceDriverFactory(
           pool: buildSqlPool(spec),
           ...(schemaMode ? { schemaMode: schemaMode as any } : {}),
           ...(autoMigrate ? { autoMigrate } : {}),
+        } as any);
+        return toHandle(driver);
+      }
+
+      if (kind === 'oracle') {
+        // ADR-0015 §4.6 — federation only: the spec refuses a managed oracle
+        // datasource at authoring, and `SqlDriver` refuses every DDL operation
+        // on it by name; this arm only connects. knex `oracledb`, node-oracledb
+        // in Thin mode (pure JavaScript, no Oracle Client libraries). The
+        // `oracledb` package is an OPTIONAL install of `@objectstack/driver-sql`
+        // that knex loads by name, like `pg` and `mysql2`, so its absence is
+        // answered by `connect-failure-remedy.ts`'s client-install remedy
+        // (`OPTIONAL_DRIVER_CLIENT_PACKAGES`).
+        assertOracleSslNotDeclared(spec);
+        const { SqlDriver } = await import('@objectstack/driver-sql');
+        const driver = new SqlDriver({
+          client: 'oracledb',
+          connection: buildOracleConnection(spec) as any,
+          pool: buildSqlPool(spec),
+          ...(schemaMode ? { schemaMode: schemaMode as any } : {}),
         } as any);
         return toHandle(driver);
       }

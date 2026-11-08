@@ -543,6 +543,45 @@ function mayName(t: DelegatedTarget, side: 'next' | 'prev', column: string): boo
   return t.reads.has(column);
 }
 
+/** The direct-grant holder column, and the object it references. */
+const GRANT_HOLDER_FIELD = 'user_id';
+const GRANT_HOLDER_OBJECT = 'sys_user';
+
+/**
+ * Does the write NAME the grant's holder — an insert's row, or an update whose
+ * payload points the grant at a different user than the row stores? A holder
+ * the row already stores is not named: the engine's reference check forgives
+ * a value the row stores, and the grant-holder membership hook judges it as
+ * stored (`grant-holder-membership-refusal.ts`, `onUpdate`).
+ */
+function namesTargetUser(t: DelegatedTarget): boolean {
+  if (!t.next) return false;
+  if (!t.prev) return true;
+  const norm = (v: unknown) => (v === undefined || v === null || v === '' ? null : String(v));
+  return norm(t.next[GRANT_HOLDER_FIELD]) !== norm(t.prev[GRANT_HOLDER_FIELD]);
+}
+
+/**
+ * Does the engine's reference check ask the caller's own read door about the
+ * holder `object`'s write names, and refuse one it does not return? It asks
+ * when the live schema's `user_id` is a non-`readonly` `lookup` / `user`
+ * reference to `sys_user` and `sys_user` is registered
+ * (`assertReferencesResolve`, `@objectstack/objectql`; the grant-holder
+ * membership hook's `referenceCheckAsksCaller` steps aside on the same test).
+ * The direct-grant object declares that reference itself
+ * (`sys-user-permission-set.object.ts`), so its target is not resolved again
+ * here: the test reads only what a composition can still change, whether
+ * `sys_user` is registered and whether the live field is still a writable
+ * lookup. Anywhere else, an engine that hands over no schema included, it
+ * answers no, and the holder is judged on its memberships alone: the gate
+ * refuses no named holder the write would not be refused for anyway.
+ */
+function referenceCheckAsksCallerAboutUser(ql: any, object: string): boolean {
+  if (typeof ql?.getSchema !== 'function' || !ql.getSchema(GRANT_HOLDER_OBJECT)) return false;
+  const def = ql.getSchema(object)?.fields?.[GRANT_HOLDER_FIELD];
+  return Boolean(def) && def.readonly !== true && (def.type === 'lookup' || def.type === 'user');
+}
+
 export class DelegatedAdminGate {
   constructor(private readonly deps: DelegatedAdminGateDeps) {}
 
@@ -1076,6 +1115,35 @@ export class DelegatedAdminGate {
   }
 
   /**
+   * Does the caller's own read door return user `userId`? The question the
+   * engine's reference check asks of a `user_id` a write names
+   * (`masterDetailHeadersCallerReads`, `@objectstack/objectql`) and the
+   * grant-holder membership hook asks before it
+   * (`grant-holder-membership-refusal.ts`, `callerReadsHolder`): one `sys_user`
+   * read WHERE `id` equals the value, projected to `id`, under the caller's
+   * own context, so every read visibility and wall answers it, and only a row
+   * whose id IS the value counts. A user it does not return is a user the
+   * caller cannot read, answered as a user that does not exist (the
+   * platform's rule for every user a non-system write names). A read the read
+   * door REFUSES (a declared 4xx) returns no user either; a store fault
+   * propagates as raised, as for the gate's other reads: an outage is neither
+   * an answer nor a refusal.
+   */
+  private async callerReadsUser(opCtx: any, userId: string): Promise<boolean> {
+    const ql = this.deps.ql;
+    if (!ql?.find) return false;
+    let rows: unknown;
+    try {
+      rows = await ql.find(GRANT_HOLDER_OBJECT, { where: { id: userId }, fields: ['id'], context: opCtx.context });
+    } catch (e) {
+      const status = declaredHttpStatus(e);
+      if (status !== undefined && status < 500) return false;
+      throw e;
+    }
+    return (Array.isArray(rows) ? rows : []).some((r: any) => r?.id != null && String(r.id) === userId);
+  }
+
+  /**
    * Is position `positionName` inside the organization boundary? `null` when
    * every set it carries is; otherwise the first failure, naming the set.
    * A position the catalog does not hold cannot be shown inside, and is not.
@@ -1465,7 +1533,16 @@ export class DelegatedAdminGate {
       const row = t.next ?? t.prev ?? {};
       const { setRow, setName, unresolved, setNamed } = await this.directGrantSet(t, row);
       const targetUserId = row.user_id ? String(row.user_id) : null;
-      const userBUs = targetUserId ? await this.businessUnitsOfUser(targetUserId) : new Set<string>();
+      // A target user the write NAMES, where the engine's reference check asks
+      // the caller's read door about it, is first asked of that door
+      // ({@link callerReadsUser}): a user it does not return is answered as a
+      // user that does not exist, which holds no business unit the subtree can
+      // cover. So an unreadable target is outside the subtree, whatever it is.
+      const userBUs = targetUserId
+        && (!namesTargetUser(t) || !referenceCheckAsksCallerAboutUser(this.deps.ql, opCtx.object)
+          || (await this.callerReadsUser(opCtx, targetUserId)))
+        ? await this.businessUnitsOfUser(targetUserId)
+        : new Set<string>();
       // [ruling of record 6649064874] Named only when the caller
       // wrote or reads it ({@link mayName}); the verdict is the stored row's.
       const userNamed = mayName(t, side, 'user_id');
@@ -1479,12 +1556,15 @@ export class DelegatedAdminGate {
             : "the grant's permission set is not in the scope's allowlist");
         }
         if (!targetUserId) return 'the grant names no target user';
-        if (userBUs.size === 0) {
-          return `${userNamed ? `target user '${targetUserId}'` : "the grant's target user"} has no business-unit membership — only a tenant admin may grant outside the tree`;
-        }
-        let inSubtree = false;
-        for (const bu of userBUs) if (s.subtree.has(bu)) { inSubtree = true; break; }
-        if (!inSubtree) {
+        // [ADR-0090 D12; ruling on #26059, Q3] A target user is inside the
+        // subtree only through a business unit of the subtree. A user holding
+        // no business-unit membership has none, and neither has an id naming
+        // no user, nor a named user the caller cannot read (above): each is
+        // outside the subtree, exactly as a user whose units all lie elsewhere
+        // is. So the refusal is one reason, one class, one sentence and one set
+        // of details for all of them, whether or not the target exists or
+        // holds a membership.
+        if (![...userBUs].some((bu) => s.subtree.has(bu))) {
           return outsideScope(userNamed
             ? `target user '${targetUserId}' is outside the delegated subtree`
             : "the grant's target user is outside the delegated subtree");

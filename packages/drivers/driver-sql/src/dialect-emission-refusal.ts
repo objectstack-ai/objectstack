@@ -92,6 +92,9 @@ export const DIALECT_EMISSION_UNSUPPORTED_STATUS = 501;
  * plan, an installer) reads `client` and `supportedClients` instead of parsing
  * the sentence back out of `message`.
  */
+/** Why a knex client is outside schema emission — see {@link UnsupportedDialectEmissionError.reason}. */
+export type DialectEmissionRefusalReason = 'postgres-wire' | 'federation-only';
+
 export class UnsupportedDialectEmissionError extends Error {
   readonly code = DIALECT_EMISSION_UNSUPPORTED_CODE;
   readonly status = DIALECT_EMISSION_UNSUPPORTED_STATUS;
@@ -104,46 +107,15 @@ export class UnsupportedDialectEmissionError extends Error {
     /** Every client spelling this driver DOES emit DDL for, sorted. */
     readonly supportedClients: readonly string[],
     /**
-     * Why the client gets no emission: `'wire-only'` — recognised on the
-     * PostgreSQL wire, refused DDL by the #11756 ruling — or
-     * `'federation-only'` — SQL Server, which the driver serves for an
-     * ADR-0015 external datasource and never builds a schema on.
+     * Why the client is outside emission: a Postgres-WIRE database this driver
+     * does not emit for (#11991, the default), or a federation-only dialect
+     * (Oracle, ADR-0015 §4.6), which the platform reads and never builds in.
      */
-    readonly scope: DialectEmissionScope = 'wire-only',
+    readonly reason: DialectEmissionRefusalReason = 'postgres-wire',
   ) {
-    super(
-      scope === 'federation-only'
-        ? renderFederationOnlyEmissionRefusal(client, operation, supportedClients)
-        : renderDialectEmissionRefusal(client, operation, supportedClients),
-    );
+    super(renderDialectEmissionRefusal(client, operation, supportedClients, reason));
     this.name = 'UnsupportedDialectEmissionError';
   }
-}
-
-/** The two reasons a recognised client gets no DDL emission. */
-export type DialectEmissionScope = 'wire-only' | 'federation-only';
-
-/**
- * The refusal's prose for a FEDERATION-ONLY client (SQL Server).
- *
- * Same three parts, same order, as {@link renderDialectEmissionRefusal}: what
- * was refused and why, what IS supported, and what to do instead. The remedy
- * differs because the boundary does: there is no out-of-band-schema posture to
- * keep here, the datasource is simply external by definition.
- */
-export function renderFederationOnlyEmissionRefusal(
-  client: string,
-  operation: string,
-  supportedClients: readonly string[],
-): string {
-  return (
-    `DDL operation '${operation}' was refused: knex client '${client}' (Microsoft SQL Server) is served ` +
-    `for federation only, so ObjectStack reads and writes tables that already exist there but never ` +
-    `creates or alters one. No table was created or altered. ` +
-    `Supported clients for schema emission: ${supportedClients.join(', ')}. ` +
-    `To use this database, declare its datasource with \`schemaMode: 'external'\` (or ` +
-    `'validate-only') and bind objects to its existing tables through \`external.remoteName\`.`
-  );
 }
 
 /**
@@ -160,7 +132,19 @@ export function renderDialectEmissionRefusal(
   client: string,
   operation: string,
   supportedClients: readonly string[],
+  reason: DialectEmissionRefusalReason = 'postgres-wire',
 ): string {
+  if (reason === 'federation-only') {
+    return (
+      `DDL operation '${operation}' was refused: knex client '${client}' is a federation-only dialect ` +
+      `(ADR-0015 §4.6) — ObjectStack reads the tables another system owns there and never creates or ` +
+      `alters one, so no table was created or altered. ` +
+      `Supported clients for schema emission: ${supportedClients.join(', ')}. ` +
+      `Declare the datasource \`schemaMode: 'external'\` (or 'validate-only') and bind each object to an ` +
+      `existing table with \`external.remoteName\`; reads, and writes where both write opt-ins are on, ` +
+      `are unaffected by this refusal.`
+    );
+  }
   return (
     `DDL operation '${operation}' was refused: knex client '${client}' speaks the PostgreSQL wire ` +
     `protocol, but ObjectStack does not emit schema DDL for it, so no table was created or altered. ` +

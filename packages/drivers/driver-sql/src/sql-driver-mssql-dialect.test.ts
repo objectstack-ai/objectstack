@@ -73,8 +73,12 @@ describe('[#31327] the mssql dialect is modelled, not unknown', () => {
       caught = e as Error & { code?: string };
     }
     expect(caught?.code).toBe('SQL_DIALECT_EMISSION_UNSUPPORTED');
-    expect(caught?.message).toContain('served for federation only');
-    expect(caught?.message).toContain('No table was created or altered');
+    // The one federation-only renderer, shared with Oracle: it names the
+    // client it refuses, never another vendor.
+    expect((caught as { reason?: string } | undefined)?.reason).toBe('federation-only');
+    expect(caught?.message).toContain("knex client 'mssql' is a federation-only dialect");
+    expect(caught?.message).toContain('no table was created or altered');
+    expect(caught?.message).not.toContain('Oracle');
   });
 });
 

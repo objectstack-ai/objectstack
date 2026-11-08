@@ -62,7 +62,8 @@
  * ## The rows
  *
  *   - `sqlite` (better-sqlite3), `sqlite-wasm` (sql.js): real drivers.
- *     `postgres` and `mysql`: real `driver-sql` instances, never connected;
+ *     `postgres`, `mysql` and `oracle` (federation-only): real `driver-sql`
+ *     instances, never connected;
  *     their dialect and bucket expression answer from the client config alone,
  *     and the spied doors mean no statement is sent.
  *   - `memory`, by code path: `InMemoryDriver` declares `supports = {}`, so
@@ -262,6 +263,14 @@ const DRIVER_ROWS = {
       face: 'driver-sql, mysql2, never connected',
       build: () =>
         new SqlDriver({ client: 'mysql2', connection: { host: '127.0.0.1', database: 'unconnected' }, pool: { min: 0 } } as any) as unknown as EnumeratedDriver,
+      release: releaseKnex,
+    },
+  ],
+  oracle: [
+    {
+      face: 'driver-sql, oracledb, never connected',
+      build: () =>
+        new SqlDriver({ client: 'oracledb', connection: { connectString: '127.0.0.1/unconnected' }, schemaMode: 'external', pool: { min: 0 } } as any) as unknown as EnumeratedDriver,
       release: releaseKnex,
     },
   ],

@@ -20,7 +20,7 @@ import {
     type ArtifactForwardConversionResult,
 } from '@objectstack/metadata-core';
 import { OBJECTQL_DRIVERS_READY_HOOK } from '@objectstack/objectql';
-import { resolveTenancyPosture } from '@objectstack/types';
+import { resolveTenancyPosture, type ScheduledWorkPolicySource } from '@objectstack/types';
 import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
 import { SeedLoaderService } from './seed-loader.js';
 import { recordSeedOutcome } from './seed-summary.js';
@@ -313,6 +313,8 @@ export class AppPlugin implements Plugin {
      * composition test can pin which registrar a boot shape declared.
      */
     readonly securityMetadataRegistrar: AppPluginSecurityMetadataRegistrar;
+    /** [#31382] The host's per-kernel scheduled-work policy for this app's jobs; absent ⇒ the deployment switch. */
+    private readonly scheduledWorkPolicy: ScheduledWorkPolicySource | undefined;
 
     /**
      * `this.bundle` with every package-owned collection resolved across BOTH
@@ -467,9 +469,18 @@ export class AppPlugin implements Plugin {
             skipSeedData?: boolean;
             skipOnEnable?: boolean;
             securityMetadataRegistrar?: AppPluginSecurityMetadataRegistrar;
+            /**
+             * [#31382] THIS kernel's scheduled-work policy, handed to the
+             * package-jobs binder (`AppArtifactJobSchedulingOptions.scheduledWorkPolicy`).
+             * Give it the same policy as the kernel's automation engine and
+             * schedule triggers (#19834). Absent, the deployment switch decides,
+             * exactly as before.
+             */
+            scheduledWorkPolicy?: ScheduledWorkPolicySource;
         } = {},
     ) {
         this.bundle = bundle;
+        this.scheduledWorkPolicy = opts.scheduledWorkPolicy;
         this.projectContext = projectContext;
         this.skipSeedData = opts.skipSeedData ?? false;
         this.skipOnEnable = opts.skipOnEnable ?? false;
@@ -1863,7 +1874,14 @@ export class AppPlugin implements Plugin {
             const jobsDefinition = this.forwardConverted(ctx).definition;
             if (collectBundleJobs(jobsDefinition).length > 0) {
                 ctx.hook('kernel:ready', async () => {
-                    await scheduleAppArtifactJobs(ctx, jobsDefinition, { appId, ql, source: 'AppPlugin' });
+                    await scheduleAppArtifactJobs(ctx, jobsDefinition, {
+                        appId,
+                        ql,
+                        source: 'AppPlugin',
+                        // [#31382] Undefined when the host gave none: the
+                        // binder then reads the deployment switch as before.
+                        scheduledWorkPolicy: this.scheduledWorkPolicy,
+                    });
                 });
             }
         } catch (err: any) {

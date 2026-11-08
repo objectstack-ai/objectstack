@@ -14,8 +14,9 @@ export interface NotNullTarget {
   shardBaseOf?(table: string): string | null;
   /**
    * Whether the table's column is NOT NULL already, read from the database the
-   * plan placed it in; `null` when it cannot be read. Asked of a rotation shard
-   * only: a shard the driver created NOT NULL has nothing left to do.
+   * plan placed it in; `null` when it cannot be read. Asked of every table
+   * first: one already NOT NULL — a shard the driver created so, or a table an
+   * earlier run of the ceremony tightened — has nothing left to do.
    */
   isNotNull?(table: string, column: string, database: string | undefined): Promise<boolean | null>;
 }
@@ -33,6 +34,11 @@ export interface NotNullTarget {
  * transport whose apply door cannot perform the op (the Turso remote face,
  * `driftApplyLimit`) is `unsupported`, never attempted.
  *
+ * A column already NOT NULL is `already-not-null`, never handed to the door
+ * again: so the step can run again on a resumed ceremony (a table an earlier
+ * run left `not-declared`, or held by a NULL row since fixed) without
+ * rebuilding a table an earlier run tightened.
+ *
  * A rotation shard is never rebuilt: the apply door rebuilds a table against
  * its own declaration, which a shard does not have. The driver creates every
  * shard it rotates in with the tenant column NOT NULL (`ensureShardTable`), so
@@ -43,16 +49,16 @@ export interface NotNullTarget {
 export async function applyNotNullThroughDrift(target: NotNullTarget, columns: readonly NotNullColumn[]): Promise<NotNullOutcome[]> {
   const outcomes: NotNullOutcome[] = [];
   for (const { table, column, database } of columns) {
+    if ((await target.isNotNull?.(table, column, database)) === true) {
+      outcomes.push({ table, column, outcome: 'already-not-null' });
+      continue;
+    }
     if (!target.isDeclared(table)) {
       outcomes.push({ table, column, outcome: 'not-declared' });
       continue;
     }
     const base = target.shardBaseOf?.(table) ?? null;
     if (base !== null && base !== table) {
-      if ((await target.isNotNull?.(table, column, database)) === true) {
-        outcomes.push({ table, column, outcome: 'already-not-null' });
-        continue;
-      }
       outcomes.push({
         table,
         column,

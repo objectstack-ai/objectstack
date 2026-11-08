@@ -756,7 +756,7 @@ const DIALECT_CELL_SYMBOLS = ['dialectCell', 'PG_CELL', 'MYSQL_CELL', 'declareDi
  * cannot make a managed cell read green, and a managed gap cannot hide behind
  * one. A further federation-only dialect appends its cell symbol here.
  */
-const FEDERATION_CELL_SYMBOLS = ['MSSQL_FEDERATION_CELL'];
+const FEDERATION_CELL_SYMBOLS = ['MSSQL_FEDERATION_CELL', 'ORACLE_CELL'];
 
 /** The export that identifies a package's dialect-matrix testkit, found on disk. */
 const DIALECT_TESTKIT_EXPORT = 'DIALECT_CELLS';
