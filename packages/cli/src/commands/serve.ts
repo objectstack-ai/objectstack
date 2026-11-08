@@ -2867,6 +2867,13 @@ export default class Serve extends Command {
       // boot modes live in a separate distribution and are no longer
       // resolved from this package.
       if (useArtifactFallback || shouldBootWithLibrary(config)) {
+        // The authored `plugins` is set aside below (the boot stack's own
+        // replaces it): an entry that may provide the crypto provider refuses
+        // the boot first. See the function.
+        await refuseSetAsideCryptoProviderPlugins(
+          (config as { plugins?: unknown }).plugins,
+          async (specifier) => await Serve.importConfigPlugin(specifier, servedAppRootOrCwd()),
+        );
         // The boot stack returns only `{plugins, api}` — preserve the
         // original stack metadata (notably `requires`, `analyticsCubes`,
         // `tiers`) so the capability resolver further down can read it.
@@ -6461,6 +6468,58 @@ export function refuseUnloadedCryptoProviderPlugins(unloaded: readonly UnloadedS
     + `and nothing rules out that ${refused.length === 1 ? 'it provides' : 'one of them provides'} the crypto provider `
     + `('${CRYPTO_PROVIDER_SERVICE}'). It seals every secret field, datasource credential and encrypted setting, `
     + 'so this boot does not choose another one. Make the entry load, or remove it from the stack\'s plugins.',
+  );
+}
+
+/**
+ * Refuse a boot that would set aside a `plugins` entry which may provide the
+ * crypto provider ({@link CRYPTO_PROVIDER_SERVICE}).
+ *
+ * A stack whose `plugins` holds no plugin instance (no entry with `init`) is
+ * not a host config: `os serve` boots the standalone stack and uses that
+ * stack's plugins in place of the authored list ({@link mergeBootConfig}), so
+ * no authored `plugins` entry is loaded. The provider seals every secret
+ * field, datasource credential and encrypted setting, and the one-shot secret
+ * commands read the same list, so an entry the boot sets aside must be ruled
+ * out by what it declares. Each entry is materialized the way the boot loop
+ * reads one (a string is imported host-anchored; an object is read as it is,
+ * never wrapped or booted) and is refused when it declares the provider in
+ * `providesServices` (ADR-0116), or when it does not import, since an entry
+ * that never materialized declares nothing. Every other entry keeps today's
+ * handling.
+ */
+export async function refuseSetAsideCryptoProviderPlugins(
+  authored: unknown,
+  importSpecifier: (specifier: string) => Promise<unknown>,
+): Promise<void> {
+  if (!Array.isArray(authored)) return;
+  const { materializeStackPlugin } = await import('@objectstack/core');
+  const unloaded: UnloadedStackPlugin[] = [];
+  const declaring: string[] = [];
+  for (const [index, entry] of authored.entries()) {
+    if (entry === undefined || entry === null || entry === false) continue;
+    let materialized: unknown;
+    try {
+      materialized = await materializeStackPlugin(entry, {
+        importSpecifier,
+        wrapBundle: async (bundle) => bundle,
+      });
+    } catch (error) {
+      unloaded.push({ index, entry, error });
+      continue;
+    }
+    if (cryptoProviderPlugins([materialized]).length > 0) {
+      const name = (materialized as { name?: unknown }).name;
+      declaring.push(typeof entry === 'string' ? `plugins[${index}] ('${entry}')` : `plugins[${index}] ('${String(name)}')`);
+    }
+  }
+  refuseUnloadedCryptoProviderPlugins(unloaded);
+  if (declaring.length === 0) return;
+  throw new HostCryptoProviderRefusal(
+    `Refusing to boot: ${declaring.join(', ')} ${declaring.length === 1 ? 'provides' : 'provide'} the crypto provider `
+    + `('${CRYPTO_PROVIDER_SERVICE}'), but this stack's plugins lists no plugin instance, so os serve boots the `
+    + 'standalone stack and does not load it. It seals every secret field, datasource credential and encrypted '
+    + "setting, so this boot does not choose another one. Add the provider's plugin instance to the stack's plugins.",
   );
 }
 
