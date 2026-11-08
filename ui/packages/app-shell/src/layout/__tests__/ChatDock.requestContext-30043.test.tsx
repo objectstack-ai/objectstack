@@ -92,6 +92,10 @@ import { armChatDockExpanded } from '../chatDockState';
 // scope, so no test's send-wait spends its budget on the first cold import and
 // the `lazy()` resolves from the module cache.
 import '../ChatDockConversation';
+// The layout reaches `@objectstack/lint` through a dynamic import (the draft
+// preview bar's capability lint): pay that load during collection, not inside
+// a clocked case (check:test-source-alias).
+import '@objectstack/lint';
 
 const CRM = { name: 'crm_app', label: 'Customer Desk', _packageId: 'app.crm' };
 const OBJECTS = [{ name: 'account', label: 'Account' }];
@@ -270,5 +274,18 @@ describe('console dock — the request names the selected app and the page in vi
       artifact: { type: 'object', name: 'account' },
       selection: { kind: 'record', id: 'rec_1' },
     });
+  });
+});
+
+describe('console dock — a record open in a list drawer is sent as the record in view (objectstack#28106)', () => {
+  it('the body names the drawer record, and closing the drawer moves the next turn back to the object', async () => {
+    mount('/apps/crm_app/account?recordId=rec_7');
+    expect((await send('change its phone to 123')).surface).toEqual({
+      artifact: { type: 'object', name: 'account' },
+      selection: { kind: 'record', id: 'rec_7' },
+    });
+
+    act(() => nav.go('/apps/crm_app/account'));
+    expect((await send('how many accounts?')).surface).toEqual({ artifact: { type: 'object', name: 'account' } });
   });
 });

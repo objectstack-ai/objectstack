@@ -24,3 +24,24 @@ import React from 'react';
  * presses Save.
  */
 export const SuggestedFieldsContext = React.createContext<ReadonlySet<string> | undefined>(undefined);
+
+/**
+ * The CHANGES AI proposes to a stored record's fields, field name → proposed
+ * value (objectstack#28106). The sibling of {@link SuggestedFieldsContext} for
+ * an edit form: there the opening value is the stored one, so the suggestion
+ * cannot be the opening value.
+ *
+ * The console's edit page provides it when it opens on an update card's
+ * proposed values from the AI chat ("Open the full form"). A `form` renderer
+ * below it applies each proposed value to a field it draws, once, over the
+ * record it opened on, as an unsaved change the person's own edit would be
+ * (the form reads dirty and the save writes it). While the field holds the
+ * proposed value it shows the same "AI suggestion" mark, the stored value it
+ * replaces (before → after) and a revert that puts the stored value back.
+ * A read-only or disabled field, and a field the form does not draw, is left
+ * alone: nothing is applied where the person cannot see or undo it.
+ *
+ * Like its sibling it is a host slot, never metadata, and it never submits:
+ * the record changes only when the person presses Save.
+ */
+export const SuggestedFieldChangesContext = React.createContext<ReadonlyMap<string, unknown> | undefined>(undefined);

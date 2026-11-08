@@ -24,6 +24,7 @@
 
 import { matchRoutes } from 'react-router-dom';
 import { APP_ROUTE_METADATA_READS } from '../console/appRouteMetadataReads.js';
+import { RECORD_DRAWER_PARAM } from '../urlParams.js';
 
 /** cloud#1610's `context.surface` — see the module doc. */
 export interface ChatSurfaceContext {
@@ -77,15 +78,27 @@ export const APP_ROUTE_SURFACES: Readonly<Record<string, (p: Params) => ChatSurf
 };
 
 /**
+ * objectstack#28106 — the list routes that open a record in the detail drawer
+ * (`?recordId=`, `RECORD_DRAWER_PARAM`) over the list. While the drawer is
+ * open, the record in it is the one in view, exactly as on its record page:
+ * the surface names the object and that record, so 「把这条电话改成……」 asked
+ * beside the drawer reaches the agent as the record-page ask does.
+ */
+const RECORD_DRAWER_ROUTES: ReadonlySet<string> = new Set([':objectName', ':objectName/data', ':objectName/view/:viewId']);
+
+/**
  * The surface the console page at `pathname` shows, or `undefined` when it
  * shows no one artifact. `pathname` is the router's (below any basename);
  * only `/apps/:appName/…` pages have one. `hostPaths` are the host's extra
  * app routes (`AppContent`'s `extraRoutes`): one that matches wins the way it
- * wins in `<Routes>`, and names no surface.
+ * wins in `<Routes>`, and names no surface. `search` is the location's query
+ * string: on a list route a record open in the drawer (`?recordId=`) is the
+ * finer selection, over the saved view the list shows.
  */
 export function consoleChatSurface(
   pathname: string,
   hostPaths: readonly string[] = [],
+  search = '',
 ): ChatSurfaceContext | undefined {
   const segments = pathname.split('/').filter(Boolean);
   if (segments[0] !== 'apps' || segments.length < 3) return undefined;
@@ -96,5 +109,10 @@ export function consoleChatSurface(
   const matches = matchRoutes(routes, `/${segments.slice(2).join('/')}`);
   const hit = matches?.[matches.length - 1];
   if (!hit || hit.route.host) return undefined;
-  return APP_ROUTE_SURFACES[hit.route.path]?.(hit.params);
+  const surface = APP_ROUTE_SURFACES[hit.route.path]?.(hit.params);
+  if (surface?.artifact && RECORD_DRAWER_ROUTES.has(hit.route.path)) {
+    const drawerRecordId = new URLSearchParams(search).get(RECORD_DRAWER_PARAM)?.trim();
+    if (drawerRecordId) return { artifact: surface.artifact, selection: { kind: 'record', id: drawerRecordId } };
+  }
+  return surface;
 }
