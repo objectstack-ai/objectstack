@@ -1,5 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
-// test-budget: 40 — three refusals that exit before any server starts, then two real `os start` boots (one on explicit settings; one on the defaults, which also signs up an owner, creates a member and reads the notice as each); the file read 27.6 s on a shared local box (no CI reading yet) x 1.25, rounded up to the next 10 s
+// test-budget: 40 — six starts that exit before any server answers (three image refusals; the multi-replica refusal, its pass and its memory-driver control), then two real `os start` boots (one on explicit settings; one on the defaults, which also signs up an owner, creates a member and reads the notice as each); the file read 27.6 s on a shared local box (no CI reading yet) x 1.25, rounded up to the next 10 s, and 26.9 s with the three multi-replica starts added
 
 /**
  * #30120, ruling A3 (record 6634240777) — the official image refuses to start
@@ -28,6 +28,12 @@
  *     `GET /api/settings/deployment/notice` with the files the block named, a
  *     member is refused `403`, and neither the public auth config nor the
  *     runtime config carries any of it.
+ *
+ * And, beside the image's refusal (#31600): a start that declares several
+ * replicas over the redis cluster driver and sets no `OS_AUTH_SECRET` exits 1
+ * on one line naming it, before it generates a secret; with the secret set it
+ * passes, and replicas declared over the memory driver still generate one.
+ * The single-node default keeps generating its own: leg 3 reads that file.
  *
  * The hide's audit row and the route's other refusals are pinned beside the
  * routes (`service-settings` `deployment-notice.routes.test.ts`).
