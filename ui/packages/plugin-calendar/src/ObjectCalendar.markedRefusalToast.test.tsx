@@ -28,10 +28,11 @@
 
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { toast } from '@object-ui/components';
 import { normaliseClientError } from '@object-ui/data-objectstack';
+import { I18nProvider } from '@object-ui/i18n';
 import { ObjectCalendar } from './ObjectCalendar';
 
 const MARKED = 'This visit cannot move outside the technician’s on-call window.';
@@ -50,22 +51,17 @@ const SOURCE_DAY = dayInThisMonth(1);
 const TARGET_DAY = dayInThisMonth(8);
 
 /**
- * The cell's own aria-label, as THIS render produces it.
- *
- * ⚠️ Not "the way `MonthView` builds it" any more: `MonthView` formats that name
- * with its RESOLVED locale (objectui#10144), which this rebuild does not have in
- * hand. The two agree here only for as long as this provider-less render's
- * resolved locale and the runtime default render a date identically — mount a
- * non-`en` `I18nProvider` in this file and this helper has to be re-derived
- * rather than trusted.
+ * The current-month grid cell of a day, found by its day number rather than
+ * by its spoken label, so a render under a non-`en` `I18nProvider` (whose
+ * resolved locale spells the label differently) finds it too.
  */
-const cellLabel = (d: Date) =>
-  d.toLocaleDateString('default', {
-    weekday: 'long',
-    month: 'long',
-    day: 'numeric',
-    year: 'numeric',
-  });
+const monthCell = (d: Date): HTMLElement => {
+  const cells = screen.getAllByRole('gridcell').filter(
+    (cell) => !cell.className.includes('opacity-50') && cell.firstElementChild?.textContent === String(d.getDate()),
+  );
+  expect(cells).toHaveLength(1);
+  return cells[0];
+};
 
 const record = () => ({
   id: 'v1',
@@ -113,10 +109,11 @@ const forbidden = (userMessage?: string) =>
     }),
   );
 
-function makeDataSource(rejectWith: unknown) {
+function makeDataSource(rejectWith: unknown, label?: string) {
   return {
     getObjectSchema: vi.fn(async () => ({
       name: 'visit',
+      ...(label ? { label } : {}),
       fields: { name: { type: 'text' }, starts_at: { type: 'datetime' } },
     })),
     find: vi.fn(async () => ({ value: [record()] })),
@@ -149,13 +146,16 @@ function performDnd(source: Element, target: Element) {
  * Mount the calendar on its OWN data (no `data` prop, no `onEventDrop`), drag
  * the event a week forward, and return the single toast text.
  */
-async function rescheduleAndReadToast(rejectWith: unknown): Promise<unknown> {
-  const ds = makeDataSource(rejectWith);
-  render(<ObjectCalendar schema={schema} dataSource={ds as never} />);
+async function rescheduleAndReadToast(
+  rejectWith: unknown,
+  { label, wrap }: { label?: string; wrap?: (ui: React.ReactElement) => React.ReactElement } = {},
+): Promise<unknown> {
+  const ds = makeDataSource(rejectWith, label);
+  const ui = <ObjectCalendar schema={schema} dataSource={ds as never} />;
+  render(wrap ? wrap(ui) : ui);
 
   const pill = await screen.findByLabelText(TITLE);
-  const targetCell = screen.getByLabelText(new RegExp(`^${cellLabel(TARGET_DAY)}`));
-  performDnd(pill, targetCell);
+  performDnd(pill, monthCell(TARGET_DAY));
 
   await waitFor(() => expect(ds.update).toHaveBeenCalledTimes(1));
   await waitFor(() => expect(toast.error).toHaveBeenCalledTimes(1));
@@ -204,5 +204,89 @@ describe('ObjectCalendar — a marked refusal reaches the reschedule toast (#590
     const said = await rescheduleAndReadToast(forbidden());
     expect(said).toBe('You are not authorized to perform this action.');
     expect(String(said)).not.toContain('insufficient privileges');
+  });
+});
+
+/**
+ * A reschedule the server refuses with `404 RECORD_NOT_FOUND` (the record was
+ * deleted, or row-level security no longer shows it to this user) toasts a
+ * translated sentence naming the object by its LABEL, never the server's
+ * `Record ID not found in OBJECT_NAME` (objectstack#31494), and the event still
+ * snaps back to its day.
+ */
+const notFound = () =>
+  normaliseClientError(
+    Object.assign(new Error('Record v1 not found in visit'), {
+      code: 'RECORD_NOT_FOUND',
+      httpStatus: 404,
+      details: { code: 'RECORD_NOT_FOUND', error: 'Record v1 not found in visit' },
+    }),
+  );
+
+const externalRefusal = () =>
+  normaliseClientError(
+    Object.assign(new Error('EXTERNAL_WRITE_FORBIDDEN: visit is read-only'), {
+      code: 'EXTERNAL_WRITE_FORBIDDEN',
+      httpStatus: 403,
+    }),
+  );
+
+/** The server's sentence leaks none of its machine parts: id, object name. */
+function expectNoServerParts(said: unknown) {
+  expect(String(said)).not.toContain('v1');
+  expect(String(said)).not.toMatch(/\bvisit\b/);
+  expect(String(said)).not.toContain('not found in');
+}
+
+describe('ObjectCalendar — a reschedule of a record gone for this session (#31494)', () => {
+  it('names the object by its served label, with no id or machine name, and rolls back', async () => {
+    const said = await rescheduleAndReadToast(notFound(), { label: 'Appointment' });
+    expect(said).toBe('This Appointment record no longer exists, or you no longer have access to it.');
+    expectNoServerParts(said);
+    // The optimistic move is undone: the event is back on its own day.
+    await waitFor(() => expect(within(monthCell(SOURCE_DAY)).getByLabelText(TITLE)).toBeTruthy());
+    expect(within(monthCell(TARGET_DAY)).queryByLabelText(TITLE)).toBeNull();
+  });
+
+  it('speaks the session language: a zh session reads the zh sentence with the zh label', async () => {
+    const said = await rescheduleAndReadToast(notFound(), {
+      label: '任务',
+      wrap: (ui) => (
+        <I18nProvider config={{ defaultLanguage: 'zh', detectBrowserLanguage: false, warnMissingKeys: false }}>
+          {ui}
+        </I18nProvider>
+      ),
+    });
+    expect(said).toBe('这条任务记录已不存在，或者您已无权访问它。');
+    expectNoServerParts(said);
+  });
+
+  it('with no label to show, says the generic sentence rather than the machine name', async () => {
+    const said = await rescheduleAndReadToast(notFound());
+    expect(said).toBe("This record doesn't exist, or you don't have access to it.");
+    expectNoServerParts(said);
+  });
+
+  it('a 404 marked for the user still renders the marking', async () => {
+    const marked = normaliseClientError(
+      Object.assign(new Error('Record v1 not found in visit'), {
+        code: 'RECORD_NOT_FOUND',
+        httpStatus: 404,
+        userMessage: MARKED,
+      }),
+    );
+    expect(await rescheduleAndReadToast(marked, { label: 'Appointment' })).toBe(MARKED);
+  });
+
+  it('leaves the external-source refusal its own read-only sentence', async () => {
+    expect(await rescheduleAndReadToast(externalRefusal(), { label: 'Appointment' })).toBe(
+      'This table is read-only. Its records come from an external data source that does not accept changes.',
+    );
+  });
+
+  it('leaves an unmarked 403 its localized permission substitution', async () => {
+    expect(await rescheduleAndReadToast(forbidden(), { label: 'Appointment' })).toBe(
+      'You are not authorized to perform this action.',
+    );
   });
 });
