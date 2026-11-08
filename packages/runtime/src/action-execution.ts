@@ -15,7 +15,7 @@
  * here; that stays with the route handlers.
  */
 
-import { validateActionParams, type ActionSession, type ResolvedActionParam } from '@objectstack/spec/ui';
+import { validateActionParams, resolveI18nLabel, type ActionSession, type I18nLabel, type ResolvedActionParam } from '@objectstack/spec/ui';
 import { templateSlotSource } from '@objectstack/spec/automation';
 // [#15124] The facade's `find` judges its own parameter against the SAME
 // declaration its type names, so the refusal and the type cannot drift apart.
@@ -3022,6 +3022,21 @@ function boundParamField(p: any, obj: any, objectOf?: ActionParamObjectLookup): 
     return obj?.fields?.[fieldRef];
 }
 
+/**
+ * [#27948, #28266] The text of a param's `helpText` for the agent-facing tool
+ * schema: the bare string or the `template` envelope's `source`; else, for the
+ * inline locale map the slot also takes, its source-language entry through the
+ * shared `resolveI18nLabel` order (no locale ⇒ `en`, then `default`, then any
+ * entry). An envelope with no `source` is not a map, and gives nothing.
+ */
+function paramHelpText(value: unknown): string | undefined {
+    const source = templateSlotSource(value);
+    if (source !== undefined) return source;
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) return undefined;
+    if ('dialect' in value || 'source' in value) return undefined;
+    return resolveI18nLabel(value as I18nLabel, undefined);
+}
+
 export function summarizeActionParams(
     deps: ActionExecutionDeps, action: any, obj: any, flow?: any, objectOf?: ActionParamObjectLookup,
 ): any[] {
@@ -3035,8 +3050,9 @@ export function summarizeActionParams(
         const label = typeof p?.label === 'string' ? p.label : field?.label;
         // A param's `helpText` is a `template` slot (#27948, ruling A): the
         // parsed value is `{ dialect: 'template', source }`, so the tool
-        // schema reads its text, never the object.
-        const help = templateSlotSource(p?.helpText) ?? field?.description;
+        // schema reads its text, never the object — or an inline locale map
+        // (#28266), read in the platform's source language.
+        const help = paramHelpText(p?.helpText) ?? field?.description;
         const description = [label, help].filter(Boolean).join(' — ') || undefined;
         const optionSource = p?.options ?? field?.options;
         const enumVals = Array.isArray(optionSource)

@@ -104,3 +104,43 @@ describe('objectui#12213 — a field-backed param’s help line reads `inlineHel
     expect(param.helpText).toBeUndefined();
   });
 });
+
+/**
+ * objectstack#28266 — a param's own `helpText` may be an inline per-locale map
+ * (`{ en, 'zh-CN' }`), the form an inline action — a page button's, which no
+ * translation bundle reaches — writes its hint in. The resolver narrows it for
+ * the active language exactly as it narrows `label`, so the line under the
+ * control is the viewer's language, and it still wins over the field's help.
+ */
+describe('objectstack#28266 — a param’s own `helpText` locale map resolves to the active language', () => {
+  const ROLE_HELP = { en: 'Owner: full control.', 'zh-CN': '所有者：完全控制。', 'ja-JP': '所有者：完全な管理権限。' };
+
+  async function openIn(locale: string, param: RawActionParam) {
+    const params = resolveActionParams([param], {
+      objectName: 'ticket',
+      objects: [TICKET] as never,
+      fieldLabel: (_o: string, _f: string, fallback: string) => fallback,
+      locale,
+    });
+    render(<ActionParamDialog state={{ open: true, params, resolve: vi.fn() }} onOpenChange={() => {}} />);
+    return { param: params[0], input: await screen.findByLabelText(params[0].label) };
+  }
+
+  it('a zh-CN session reads the zh-CN entry under the control, over the field’s help', async () => {
+    const { param, input } = await openIn('zh-CN', { field: 'note', helpText: ROLE_HELP as never });
+    expect(param.helpText).toBe('所有者：完全控制。');
+    const help = screen.getByText('所有者：完全控制。');
+    expect(input.compareDocumentPosition(help) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByText('Shown under the note')).toBeNull();
+  });
+
+  it('an inline param resolves the map too; a locale the map omits reads the shared fallback (en)', async () => {
+    const { param } = await openIn('es-ES', { name: 'role', label: 'Role', type: 'text', helpText: ROLE_HELP as never });
+    expect(param.helpText).toBe('Owner: full control.');
+  });
+
+  it('CONTROL: an envelope with no `source` is not a map: the field’s help is drawn', async () => {
+    const { param } = await openIn('zh-CN', { field: 'note', helpText: { dialect: 'template' } as never });
+    expect(param.helpText).toBe('Shown under the note');
+  });
+});

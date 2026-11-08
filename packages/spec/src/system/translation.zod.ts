@@ -2238,6 +2238,29 @@ const appTranslationDataShape = () => ({
 });
 
 /**
+ * One column header of a settings `map` specifier: the key column
+ * (`keys.<key>.keyColumn`) or one value column (`keys.<key>.columns.<name>`).
+ * Its leaves are the two strings `SpecifierMapColumnSchema` and
+ * `SpecifierMapKeyColumnSchema` declare: `label`, and `description` translated
+ * as `help`, the spelling the setting's own entry uses for its `description`.
+ */
+const settingsMapColumnTranslation = (surface: string) => strictObject({
+  surface,
+  history: TRANSLATION_HISTORY,
+  aliases: { title: 'label', header: 'label', heading: 'label', helpText: 'help', hint: 'help', description: 'help' },
+  // A specifier column pasted in whole carries these two. Neither is copy:
+  // the column's `name` is the record key this entry sits under, and its
+  // `kind` is declared by the specifier, so neither is renamed to a leaf here.
+  guidance: {
+    name: "a column's `name` is not translated: it is the key this entry sits under (`columns.<name>`), so write the entry there and drop `name`",
+    kind: "a column's `kind` is not translated: the `map` specifier declares it, so drop it from the translation",
+  },
+}, {
+  label: z.string().optional().describe('Translated column header'),
+  help: z.string().optional().describe('Translated column help text'),
+});
+
+/**
  * The one group that is PLATFORM-ONLY, as a shape rather than a schema.
  *
  * `settings` is keyed by `SettingsManifest.namespace`, and a manifest is
@@ -2281,6 +2304,10 @@ const platformSettingsShape = () => ({
    *   settings.<namespace>.keys.<setting_key>.placeholder
    *   settings.<namespace>.keys.<setting_key>.options.<option_value>
    *   settings.<namespace>.keys.<setting_key>.confirmOffText
+   *   settings.<namespace>.keys.<setting_key>.keyColumn.label
+   *   settings.<namespace>.keys.<setting_key>.keyColumn.help
+   *   settings.<namespace>.keys.<setting_key>.columns.<column_name>.label
+   *   settings.<namespace>.keys.<setting_key>.columns.<column_name>.help
    *   settings.<namespace>.actions.<action_id>.label
    *   settings.<namespace>.actions.<action_id>.confirmText
    *   settings.<namespace>.actions.<action_id>.successMessage
@@ -2293,6 +2320,12 @@ const platformSettingsShape = () => ({
    * `groups` already uses for the same field), and its `bannerText` as
    * `text`. A banner without an `id` has no address here and renders its
    * manifest literals.
+   *
+   * `keyColumn` and `columns` are a `map` specifier's table headers, spelled
+   * as the specifier spells them: `keyColumn` is the key column, `columns` the
+   * value columns keyed by each column's `name`. Both carry the two strings a
+   * map column declares, its `label` and its `description`, the latter as
+   * `help` as on the setting itself.
    */
   settings: z.record(z.string(), strictObject({
     surface: 'this settings manifest translation',
@@ -2312,7 +2345,10 @@ const platformSettingsShape = () => ({
     keys: z.record(z.string(), strictObject({
       surface: 'this setting translation',
       history: TRANSLATION_HISTORY,
-      aliases: { title: 'label', name: 'label', helpText: 'help', hint: 'help', description: 'help', choices: 'options', values: 'options' },
+      aliases: {
+        title: 'label', name: 'label', helpText: 'help', hint: 'help', description: 'help', choices: 'options', values: 'options',
+        keyHeader: 'keyColumn', headers: 'columns', columnLabels: 'columns',
+      },
     }, {
       label: z.string().optional().describe('Translated setting label'),
       help: z.string().optional().describe('Translated setting help text'),
@@ -2321,6 +2357,12 @@ const platformSettingsShape = () => ({
         .describe('Enum option value → translated label'),
       confirmOffText: z.string().optional()
         .describe("Translated confirm text shown before a toggle's value changes to off"),
+      keyColumn: settingsMapColumnTranslation('this settings map key-column translation')
+        .optional()
+        .describe("A map setting's key column header: `label` translates the specifier's `keyColumn.label`, `help` its `keyColumn.description`"),
+      columns: z.record(z.string(), settingsMapColumnTranslation('this settings map column translation'))
+        .optional()
+        .describe("A map setting's value column headers keyed by column `name`: `label` translates the column's `label`, `help` its `description`"),
     })).optional().describe('Per-setting field translations keyed by setting key'),
     actions: z.record(z.string(), strictObject({
       surface: 'this settings action translation',

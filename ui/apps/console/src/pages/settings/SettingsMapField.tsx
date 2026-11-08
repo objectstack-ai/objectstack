@@ -253,6 +253,13 @@ export interface SettingsMapFieldProps {
   labelId: string;
   /** An option's shown name, translated through the namespace's option slot. */
   optionLabel: (option: NonNullable<Specifier['options']>[number]) => string;
+  /**
+   * A header's shown text, translated through the setting's `keyColumn` slot
+   * (`column` undefined) or its `columns.<column>` slot (objectstack#31453);
+   * `literal` is the manifest's own text in the page language. Absent, the
+   * literal is shown.
+   */
+  headerText?: (column: string | undefined, leaf: 'label' | 'help', literal: string | undefined) => string | undefined;
   /** The save door's pointer into the value, from the last refused save. */
   errorAt?: MapRefusalAt;
   /** Set by the row's wrapper: the error line and note this control is described by. */
@@ -267,6 +274,7 @@ export function SettingsMapField({
   disabled,
   labelId,
   optionLabel,
+  headerText,
   errorAt,
   'aria-describedby': describedBy,
 }: SettingsMapFieldProps) {
@@ -294,8 +302,12 @@ export function SettingsMapField({
 
   const usedKeys = new Set(rows.map((r) => r.key));
   const unused = served.filter((o) => !usedKeys.has(o.value));
-  const keyHeader = pickLocalized(spec.keyColumn?.label, language);
-  const columnLabels = columns.map((c) => pickLocalized(c.label, language));
+  const header = (column: string | undefined, leaf: 'label' | 'help', literal: string | undefined) =>
+    (headerText ? headerText(column, leaf, literal) : literal);
+  const keyHeader = header(undefined, 'label', pickLocalized(spec.keyColumn?.label, language)) ?? '';
+  const keyHelp = header(undefined, 'help', spec.keyColumn?.description);
+  const columnLabels = columns.map((c) => header(c.name, 'label', pickLocalized(c.label, language)) ?? '');
+  const columnHelps = columns.map((c) => header(c.name, 'help', c.description));
   // Each row's key picker is named by the key column's header: a combobox
   // takes its name from its label, never from the option it shows.
   const keyHeaderId = `${labelId}-key`;
@@ -307,9 +319,9 @@ export function SettingsMapField({
       <Table aria-describedby={errorAt ? undefined : describedBy}>
         <TableHeader>
           <TableRow>
-            <TableHead id={keyHeaderId}>{keyHeader}</TableHead>
+            <TableHead id={keyHeaderId} title={keyHelp}>{keyHeader}</TableHead>
             {columns.map((c, i) => (
-              <TableHead key={c.name} title={c.description}>
+              <TableHead key={c.name} title={columnHelps[i]}>
                 {columnLabels[i]}
               </TableHead>
             ))}
