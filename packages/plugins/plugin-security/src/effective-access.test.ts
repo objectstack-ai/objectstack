@@ -20,6 +20,7 @@
 
 import { afterEach, describe, it, expect } from 'vitest';
 import { resetPlatformAdminEmailMemo } from '@objectstack/core';
+import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { PermissionSetSchema, type PermissionSet } from '@objectstack/spec/security';
 import { PermissionEvaluator } from './permission-evaluator';
 import { describeEffectiveAccess, type EffectiveAccessHost } from './security-plugin-effective-access';
@@ -53,6 +54,7 @@ function engine(tables: Tables, catalog: { positions: Array<{ name: string; perm
       return typeof opts?.limit === 'number' ? rows.slice(0, opts.limit) : rows;
     },
     async findOne(object: string, opts: any) {
+      assertEngineFindOnePredicate(object, opts);
       return (tables[object] ?? []).find((row) => match(row, opts?.where)) ?? null;
     },
   }, catalog);

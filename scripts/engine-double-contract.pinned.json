@@ -4107,6 +4107,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-security/src/effective-access.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-security/src/engine-find-bare-array.pin.test.ts",
       "verb": "findOne",
       "pinned": 1

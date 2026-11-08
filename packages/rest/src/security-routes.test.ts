@@ -3,6 +3,8 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { RestServer } from './rest-server';
+// Paid at collection, not inside a clocked case: the server reaches it lazily.
+import '@objectstack/objectql';
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
