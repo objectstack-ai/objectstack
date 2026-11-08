@@ -306,13 +306,16 @@
  * for each state of `ADVISORY_LIST_STATES` in order, one walk of the
  * collection's GETs (`advisoryListPagePath`), nothing written: a page fails
  * its fences (`advisoryListPageFailure`: 200, a list, every item an advisory
- * in the state asked for) ⇒ FAILED, naming the status alone, with
+ * in the state asked for, its severity and dates in their declared shapes) ⇒
+ * FAILED, naming the status alone, with
  * `ADVISORY_LIST_ACCESS_REMEDY` on a refusal; a page that never reached the
  * platform ⇒ FAILED with `ADVISORY_LIST_UNREACHED` and the row status
- * `not reached`; a short page, or a full one whose `Link` names no next page,
- * ends the walk; a full page with a next link is followed only on the cursor
- * `advisoryListNextCursor` admits, ⛔ never the link itself, and a link it
- * refuses ⇒ FAILED; an advisory met twice ⇒ FAILED; a walk still pending
+ * `not reached`; every page's `Link` is read through `advisoryListNextCursor`,
+ * and a link it refuses ⇒ FAILED; a short page whose link names no next page,
+ * or a full one whose link names none, ends the walk, and a short page that
+ * still names one ⇒ FAILED with `ADVISORY_LIST_SHORT_PAGE_NEXT`; a full page
+ * with a next link is followed only on the cursor it admits, ⛔ never the link
+ * itself; an advisory met twice ⇒ FAILED; a walk still pending
  * after `ADVISORY_LIST_PAGE_CAP` pages ⇒ FAILED, never a truncated answer.
  * Otherwise it projects each advisory to `ADVISORY_LIST_FIELDS`
  * (`advisoryListPlaintext`), pads the JSON to `ADVISORY_LIST_PADDED_BYTES`
@@ -480,6 +483,7 @@ import {
   ADVISORY_LIST_PAGE_SIZE,
   ADVISORY_LIST_PADDED_BYTES,
   ADVISORY_LIST_REPEATED,
+  ADVISORY_LIST_SHORT_PAGE_NEXT,
   ADVISORY_LIST_SENDER_REFUSED,
   ADVISORY_LIST_STATES,
   ADVISORY_LIST_UNREACHED,
@@ -1228,12 +1232,14 @@ export async function advisoryListAction(req, { payload, index, api, t, seal = s
         seen.add(item.ghsa_id);
         items.push(item);
       }
+      // Every page's Link is read, a short one's too: a short page that still names a next page is not the last.
+      const next = advisoryListNextCursor(r.link ?? null, { api, repo: payload.repo, state });
+      if (next.fail) return { ok: false, status: r.status, why: next.fail, notes: [] };
       if (r.json.length < ADVISORY_LIST_PAGE_SIZE) {
+        if (next.after !== null) return { ok: false, status: r.status, why: ADVISORY_LIST_SHORT_PAGE_NEXT, notes: [] };
         ended = true;
         break;
       }
-      const next = advisoryListNextCursor(r.link ?? null, { api, repo: payload.repo, state });
-      if (next.fail) return { ok: false, status: r.status, why: next.fail, notes: [] };
       if (next.after === null) ended = true;
       else after = next.after;
     }
@@ -1786,7 +1792,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   "the mailbox branch delete: the pull's own answer, the open pulls on its head and the ref read immediately before ONE DELETE of the ref under the App token — an open, unlabelled, other-headed or forked pull, an open pull on that head, a ref moved off the pull's head, or a read that does not answer is zero writes with every failing fence named; the DELETE lands only when the ref reads back absent, a ref already gone an idempotent landing and one still there FAILED; and mailbox-open's close stroke — comment, close, delete — leaves no branch, while a head outside claude/mailbox-* sends no DELETE": 7,
   "an issue_create's title and body on a private repository: they reach no log line, row, step summary or annotation when the stroke lands, when the platform refuses it with a message quoting either — the row keeps the status, withholds that message and prints one that quotes nothing —, when the transport fails, or when the payload is refused for an over-cap or ill-typed body — the refusal names the key and the byte count alone": 8,
   "advisory_read: ONE GET after the sender gate and nothing written; the read, advisory and sender fences judged on that answer — target-write by the maintainer's ruling, a sender off the advisory's collaborators sealed for, one without write refused before the GET, any other gate closed — then the answer sealed to the seat's key and emitted as notice parts the reader parses back, opening byte for byte for that key and read alone; a failed or unsealed seal and an over-cap answer FAILED with nothing emitted; ⛔ the marker in the summary, description and vulnerabilities, and the advisory's id, reach no log line, row, step summary or annotation, and the sealed answer alone carries no marker": 18,
-  "advisory_list: the row's gate before any request, then one walk per listed state on the platform's own cursor, nothing written; a short page or a full one with no next link ends a walk; a refused, unreached or off-shape page, a next link off this API's collection, a repeated advisory, the page cap and the channel's cap each FAILED with nothing emitted; each advisory projected to five fields, the JSON padded and sealed to the seat's key as exactly ten notice parts the reader parses back and opens; ⛔ the marker, every listed id, the cursor and the count reach no log line, row, step summary or annotation, and the row reads the same whatever the count": 19,
+  "advisory_list: the row's gate before any request, then one walk per listed state on the platform's own cursor, nothing written; a short page or a full one with no next link ends a walk; a refused, unreached or off-shape page, a next link off this API's collection, a repeated advisory, the page cap and the channel's cap each FAILED with nothing emitted; each advisory projected to five fields, the JSON padded and sealed to the seat's key as exactly ten notice parts the reader parses back and opens; ⛔ the marker, every listed id, the cursor and the count reach no log line, row, step summary or annotation, and the row reads the same whatever the count": 22,
 });
 // Raised 17 → 18 with the governed-review follow-up battery, 18 → 19 with the run_rerun_failed battery, 19 → 20 with the
 // hierarchy link battery, 20 → 21 with the advisory rows' battery, 21 → 22 with advisory_read's, 22 → 23 with the mailbox
@@ -3172,6 +3178,17 @@ export async function selfTest() {
       t("⭐ a full page whose Link names this collection's next page is followed on its cursor alone, re-spelled on the relay's own path — and the walk ends on the short page: 105 listed", [paged.exit, paged.seen.map((s) => s.call), JSON.parse(opens(paged)).count], [EXIT_OK, [PERM, pageKey('triage'), pageKey('draft'), pageKey('draft', CURSOR), pageKey('closed')], 105]);
       const exact = await listRun([list()], { ...allowed, ...empty, [pageKey('closed')]: pageOf(items(10, 100, 'closed')) });
       t('a full page whose Link names no next page ends its walk too: 100 listed, no second GET', [exact.exit, exact.seen.map((s) => s.call), JSON.parse(opens(exact)).count], [EXIT_OK, [PERM, pageKey('triage'), pageKey('draft'), pageKey('closed')], 100]);
+      const shortNext = await listRun([list()], { ...allowed, ...empty, [pageKey('draft')]: pageOf(items(10, 5, 'draft'), nextLink('draft', CURSOR)), [pageKey('draft', CURSOR)]: pageOf(items(15, 5, 'draft')) });
+      t('⛔ a SHORT page whose Link still names a next page is FAILED — the walk cannot end on a page the platform says is not the last — no second page asked, the next state never asked, nothing sealed, no part', [shortNext.exit, shortNext.seen.filter((s) => s.call.includes('state=draft')).length, shortNext.seen.some((s) => s.call.includes('state=closed')), shortNext.annotations.length, notices(shortNext).length, shortNext.rows[0]?.result], [EXIT_ACTION_FAILED, 1, false, 0, 0, `FAILED: ${ADVISORY_LIST_SHORT_PAGE_NEXT}`]);
+      const upper = await listRun([list()], { ...allowed, ...empty, [pageKey('draft')]: pageOf(items(10, 100, 'draft'), nextLink('draft', CURSOR).replace('rel="next"', 'REL="Next"')), [pageKey('draft', CURSOR)]: pageOf(items(110, 5, 'draft')) });
+      t('a next relation in another case is the same relation (RFC 8288): REL="Next" is followed on its cursor — 105 listed', [upper.exit, upper.seen.map((s) => s.call), JSON.parse(opens(upper)).count], [EXIT_OK, [PERM, pageKey('triage'), pageKey('draft'), pageKey('draft', CURSOR), pageKey('closed')], 105]);
+      // ⛔ A field that crosses is only ever its declared value: a nested severity carrying the marker, a number for a date.
+      const fieldRuns = [];
+      for (const extra of [{ severity: { level: MARKER } }, { severity: 'catastrophic' }, { created_at: 1730000000 }, { updated_at: `${MARKER}` }, { created_at: null }]) {
+        const r = await listRun([list()], { ...allowed, ...empty, [pageKey('draft')]: pageOf([item(1, 'draft'), item(2, 'draft', extra)]) });
+        fieldRuns.push(r);
+      }
+      t("⛔ an advisory whose severity is not one of the platform's four or null (a nested object carrying the marker, a made-up word), or whose created_at or updated_at is not an ISO-8601 string (a number, prose carrying the marker, null), is FAILED at the page fence — status 200, nothing sealed, no part — and the value is echoed nowhere", [fieldRuns.map((r) => [r.exit, r.annotations.length, notices(r).length, r.rows[0]?.status, r.rows[0]?.result]), fieldRuns.some((r) => [...r.logs, r.summary ?? '', JSON.stringify(r.rows)].join('\n').match(/ADVISORY MARKER|catastrophic|1730000000/))], [fieldRuns.map(() => [EXIT_ACTION_FAILED, 0, 0, 200, `FAILED: REFUSED at the relay's fence on the listing, nothing sealed or emitted — ${advisoryListPageFailure({ status: 200, json: [item(2, 'draft', { severity: 'catastrophic' })] }, 'draft')}`]), false]);
       // ⭐ One sealed size whatever the count — the row and the log read the same.
       const none = await listRun([list()], { ...allowed, ...empty });
       const many = await listRun([list()], { ...allowed, ...empty, [pageKey('triage')]: pageOf(items(10, 100, 'triage'), nextLink('triage', CURSOR)), [pageKey('triage', CURSOR)]: pageOf(items(110, 50, 'triage')) });
@@ -3227,7 +3244,7 @@ export async function selfTest() {
       const emitted = swept.map(({ r, paceLines }) => [...(r.logs ?? []), ...(r.lines ?? []), r.summary ?? '', JSON.stringify(r.rows ?? []), ...(r.annotations ?? []).map((n) => relayAdvisoryReadAnnotationMessage(n)), ...paceLines].join('\n'));
       const ids = Array.from({ length: 400 }, (_, k) => idOf(k));
       const leaks = emitted.map((text, i) => (text.includes('ADVISORY MARKER') || ids.some((id) => text.includes(id)) || text.includes(CURSOR) || text.includes(encodeURIComponent(CURSOR)) ? i : null)).filter((i) => i !== null);
-      t("⛔ THE MARKER TEST: across every run of this battery — landed, paged, exact, empty and large, capped, off-link, repeated, over-cap, fenced, unreached, gated, unsealed, refused — the marker, every listed advisory's id and the cursor reach NO log line, row, step summary, annotation or pace-log line", [swept.length, leaks], [32, []], leaks.map((i) => emitted[i].split('\n').find((l) => l.includes('ADVISORY MARKER') || ids.some((id) => l.includes(id)) || l.includes(CURSOR))).join(' | '));
+      t("⛔ THE MARKER TEST: across every run of this battery — landed, paged, exact, short-with-next, any-case relation, field-fenced, empty and large, capped, off-link, repeated, over-cap, fenced, unreached, gated, unsealed, refused — the marker, every listed advisory's id and the cursor reach NO log line, row, step summary, annotation or pace-log line", [swept.length, leaks], [39, []], leaks.map((i) => emitted[i].split('\n').find((l) => l.includes('ADVISORY MARKER') || ids.some((id) => l.includes(id)) || l.includes(CURSOR))).join(' | '));
       t('…positive control: the answers served carried the marker, the ids and the cursor, the cursor reached the platform on the second page — where it belongs — and the generic row printer, given a served item, WOULD print the marker and its id', [JSON.stringify(served).includes('ADVISORY MARKER') && JSON.stringify(served).includes(idOf(1)), paged.seen.some((s) => s.call.includes(encodeURIComponent(CURSOR))), resultOf({}, item(1, 'draft')).includes('ADVISORY MARKER') && resultOf({}, item(1, 'draft')).includes(idOf(1))], [true, true, true]);
     }
 

@@ -136,7 +136,7 @@
  * is lower than `PERMISSIONS` holds. The
  * workflow reads those outputs and never the payload, and `--self-test` pins
  * the list to ONE name for every other op, two for a transfer, the grant to
- * the one row, and the workflow lines that read both.
+ * those two rows alone, and the workflow lines that read both.
  *
  * A refusal is the WHOLE list of reasons, not the first one: a seat fixing a
  * payload reads every problem in one pass, and the runner's step summary
@@ -250,6 +250,9 @@ import {
   ADVISORY_LIST_PAGE_PATH_SHAPE,
   ADVISORY_LIST_PAGE_SIZE,
   ADVISORY_LIST_REPEATED,
+  ADVISORY_LIST_SEVERITIES,
+  ADVISORY_LIST_SHORT_PAGE_NEXT,
+  ADVISORY_LIST_TIMESTAMP_SHAPE,
   ADVISORY_LIST_SENDER_REFUSED,
   ADVISORY_LIST_STATES,
   ADVISORY_LIST_UNREACHED,
@@ -1058,7 +1061,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   "the event file: the workflow carries client_payload in no step's env, and the payload is read from GITHUB_EVENT_PATH": 6,
   "the advisory rows: advisory_report, advisory_create, advisory_collaborators_add, advisory_versions and advisory_state — closed keys, a malformed id, package or versions entry refused before any request, a refusal that names the key and the byte count and never echoes a value, published reached by advisory_state alone, from draft alone and through the versions fence; one request each, the draft's and the versions' bodies naming no state and the two other PATCH bodies left to the executor; each a stroke of its own, repository-advisories write minted for it and EMPTY for every other; the bare collection reached by the draft's POST alone and every other security-advisories path refused; the fences, the transitions, the merge and the five read-backs, printing nothing of an answer but the id, the state, the logins and counts": 77,
   "advisory_read: ghsa_id and public_key alone — the key its own kind, an X25519 key in base64 SPKI DER; a malformed key or id refused before any request and never echoed; ONE GET of one advisory; a stroke of its own whose token alone carries repository-advisories READ; the seal opening byte for byte for its own read and key alone, the parts inside the runner's caps, the sender gate's one setting with every other closed, and the fences, printing no id, state or field": 28,
-  "advisory_list: public_key alone — no state, page, cursor or query the caller can pass; a stroke of its own whose token alone carries repository-advisories READ under the read's sender gate; the listing page's one path shape per listed state; the next cursor taken only from one rel=next link on this API's collection and this state, in its closed shape; each page fenced; each advisory projected to five fields before the seal; the JSON padded to one constant sealed size, ten parts, whatever the count, and one more advisory than fits refused; the shared associated data, advisory_read's byte for byte; and no id, count, state or cursor in any sentence": 19,
+  "advisory_list: public_key alone — no state, page, cursor or query the caller can pass; a stroke of its own whose token alone carries repository-advisories READ under the read's sender gate; the listing page's one path shape per listed state; the next cursor taken only from one rel=next link on this API's collection and this state, in its closed shape; each page fenced; each advisory projected to five fields before the seal; the JSON padded to one constant sealed size, ten parts, whatever the count, and one more advisory than fits refused; the shared associated data, advisory_read's byte for byte; and no id, count, state or cursor in any sentence": 21,
 });
 // Raised 11 → 12 with the run_rerun_failed battery, 12 → 13 with the hierarchy rows' battery, 13 → 15 with the event
 // file's battery and the advisory rows' battery, 15 → 16 with advisory_read's, 16 → 17 with mailbox_branch_delete's,
@@ -2088,6 +2091,7 @@ export async function selfTest() {
     const own = (after, state = 'draft') => `${API}/repos/${REPO}/security-advisories?state=${state}&per_page=100&after=${encodeURIComponent(after)}`;
     const ctx = { api: API, repo: REPO, state: 'draft' };
     t('⭐ the next cursor: from the one rel="next" link on this API\'s collection and this state, decoded — and no rel="next", an empty header or none at all ends the walk', [advisoryListNextCursor(nextOf(own('Y3Vy+c29y/OnYy==')), ctx), advisoryListNextCursor(`<${own('abc')}>; rel="prev"`, ctx), advisoryListNextCursor('', ctx), advisoryListNextCursor(null, ctx), advisoryListNextCursor(`<${own('abc')}>; rel="next last"`, ctx)], [{ after: 'Y3Vy+c29y/OnYy==' }, { after: null }, { after: null }, { after: null }, { after: 'abc' }]);
+    t('a relation compares case-insensitively (RFC 8288 §3.3): REL="NEXT", rel="Next" and a mixed-case relation list each name the next page', [advisoryListNextCursor(`<${own('abc')}>; REL="NEXT"`, ctx), advisoryListNextCursor(`<${own('abc')}>; rel="Next"`, ctx), advisoryListNextCursor(`<${own('abc')}>; rel="Last NEXT"`, ctx), advisoryListNextCursor(`<${own('abc')}>; rel="next", <${own('def')}>; rel="NEXT"`, ctx)], [{ after: 'abc' }, { after: 'abc' }, { after: 'abc' }, { fail: ADVISORY_LIST_CURSOR_REFUSED }]);
     const refusedLinks = [
       `<${own('abc').replace('https://api.github.com', 'https://evil.test')}>; rel="next"`,
       `<${own('abc').replace('https://', 'http://')}>; rel="next"`,
@@ -2111,6 +2115,9 @@ export async function selfTest() {
     const page = (json, status = 200) => ({ status, json });
     const pageFails = [page([item()]), page([]), page({ message: 'Not Found' }, 404), page({ message: 'Resource not accessible by integration' }, 403), page({}), page(null), page([item({ state: 'triage' })]), page([item({ state: 'published' })]), page([item({ ghsa_id: MARKER })]), page([item({ ghsa_id: undefined })]), page(['x']), page([[item()]])].map((pg) => advisoryListPageFailure(pg, 'draft'));
     t('⛔ a page holds only as 200 with a list of advisories in the state it asked for — an empty list among them; a refusal, a non-list, an item in another state, one with no or a malformed id, and an item that is no object each fail, naming the status alone', pageFails, [null, null, 'a page of the listing answered HTTP 404', 'a page of the listing answered HTTP 403', 'a page of the listing answered HTTP 200 with no list', 'a page of the listing answered HTTP 200 with no list', ...Array.from({ length: 6 }, () => 'a page of the listing lists an item that is not an advisory in the state the page asked for')]);
+    const fieldFails = [item({ severity: null }), item({ severity: 'critical', created_at: '2026-11-01T00:00:00.123Z', updated_at: '2026-11-02T08:00:00+08:00' }), item({ severity: { level: MARKER } }), item({ severity: 'catastrophic' }), item({ severity: 'HIGH' }), item({ severity: undefined }), item({ created_at: 1730000000 }), item({ updated_at: MARKER }), item({ created_at: null }), item({ updated_at: '2026-11-02' }), item({ created_at: ['2026-11-01T00:00:00Z'] })].map((it) => advisoryListPageFailure(page([item(), it]), 'draft'));
+    const fieldSentence = "a page of the listing lists an advisory whose severity or dates are not of the field's declared shape";
+    t("⛔ a page holds only when every advisory's severity is one of the platform's four or null and its created_at and updated_at are ISO-8601 strings (fractions and offsets among them); a nested severity carrying the marker, a made-up or upper-case word, a missing severity, a number, prose, null, a bare date or a list for a date each fail with one sentence that echoes no value", [[...ADVISORY_LIST_SEVERITIES], ADVISORY_LIST_TIMESTAMP_SHAPE.test('2026-11-01T00:00:00Z'), fieldFails, fieldFails.some((x) => x !== null && /ADVISORY LIST MARKER|catastrophic|HIGH|1730000000/.test(x))], [['critical', 'high', 'medium', 'low'], true, [null, null, ...Array.from({ length: 9 }, () => fieldSentence)], false]);
     // The projection.
     const projected = advisoryListProjection(item());
     const json = advisoryListPlaintext([item(), item({ ghsa_id: 'GHSA-wxyz-2345-abcd', state: 'closed', severity: null })]);
@@ -2142,7 +2149,7 @@ export async function selfTest() {
     const sealedList = sealedFor(1);
     t("⛔ the listing's binds the request id, the action and the op: it opens under its own, and never under another request, another action, a read's associated data, or a read's with no id; any other op throws", [advisorySealAad({ requestId: RID, action: 2, op: 'advisory_list' }).toString('utf8'), opensUnder(sealedList, aadList), opensUnder(sealedList, advisorySealAad({ requestId: 'fw-20261108T000000Z-abc124', action: 1, op: 'advisory_list' })), opensUnder(sealedList, advisorySealAad({ requestId: 'fw-20261108T000000Z-abc123', action: 2, op: 'advisory_list' })), opensUnder(sealedList, advisoryReadAad({ requestId: 'fw-20261108T000000Z-abc123', action: 1, ghsaId: GHSA })), opensUnder(sealedList, advisoryReadAad({ requestId: 'fw-20261108T000000Z-abc123', action: 1 })), (() => { try { advisorySealAad({ requestId: RID, action: 1, op: 'comment' }); return 'bound'; } catch { return 'threw'; } })()], [`fleet-write:advisory_read:v1 request=${RID} action=2 op=advisory_list`, 'opened', 'refused', 'refused', 'refused', 'refused', 'threw']);
     // The sentences.
-    const sentences = [ADVISORY_LIST_LANDED, ADVISORY_LIST_OVER_CAP, ADVISORY_LIST_CAP_HIT, ADVISORY_LIST_REPEATED, ADVISORY_LIST_SENDER_REFUSED, ADVISORY_LIST_UNREACHED, ADVISORY_LIST_CURSOR_REFUSED, ...pageFails.filter(Boolean)];
+    const sentences = [ADVISORY_LIST_LANDED, ADVISORY_LIST_OVER_CAP, ADVISORY_LIST_CAP_HIT, ADVISORY_LIST_REPEATED, ADVISORY_LIST_SENDER_REFUSED, ADVISORY_LIST_UNREACHED, ADVISORY_LIST_CURSOR_REFUSED, ADVISORY_LIST_SHORT_PAGE_NEXT, ...pageFails.filter(Boolean), ...fieldFails.filter(Boolean)];
     t('⛔ every sentence a listing prints names no id, no state word, no severity, no digit but its own caps and statuses, and no marker — the landed row says it landed and nothing more', [sentences.filter((x) => /GHSA|\b(?:triage|draft|closed|published|critical|high|medium|low)\b|ADVISORY LIST MARKER/.test(x)), ADVISORY_LIST_LANDED, sentences.flatMap((x) => x.match(/\d+/g) ?? []).filter((d) => !['3', '29939', '10', '200', '404', '403'].includes(d))], [[], "sealed the listing to the seat's one-time key, padded to the run's full notice size so its length says nothing — only that seat's process opens it", []]);
   }
 

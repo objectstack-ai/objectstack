@@ -687,13 +687,18 @@
  * most 100), `state`, `sort` and `direction`, and no `page` (read 2026-11-08,
  * operation `security-advisories/list-repository-advisories`). A walk asks
  * `ADVISORY_LIST_PAGE_SIZE` a page and ends on a short page, or on a full page
- * whose `Link` header names no `rel="next"`. On a full page that names one it
+ * whose `Link` header names no `rel="next"` (matched without regard to case, as
+ * RFC 8288 has it); a short page whose `Link` still names a next page is FAILED,
+ * since the walk would end on a page the platform says is not the last. On a full page that names one it
  * takes that link's `after` cursor and nothing else, and only when the link's
  * origin and path are the relay's own API and this collection, its `state` the
  * walk's own, and the cursor one value in `ADVISORY_LIST_CURSOR_SHAPE`
  * (`advisoryListNextCursor`); the next path is the relay's own spelling with
  * that cursor, never the link. A link that is none of these, a page that is not
- * a list of advisories in the state asked for, and an advisory listed twice are
+ * a list of advisories in the state asked for, an advisory whose `severity` is
+ * not one of `ADVISORY_LIST_SEVERITIES` or null or whose `created_at` or
+ * `updated_at` is not an ISO-8601 string (`ADVISORY_LIST_TIMESTAMP_SHAPE`), so
+ * nothing but those values is ever sealed, and an advisory listed twice are
  * each a FAILED action. A walk still pending after `ADVISORY_LIST_PAGE_CAP`
  * pages is FAILED too: a truncated listing is a SUBSET, never an answer. In
  * each, nothing is sealed or emitted.
@@ -1822,7 +1827,8 @@ export function advisoryListNextCursor(link, { api, repo, state }) {
   const nexts = [];
   for (const m of link.matchAll(/<([^>]*)>((?:\s*;\s*[^;,]*)*)/g)) {
     const rel = /;\s*rel\s*=\s*"?([^";]*)"?/i.exec(m[2]);
-    if (rel && rel[1].trim().split(/\s+/).includes('next')) nexts.push(m[1]);
+    // RFC 8288 §3.3: a relation type compares case-insensitively.
+    if (rel && rel[1].trim().toLowerCase().split(/\s+/).includes('next')) nexts.push(m[1]);
   }
   if (nexts.length === 0) return { after: null };
   if (nexts.length > 1) return { fail: ADVISORY_LIST_CURSOR_REFUSED };
@@ -1841,16 +1847,27 @@ export function advisoryListNextCursor(link, { api, repo, state }) {
   return { after: afters[0] };
 }
 
+/** The severities a listed advisory may carry, beside null (the platform's own enum for the field). */
+export const ADVISORY_LIST_SEVERITIES = Object.freeze(['critical', 'high', 'medium', 'low']);
+
+/** A listed advisory's `created_at` and `updated_at`: one ISO-8601 date-time string, as the platform answers it. */
+export const ADVISORY_LIST_TIMESTAMP_SHAPE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/;
+
 /**
  * Why one listing page fails its fences, or null when it holds (header): the page answered 200 with a list, and every
- * item is an advisory — an object whose `ghsa_id` is in `GHSA_ID_SHAPE` — in the state the walk asked for. ⛔ The
- * sentence carries the status alone: no id, no state, no count, no field. Pure.
+ * item is an advisory — an object whose `ghsa_id` is in `GHSA_ID_SHAPE` — in the state the walk asked for, whose
+ * `severity` is one of `ADVISORY_LIST_SEVERITIES` or null and whose `created_at` and `updated_at` are each one string
+ * in `ADVISORY_LIST_TIMESTAMP_SHAPE`: the five fields that cross are only ever those values. ⛔ The sentence carries the
+ * status alone: no id, no state, no count, no field's value. Pure.
  */
 export function advisoryListPageFailure(answer, state) {
   if (answer?.status !== 200) return `a page of the listing answered HTTP ${answer?.status ?? 'none'}`;
   if (!Array.isArray(answer.json)) return 'a page of the listing answered HTTP 200 with no list';
   const ok = answer.json.every((item) => advisoryShaped(item) && typeof item.ghsa_id === 'string' && GHSA_ID_SHAPE.test(item.ghsa_id) && item.state === state);
-  return ok ? null : 'a page of the listing lists an item that is not an advisory in the state the page asked for';
+  if (!ok) return 'a page of the listing lists an item that is not an advisory in the state the page asked for';
+  const stamp = (v) => typeof v === 'string' && ADVISORY_LIST_TIMESTAMP_SHAPE.test(v);
+  const fields = answer.json.every((item) => (item.severity === null || ADVISORY_LIST_SEVERITIES.includes(item.severity)) && stamp(item.created_at) && stamp(item.updated_at));
+  return fields ? null : "a page of the listing lists an advisory whose severity or dates are not of the field's declared shape";
 }
 
 /** One listed advisory as it crosses: `ADVISORY_LIST_FIELDS` it carries, in that order, as the platform answered them. Pure. */
@@ -1913,6 +1930,10 @@ export const ADVISORY_LIST_UNREACHED =
 export const ADVISORY_LIST_CAP_HIT =
   `a walk reached its ${ADVISORY_LIST_PAGE_CAP}-page cap with more pending — a truncated listing is a SUBSET, so nothing was sealed or ` +
   'emitted; put the reading to the maintainer';
+
+/** What a walk prints when a short page still names a next page: ending there would be a SUBSET, never an answer. */
+export const ADVISORY_LIST_SHORT_PAGE_NEXT =
+  'a short page of the listing still names a next page, so the walk cannot end there — nothing was sealed or emitted';
 
 /** What a walk that met one advisory twice prints: the cursor did not advance cleanly. */
 export const ADVISORY_LIST_REPEATED = 'one advisory appears twice across the pages, so the walk is not one listing — nothing was sealed or emitted';
