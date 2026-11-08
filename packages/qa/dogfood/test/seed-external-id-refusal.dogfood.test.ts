@@ -92,7 +92,7 @@ describe('dogfood: a seed whose externalId names no field of its object is refus
     const saved = await call('PUT', `/meta/seed/r_ghost?mode=draft&package=${PKG}`, seed('no_such_field'));
     expectRefused(saved, 'externalId', 'no_such_field');
 
-    const drafts = await call('GET', `/meta/_drafts?packageId=${PKG}`);
+    const drafts = await call('GET', `/meta/_drafts?package=${PKG}`);
     expect(drafts.status, JSON.stringify(drafts.json)).toBe(200);
     expect(JSON.stringify(drafts.json)).not.toContain('r_ghost');
   });

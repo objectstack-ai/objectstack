@@ -24,6 +24,7 @@
 import type { Redis } from 'ioredis';
 import {
     ComposedClusterService,
+    offerClusterDriverConnection,
     registerClusterDriver,
     type DriverFactoryConfig,
 } from '@objectstack/service-cluster';
@@ -94,6 +95,15 @@ function redisDriverFactory(config: DriverFactoryConfig) {
         kv,
         counter,
     );
+
+    // Offer the connection for reuse (`offerClusterDriverConnection`): the
+    // shared `cache` a multi-node deployment counts its rate limits in
+    // (`@objectstack/service-cache`, ADR-0069 D2) reaches THIS Redis through it
+    // rather than through a second client configuration that could name a
+    // different server. The borrower derives its own connection
+    // (`client.duplicate()`) and writes under `<keyPrefix>cache:`; this facade
+    // keeps owning `client` and is the only one that closes it.
+    offerClusterDriverConnection(facade, { driver: 'redis', client, keyPrefix });
 
     // Wrap close() so we also tear down the publisher client if we own it.
     const originalClose = facade.close.bind(facade);

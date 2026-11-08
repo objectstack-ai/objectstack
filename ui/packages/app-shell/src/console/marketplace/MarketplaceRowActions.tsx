@@ -37,25 +37,59 @@ import {
 } from '@object-ui/components';
 import { AlertCircle, ExternalLink, Trash2 } from 'lucide-react';
 import { useObjectTranslation } from '@object-ui/i18n';
-import { uninstallLocal, type LocalInstallEntry, type LocalInstallNotLoaded } from './marketplaceApi.js';
+import {
+  uninstallLocal,
+  type LocalInstallEntry,
+  type LocalInstallNotLoaded,
+  type LocalInstallNotLoadedProtocol,
+} from './marketplaceApi.js';
+
+/** The protocol arm, told by its code alone, as the console has always read it. */
+const isProtocolMarker = (marker: LocalInstallNotLoaded): marker is LocalInstallNotLoadedProtocol =>
+  marker.code === 'OS_PROTOCOL_INCOMPATIBLE';
+
+/** The engine's sentence on a register-refusal marker, or '' when it carries none. */
+const engineMessageOf = (marker: LocalInstallNotLoaded): string =>
+  'message' in marker && typeof marker.message === 'string' ? marker.message.trim() : '';
 
 /**
- * The reason a `notLoaded` entry was refused, in plain words (objectui#11645).
- * A code the console has no sentence for still reads as not loaded, naming
- * the code, rather than hiding the row the operator needs to uninstall.
+ * The reason a `notLoaded` entry was refused, in plain words: the ONE reader of
+ * the marker, drawn by Installed Apps' row ({@link MarketplaceNotLoaded}) and
+ * the package page's header (objectui#11645, objectui#11760).
+ *
+ * - The protocol arm names the range the package targets.
+ * - Any other code reads as not loaded, naming the code, rather than hiding the
+ *   row the operator needs to uninstall. On the register-refusal arm the
+ *   engine's sentence follows it (objectstack#31566), so the operator can tell
+ *   whether to uninstall the app or fix the package. It is server text and is
+ *   drawn as a text node, never as markup. A marker with no sentence, or an
+ *   empty one, reads with the code alone.
  */
+export function MarketplaceNotLoadedReason({ marker }: { marker: LocalInstallNotLoaded }) {
+  const { t } = useObjectTranslation();
+  if (isProtocolMarker(marker)) {
+    return <span>{t('marketplace.notLoaded.protocolIncompatible', { requiredRange: marker.requiredRange })}</span>;
+  }
+  const sentence = t('marketplace.notLoaded.otherReason', { code: marker.code });
+  const engineMessage = engineMessageOf(marker);
+  if (!engineMessage) return <span>{sentence}</span>;
+  return (
+    <span className="min-w-0">
+      <span>{sentence}</span>{' '}
+      <span className="block break-words" data-testid="marketplace-not-loaded-engine-message">{engineMessage}</span>
+    </span>
+  );
+}
+
+/** A `notLoaded` entry's badge and its reason (objectui#11645). */
 export function MarketplaceNotLoaded({ marker }: { marker: LocalInstallNotLoaded }) {
   const { t } = useObjectTranslation();
-  const reason =
-    marker.code === 'OS_PROTOCOL_INCOMPATIBLE'
-      ? t('marketplace.notLoaded.protocolIncompatible', { requiredRange: marker.requiredRange })
-      : t('marketplace.notLoaded.otherReason', { code: marker.code });
   return (
     <div className="flex flex-col gap-1">
       <Badge variant="destructive" className="self-start">{t('marketplace.notLoaded.badge')}</Badge>
       <p className="text-xs text-destructive flex items-start gap-1.5">
         <AlertCircle className="h-3.5 w-3.5 mt-px shrink-0" aria-hidden="true" />
-        <span>{reason}</span>
+        <MarketplaceNotLoadedReason marker={marker} />
       </p>
     </div>
   );

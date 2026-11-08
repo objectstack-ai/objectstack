@@ -27,6 +27,15 @@
  *  - (f) a managed row says why it has no Sync; an external row and the
  *    primary datasource say nothing;
  *  - (g) zh: the sentences read in Chinese.
+ *
+ * objectstack#31389 — a driver the catalog marks `federationOnly` (Oracle, SQL
+ * Server) is offered the federation modes alone:
+ *  - (h) its Schema mode select has no Managed option, the reason sentence
+ *    shows, and Create sends `external` with the block;
+ *  - (i) a Managed choice made on another driver moves to External when such a
+ *    driver is chosen;
+ *  - (j) CONTROL: an unmarked driver (PostgreSQL) still offers all three modes
+ *    and shows no reason sentence.
  */
 
 import * as React from 'react';
@@ -100,6 +109,29 @@ const POSTGRES = {
   },
 };
 
+/**
+ * The catalog's federation-only entries, as `GET /datasources/drivers` serves
+ * them: the mark is the catalog's `federationOnly`, the form keeps no driver
+ * list of its own (objectstack#31389).
+ */
+const ORACLE = {
+  id: 'oracle',
+  label: 'Oracle Database',
+  federationOnly: true,
+  configSchema: { properties: { connectString: { type: 'string', title: 'Connect string' } } },
+};
+const MSSQL = {
+  id: 'mssql',
+  label: 'SQL Server',
+  federationOnly: true,
+  configSchema: {
+    properties: {
+      host: { type: 'string', title: 'Host' },
+      database: { type: 'string', title: 'Database' },
+    },
+  },
+};
+
 interface Seen { method: string; url: string; body?: Record<string, unknown> }
 
 function renderPage(opts: { rows?: unknown[]; stored?: Record<string, unknown>; language?: string } = {}) {
@@ -108,7 +140,7 @@ function renderPage(opts: { rows?: unknown[]; stored?: Record<string, unknown>; 
     const method = (init?.method ?? 'GET').toUpperCase();
     const body = typeof init?.body === 'string' ? (JSON.parse(init.body) as Record<string, unknown>) : undefined;
     seen.push({ method, url, body });
-    if (url === '/api/v1/datasources/drivers') return ok({ drivers: [SQLITE, POSTGRES] });
+    if (url === '/api/v1/datasources/drivers') return ok({ drivers: [SQLITE, POSTGRES, ORACLE, MSSQL] });
     if (url === '/api/v1/datasources' && method === 'GET') return ok({ datasources: opts.rows ?? [] });
     if (url === '/api/v1/datasources' && method === 'POST') return ok({ datasource: { name: body?.name } }, 201);
     if (url === '/api/v1/datasources/test') return ok({ result: { ok: true } });
@@ -284,5 +316,64 @@ describe('A managed row says why it has no Sync (objectstack#30327)', () => {
     expect(within(rowOf('scratch')).getByTestId('datasource-no-sync-note').textContent).toBe(t('engine.datasource.noSyncManaged', ZH));
     const dialog = await openNew('zh');
     expect(within(dialog).getByTestId('datasource-schema-mode-hint').textContent).toBe(t('engine.datasource.schemaModeExternalHint', ZH));
+  });
+});
+
+/** The Schema mode select's option names, read with the select open. */
+async function modeOptions(): Promise<string[]> {
+  await userEvent.click(controlUnder('Schema mode'));
+  const names = (await screen.findAllByRole('option')).map((o) => o.textContent ?? '');
+  await userEvent.keyboard('{Escape}');
+  return names;
+}
+
+describe('A federation-only driver is offered the federation modes alone (objectstack#31389)', () => {
+  const FEDERATION_MODES = [t('engine.datasource.schemaModeExternal', EN), t('engine.datasource.schemaModeValidateOnly', EN)];
+
+  it.each([
+    ['Oracle Database', 'oracle', 'Connect string', { connectString: 'db.example.com:1521/ORCLPDB1' }],
+    ['SQL Server', 'mssql', 'Host', { host: 'sql.example.com' }],
+  ] as const)('(h) %s: no Managed, the reason shows, and Create sends external', async (label, id, field, config) => {
+    const seen = renderPage();
+    const dialog = await openNew();
+    await chooseDriver(label);
+    expect(await modeOptions()).toEqual(FEDERATION_MODES);
+    expect(within(dialog).getByTestId('datasource-schema-mode-federation-only').textContent)
+      .toBe(t('engine.datasource.schemaModeFederationOnly', EN));
+    fireEvent.change(controlUnder('Name *'), { target: { value: 'legacy_erp' } });
+    fireEvent.change(controlUnder(field), { target: { value: Object.values(config)[0] } });
+    fireEvent.click(within(dialog).getByRole('button', { name: /Create datasource/ }));
+    await waitFor(() => expect(toast.success).toHaveBeenCalled());
+    const post = lastWrite(seen, 'POST', '/api/v1/datasources');
+    expect(post).toMatchObject({ name: 'legacy_erp', driver: id, schemaMode: 'external', config });
+    expect(post.external).toEqual({});
+  });
+
+  it('(i) Managed chosen on PostgreSQL moves to External when SQL Server is chosen', async () => {
+    renderPage();
+    const dialog = await openNew();
+    await chooseDriver('PostgreSQL');
+    await chooseMode(/^Managed/);
+    await chooseDriver('SQL Server');
+    expect(within(controlUnder('Schema mode')).getByText(t('engine.datasource.schemaModeExternal', EN))).toBeTruthy();
+    expect(within(dialog).getByTestId('datasource-schema-mode-hint').textContent).toBe(t('engine.datasource.schemaModeExternalHint', EN));
+  });
+
+  it('(j) CONTROL: PostgreSQL offers all three modes and no reason sentence', async () => {
+    renderPage();
+    const dialog = await openNew();
+    await chooseDriver('PostgreSQL');
+    expect(await modeOptions()).toEqual([
+      t('engine.datasource.schemaModeExternal', EN),
+      t('engine.datasource.schemaModeManaged', EN),
+      t('engine.datasource.schemaModeValidateOnly', EN),
+    ]);
+    expect(within(dialog).queryByTestId('datasource-schema-mode-federation-only')).toBeNull();
+  });
+
+  it('zh: the reason reads in Chinese', () => {
+    const key = 'engine.datasource.schemaModeFederationOnly';
+    expect(t(key, ZH)).toMatch(/\p{Script=Han}/u);
+    expect(t(key, ZH)).not.toBe(t(key, EN));
   });
 });

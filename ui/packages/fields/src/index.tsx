@@ -16,7 +16,7 @@ import { ComponentRegistry, percentDisplayValue, type PercentScale, getRecordDis
 // means is the protocol's answer, not this package's (objectui#9843).
 import { valueSchemaFor, resolveFieldScale } from '@objectstack/spec/data';
 import type { ReferenceNameOnlyValue } from '@objectstack/spec/data';
-import { useLocalization, useDisplayLocale, formatDisplayNumber } from '@object-ui/i18n';
+import { useLocalization, useDisplayLocale, formatDisplayNumber, readHomeAmountSource } from '@object-ui/i18n';
 import { Badge, Avatar, AvatarImage, AvatarFallback, Button, Checkbox, EmptyValue, cn, setFieldReadFaceResolver } from '@object-ui/components';
 import { Check, Copy, Phone as PhoneIcon, MapPin, CircleQuestionMark, Lock, Star } from 'lucide-react';
 import { useObjectTranslation, classifyLoadError } from '@object-ui/react';
@@ -573,6 +573,7 @@ function isPlainObjectValue(value: unknown): value is Record<string, unknown> {
 }
 
 import { resolveFieldCurrency } from './currency.js';
+import { HomeAmountHint } from './widgets/CurrencyField.js';
 export { resolveFieldCurrency };
 
 /**
@@ -919,6 +920,18 @@ export function CurrencyCellRenderer({ value, field, dependentValues }: CellRend
     ? formatCurrency(num, currency, locale)
     : String(safe);
 
+  // A home field the record page stamped (ADR-0144 D5) also says which rate
+  // and document date produced it. A grid stamps nothing, so its cells are
+  // unchanged.
+  const homeSource = readHomeAmountSource(field);
+  if (homeSource) {
+    return (
+      <span className="flex flex-col">
+        <span className="tabular-nums font-medium whitespace-nowrap">{formatted}</span>
+        <HomeAmountHint source={homeSource} record={dependentValues} />
+      </span>
+    );
+  }
   return <span className="tabular-nums font-medium whitespace-nowrap">{formatted}</span>;
 }
 

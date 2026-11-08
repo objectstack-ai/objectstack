@@ -1,7 +1,7 @@
 ---
 title: Dataset schema — UI Protocol reference
 navTitle: Dataset
-description: "Analytics Dataset — the one semantic layer. Reference for Dataset, DatasetDimension, DatasetDurationUnit and 4 more: every property with its type and default."
+description: "Analytics Dataset — the one semantic layer. Reference for Dataset, DatasetDimension, DatasetDurationUnit and 5 more: every property with its type and default."
 ---
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
@@ -27,6 +27,12 @@ do not clash with the Cube layer's `DimensionSchema` / `MetricSchema` in
 `data/analytics.zod.ts` while the two layers coexist (Phase 1). The Cube
 layer is absorbed/retired in a later phase (D-A).
 
+Business vocabulary (ADR-0149 D1): every dimension and measure may carry
+`synonyms` — the words people use for it in a question, matched and never
+rendered — and a `description`, one or two sentences of business definition
+in plain language, never a prompt. Within one dataset a word answers to one
+member: a synonym may not equal another member's name, label or synonym.
+
 <Callout type="info">
 **Source:** `packages/spec/src/ui/dataset.zod.ts`
 </Callout>
@@ -34,8 +40,8 @@ layer is absorbed/retired in a later phase (D-A).
 ## TypeScript Usage
 
 ```typescript
-import { DatasetSchema, DatasetDimensionSchema, DatasetDurationUnit, DatasetMeasureSchema, DatasetMeasureDurationSchema, DatasetMeasurePolarity, DerivedMeasureOp } from '@objectstack/spec/ui';
-import type { Dataset, DatasetDimension, DatasetDurationUnit, DatasetMeasure, DatasetMeasureDuration, DatasetMeasurePolarity } from '@objectstack/spec/ui';
+import { DatasetSchema, DatasetDimensionSchema, DatasetDurationUnit, DatasetMeasureSchema, DatasetMeasureDurationSchema, DatasetMeasurePolarity, DatasetMemberSynonymsSchema, DerivedMeasureOp } from '@objectstack/spec/ui';
+import type { Dataset, DatasetDimension, DatasetDurationUnit, DatasetMeasure, DatasetMeasureDuration, DatasetMeasurePolarity, DatasetMemberSynonyms } from '@objectstack/spec/ui';
 
 // Validate data
 const result = DatasetSchema.parse(data);
@@ -65,7 +71,7 @@ const result = DatasetSchema.parse(data);
 | **_packageId** | `string` | optional | Owning package machine id. |
 | **_packageVersion** | `string` | optional | Owning package version. |
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
-| **overrides** | `{ package: string; basedOn: string }` | optional | Override declaration (ADR-0146 D2): `{ package, basedOn }` — this item of "`<base>`.custom" replaces the base package's same-named item whole. `basedOn` is recorded and never judged. |
+| **overrides** | `{ package: string; basedOn: string }` | optional | Override declaration (ADR-0146 D2): `{ package, basedOn }` — this item of "`<base>`.custom" replaces the base package's same-named item whole. `basedOn` is recorded and never gates; a base's upgrade plan reads it only as advice. |
 
 ### Nested Shape: `Dataset.dimensions[number]`
 
@@ -77,6 +83,8 @@ const result = DatasetSchema.parse(data);
 | **type** | `Enum<'string' \| 'number' \| 'date' \| 'boolean' \| 'lookup'>` | optional |  |
 | **dateGranularity** | `Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>` | optional |  |
 | **nullLabel** | `string \| Record<string, string>` | optional | Label for the bucket of rows whose value for this dimension is null (e.g. "System" on a user axis). Display copy only: grouping is unchanged. When absent, consumers fall back to their own default label for that bucket. |
+| **synonyms** | `string[]` | optional | Words a person uses for this member in a question (e.g. ["收入", "销售额", "revenue"]), matched after normalization and never rendered. Each trimmed, non-empty, at most 60 characters; at most 20. Within one dataset a synonym may not equal another member's name, label or synonym. |
+| **description** | `string \| Record<string, string>` | optional | Business definition of this dimension in plain language — one or two sentences on what it is and when to use it (e.g. "商机当前所处的销售阶段，从初步接洽到赢单或丢单"). Never a prompt or an instruction to an AI. At most 500 characters per locale. |
 
 ### Nested Shape: `Dataset.measures[number]`
 
@@ -92,6 +100,8 @@ const result = DatasetSchema.parse(data);
 | **polarity** | `Enum<'higher' \| 'lower' \| 'neutral'>` | optional | Which direction of change is good news: higher (rise green, fall red), lower (fall green, rise red) or neutral (no good/bad colour). Colours a period-over-period delta; undeclared keeps rise green, fall red. |
 | **derived** | `{ op: Enum<'ratio' \| 'sum' \| 'difference' \| 'product'>; of: string[] }` | optional |  |
 | **duration** | `{ from: string; to: string; unit: Enum<'seconds' \| 'minutes' \| 'hours' \| 'days'> }` | optional | Time between two datetime columns of each record (`{ from, to, unit }`), reduced by `aggregate` (avg / min / max / sum). Records with either instant null are excluded. Replaces `field`. |
+| **synonyms** | `string[]` | optional | Words a person uses for this member in a question (e.g. ["收入", "销售额", "revenue"]), matched after normalization and never rendered. Each trimmed, non-empty, at most 60 characters; at most 20. Within one dataset a synonym may not equal another member's name, label or synonym. |
+| **description** | `string \| Record<string, string>` | optional | Business definition of this measure in plain language — one or two sentences on what it is and when to use it (e.g. "已赢单金额合计，按成交日期归月；不含报价中与已丢单"). Never a prompt or an instruction to an AI. At most 500 characters per locale. |
 
 ### Nested Shape: `Dataset.protection`
 
@@ -106,7 +116,7 @@ const result = DatasetSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **package** | `string` | ✅ | The base package id whose same-named item this item replaces whole (e.g. "com.acme.crm"). Only an item of the base's paired "`<base>`.custom" package declares an override. |
-| **basedOn** | `string` | ✅ | Recorded, never judged: the base package's `manifest.version` this override was taken from (e.g. "3.2.0"), not a history version of the item. No door compares it with the installed base, no upgrade diff is produced from it, and nothing is refused on it; it tells a person re-basing the override where it started (ADR-0146 D2). |
+| **basedOn** | `string` | ✅ | Recorded, never a gate: the base package's `manifest.version` this override was taken from (e.g. "3.2.0"), not a history version of the item. Nothing is refused, merged or rebased on it; it tells a person re-basing the override where it started. One reader, as advice: a base's upgrade plan lists an override whose `basedOn` is not the installed base version as stale, beside each override whose base item the upgrade changes (ADR-0146 D2, as amended). |
 
 
 ---
@@ -123,6 +133,8 @@ const result = DatasetSchema.parse(data);
 | **type** | `Enum<'string' \| 'number' \| 'date' \| 'boolean' \| 'lookup'>` | optional |  |
 | **dateGranularity** | `Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>` | optional |  |
 | **nullLabel** | `string \| Record<string, string>` | optional | Label for the bucket of rows whose value for this dimension is null (e.g. "System" on a user axis). Display copy only: grouping is unchanged. When absent, consumers fall back to their own default label for that bucket. |
+| **synonyms** | `string[]` | optional | Words a person uses for this member in a question (e.g. ["收入", "销售额", "revenue"]), matched after normalization and never rendered. Each trimmed, non-empty, at most 60 characters; at most 20. Within one dataset a synonym may not equal another member's name, label or synonym. |
+| **description** | `string \| Record<string, string>` | optional | Business definition of this dimension in plain language — one or two sentences on what it is and when to use it (e.g. "商机当前所处的销售阶段，从初步接洽到赢单或丢单"). Never a prompt or an instruction to an AI. At most 500 characters per locale. |
 
 
 ---
@@ -155,6 +167,8 @@ const result = DatasetSchema.parse(data);
 | **polarity** | `Enum<'higher' \| 'lower' \| 'neutral'>` | optional | Which direction of change is good news: higher (rise green, fall red), lower (fall green, rise red) or neutral (no good/bad colour). Colours a period-over-period delta; undeclared keeps rise green, fall red. |
 | **derived** | `{ op: Enum<'ratio' \| 'sum' \| 'difference' \| 'product'>; of: string[] }` | optional |  |
 | **duration** | `{ from: string; to: string; unit: Enum<'seconds' \| 'minutes' \| 'hours' \| 'days'> }` | optional | Time between two datetime columns of each record (`{ from, to, unit }`), reduced by `aggregate` (avg / min / max / sum). Records with either instant null are excluded. Replaces `field`. |
+| **synonyms** | `string[]` | optional | Words a person uses for this member in a question (e.g. ["收入", "销售额", "revenue"]), matched after normalization and never rendered. Each trimmed, non-empty, at most 60 characters; at most 20. Within one dataset a synonym may not equal another member's name, label or synonym. |
+| **description** | `string \| Record<string, string>` | optional | Business definition of this measure in plain language — one or two sentences on what it is and when to use it (e.g. "已赢单金额合计，按成交日期归月；不含报价中与已丢单"). Never a prompt or an instruction to an AI. At most 500 characters per locale. |
 
 ### Nested Shape: `DatasetMeasure.duration`
 
@@ -187,6 +201,15 @@ const result = DatasetSchema.parse(data);
 * `higher`
 * `lower`
 * `neutral`
+
+
+---
+
+## DatasetMemberSynonyms
+
+Words a person uses for this member in a question (e.g. ["收入", "销售额", "revenue"]), matched after normalization and never rendered. Each trimmed, non-empty, at most 60 characters; at most 20. Within one dataset a synonym may not equal another member's name, label or synonym.
+
+**Type:** `string[]`
 
 
 ---

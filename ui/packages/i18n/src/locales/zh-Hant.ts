@@ -445,6 +445,10 @@ const zhHant = {
       available: '可用',
       all: '全部幣種（ISO 4217）',
     },
+    currencyHome: {
+      convertedAt: '按匯率 {{rate}}（{{date}}）折算',
+      homeCurrency: '本位幣（匯率 1）',
+    },
     boolean: {
       offBadge: '{{label}} — 已關閉',
       completed: '已完成',

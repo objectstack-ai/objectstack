@@ -67,6 +67,7 @@ export interface AfterHookHost {
   enforceConcurrentCap: AuthManager['enforceConcurrentCap'];
   externalDirectoryDoorDeps: AuthManager['externalDirectoryDoorDeps'];
   isEmailDeliveryLive: AuthManager['isEmailDeliveryLive'];
+  logDurabilityDegradation: AuthManager['logDurabilityDegradation'];
   recordPasswordHistory: AuthManager['recordPasswordHistory'];
   roleChangeGrantDeps: AuthManager['roleChangeGrantDeps'];
   sendChangeEmailNotice: AuthManager['sendChangeEmailNotice'];
@@ -88,6 +89,38 @@ function changeEmailFrom(user: unknown): { email: string; name?: string; id?: st
     ...(typeof u.name === 'string' && u.name ? { name: u.name } : {}),
     ...(typeof u.id === 'string' && u.id ? { id: u.id } : {}),
   };
+}
+
+/**
+ * The user of the session the endpoint acted on, as better-auth's session
+ * middleware recorded it on `ctx.context.session` before the handler ran.
+ */
+function actingUserIdOf(ctx: any): string | undefined {
+  const id: unknown = ctx?.context?.session?.user?.id;
+  return typeof id === 'string' && id !== '' ? id : undefined;
+}
+
+/**
+ * ADR-0069 D1 — the account a successful password change's after-effects
+ * (the `password_changed_at` stamp, the forced-change flag it clears, the
+ * history entry) land on, or `undefined` when they land on none.
+ *
+ * `/change-password`: the account the endpoint acted on
+ * ({@link actingUserIdOf}), and only when the before-hook's password checks
+ * ran for that same account (`__osPwChangeUserId`, stashed beside them). A
+ * clear of the forced-change flag is the verdict those checks gate, so an
+ * account they did not judge is given none of it, and no account but the one
+ * changed is ever stamped.
+ *
+ * `/reset-password`: no session is involved; the account is the reset
+ * token's, which the before-hook resolved, as before.
+ */
+function passwordChangeAfterEffectsAccount(ctx: any): string | undefined {
+  const checkedFor: unknown = ctx?.context?.__osPwChangeUserId;
+  const checked = typeof checkedFor === 'string' && checkedFor !== '' ? checkedFor : undefined;
+  if (ctx?.path !== '/change-password') return checked;
+  const acting = actingUserIdOf(ctx);
+  return acting !== undefined && acting === checked ? acting : undefined;
 }
 
 /**
@@ -251,6 +284,15 @@ export async function globalAfterHook(this: AfterHookHost, ctx: any) {
 
   // ── ADR-0069 D1: on a successful change/reset — stamp
   //    password_changed_at (expiry) and commit password history.
+  //
+  // Every after-effect lands on ONE account, read by
+  // `passwordChangeAfterEffectsAccount`: on `/change-password` the account
+  // the endpoint itself acted on — the session better-auth's
+  // `sensitiveSessionMiddleware` recorded on `ctx.context.session` before
+  // the handler ran, the reading the change-email notice below takes — and
+  // only when the before-hook's reuse and forced-change checks ran for that
+  // same account. The history entry is the old hash those checks read, so it
+  // is appended only to the account it was read from.
   if (ctx?.path === '/change-password' || ctx?.path === '/reset-password') {
     let succeeded: boolean;
     try {
@@ -260,10 +302,27 @@ export async function globalAfterHook(this: AfterHookHost, ctx: any) {
       succeeded = !(ctx?.context?.returned instanceof Error);
     }
     if (succeeded) {
-      const stampId = ctx?.context?.__osPwChangeUserId;
-      if (stampId) await this.stampPasswordChangedAt(stampId);
-      const stash = ctx?.context?.__osPwHistory;
-      if (stash?.userId) await this.recordPasswordHistory(stash.userId, stash.oldHash);
+      const stampId = passwordChangeAfterEffectsAccount(ctx);
+      if (stampId) {
+        await this.stampPasswordChangedAt(stampId);
+        const stash = ctx?.context?.__osPwHistory;
+        if (stash?.userId === stampId) await this.recordPasswordHistory(stash.userId, stash.oldHash);
+      } else if (ctx?.path === '/change-password' && actingUserIdOf(ctx)) {
+        // The password changed, but the checks that gate these writes never
+        // judged the account it changed on: nothing is stamped, so a forced
+        // change stays outstanding and the user is asked again (the safe
+        // direction), and the operator is told, here.
+        this.logDurabilityDegradation(
+          'AuthManager: a password change succeeded, but its password_changed_at stamp, the '
+            + 'must_change_password clear and the history entry were NOT written: the password '
+            + 'checks before it (reuse, forced change) did not run for the account it changed. '
+            + 'The new password works; any forced change stays outstanding, so the user is asked '
+            + 'to change it again at the next sign-in, and the password-age clock keeps its old '
+            + 'start. Remedy: none needed per request; the next change whose checks run re-stamps.',
+          new Error('password checks did not run for the acting account'),
+          { object: 'sys_user', fields: ['password_changed_at', 'must_change_password'] },
+        );
+      }
     }
     delete ctx.context.__osPwChangeUserId;
     delete ctx.context.__osPwHistory;

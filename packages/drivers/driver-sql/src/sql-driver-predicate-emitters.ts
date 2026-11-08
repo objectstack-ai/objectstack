@@ -18,6 +18,14 @@
  * refusals (`emptyJsonListPredicate`, `undeclaredEmptyOperatorFieldError`,
  * `emptyListUnsupportedDialectError`).
  *
+ * [#31394] The text-match constructs then moved on, out of this package: the
+ * per-dialect table, its comparand escapes, the ASCII case map, `NUL_CHARACTER`
+ * and `sqliteLengthAwareTextMatch` live in `@objectstack/core`
+ * (`utils/text-match-sql.ts`), shared with the analytics compilers.
+ * `textMatchPredicate` stays here as the knex adapter over it and keeps the
+ * `'unknown'` residue; `likePatternPredicate` reads the SQL Server and MySQL
+ * renderings from the same module.
+ *
  * A MOVE, not a redesign. Each function below is the body of the `SqlDriver`
  * method of the same name as it stood, re-indented one level and otherwise
  * unedited, and each moved declaration is byte-identical but for a leading
@@ -62,7 +70,16 @@
  */
 
 import { coreSqlDialectOf } from './sql-driver-oracle-dialect.js';
-import { jsonMembershipPredicate } from '@objectstack/core';
+import {
+  ASCII_LOWER_LETTERS,
+  ASCII_UPPER_LETTERS,
+  dialectTextMatchSql,
+  jsonMembershipPredicate,
+  mssqlAsciiLowerSql,
+  mssqlCaseExactSql,
+  mysqlAsciiLowerBinarySql,
+  textMatchLikePattern,
+} from '@objectstack/core';
 import { expandEmptyOperator, likePatternToGlobPattern } from '@objectstack/spec/data';
 import type { SqlDialectName } from './schema-drift.js';
 import {
@@ -89,67 +106,6 @@ export interface PredicateEmitterHost {
 }
 
 /**
- * The ASCII case map, written out as data.
- *
- * [#6518] Spelled as two 26-character constants rather than reached through a
- * locale-aware `LOWER()` because "ASCII only" is the CONTRACT (#4706 Q1 = A),
- * and a locale can be configured to fold more. Measured on a live Postgres 16
- * (both a `C.utf8` database and an ICU one): `lower('CAFÉ')` is `café` — the
- * over-fold — while `translate('CAFÉ', <upper>, <lower>)` is `cafÉ`. The
- * mapping being visible in the emitted SQL is the point: a reviewer can see
- * that exactly 26 characters fold, without knowing the server's locale.
- */
-const ASCII_UPPER_LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-const ASCII_LOWER_LETTERS = 'abcdefghijklmnopqrstuvwxyz';
-
-/**
- * Escape the LIKE metacharacters (`%`, `_`) and the escape character itself
- * (`\`) so a comparand matches literally.
- *
- * This is the expression `service-analytics`'s `escapeLikePattern` is held to
- * character for character by its `like-metacharacter-escape.test.ts`. Changing
- * it here without changing it there forks one `$contains` into two.
- */
-function escapeLikeComparand(value: unknown): string {
-  return String(value).replace(/[\\%_]/g, '\\$&');
-}
-
-/**
- * [#6518] Escape the GLOB metacharacters (`*`, `?`, `[`) so a comparand matches
- * literally, using GLOB's ONLY escape mechanism: a single-character class.
- *
- * GLOB has no `ESCAPE` clause — SQLite's grammar simply does not have one for
- * it — so `[*]`, `[?]` and `[[]` are how a literal metacharacter is spelled.
- * `]` needs no escape and deliberately gets none: every `[` this function sees
- * is turned into a class that closes itself, so no unclosed class can survive
- * for a later `]` to terminate. `%` and `_` are ordinary characters to GLOB and
- * are likewise left alone — the escaped class here is NOT the LIKE one, and
- * writing the two as one shared regex is the mistake to refuse.
- *
- * Measured before it was written (better-sqlite3 3.53.4, the nine-row
- * `FILTER_TEXT_ROWS` fixture plus `a*b` / `a?b` / `a[b`): the unescaped pattern
- * `*a*b*` returned six rows where `*a[*]b*` returns the one. An unescaped `*`
- * is the same filter bypass an unescaped `%` is under LIKE, which is why this
- * function exists at the same level as its LIKE sibling rather than inline.
- */
-function escapeGlobComparand(value: unknown): string {
-  return String(value).replace(/[*?[]/g, '[$&]');
-}
-
-/**
- * Escape a comparand for SQL Server's `LIKE`, whose pattern language has ONE
- * metacharacter more than the shared one: `[` opens a character class
- * (`[a-c]`, `[^0-9]`). Left unescaped, `$contains: '[1]'` would match every
- * value holding a `1` — the #5567 bypass in a fourth spelling. So `[` joins
- * `%`, `_` and the escape character itself, behind the same bound `ESCAPE`
- * character as every other dialect. `]` and `^` are literal outside a class,
- * and with every `[` escaped no class can open, so they need nothing.
- */
-function escapeMssqlLikeComparand(value: unknown): string {
-  return String(value).replace(/[\\%_[]/g, '\\$&');
-}
-
-/**
  * Carry a caller's `$like` PATTERN into SQL Server's pattern language.
  *
  * The shared language has two wildcards (`%`, `_`) and the backslash escape;
@@ -173,268 +129,90 @@ function mssqlLikePattern(pattern: string): string {
 }
 
 /**
- * SQL Server's case-EXACT rendering of a text expression: the value as
- * `nvarchar(max)`, under a binary (`_BIN2`, code-point) collation.
+ * [#31395] The text a SQL Server `uniqueidentifier` column is matched as: its
+ * canonical lower-case form, `LOWER(CONVERT(nvarchar(36), col))`.
  *
- * Both halves are load-bearing:
+ * SQL Server renders a GUID as UPPER-case text (`CONVERT`, `CAST` and an
+ * implicit conversion alike), while this driver reads one back lower-case
+ * (`lowerCaseGuids`, set on the connection since #31327). A substring or pattern
+ * match over the column's own text therefore compared a different spelling from
+ * the one every read answers: a lower-case fragment copied from a read matched
+ * nothing. Matching over the lower-case form makes the match agree with the
+ * read, so the case-exact operators stay case-exact against the value a caller
+ * can see, and the folding ones fold as before.
  *
- * - **`COLLATE … _BIN2`.** A SQL Server database's default collation is
- *   case-insensitive (`SQL_Latin1_General_CP1_CI_AS`, `Chinese_PRC_CI_AS`, …),
- *   so a bare `LIKE` folds case — `$contains: 'Caf'` matched `café`, measured on
- *   SQL Server 2022 before this arm existed. An explicit collation on an
- *   operand outranks the column's own, so the comparison is code-point exact
- *   whatever the database or column was created with.
- * - **`CAST(… AS nvarchar(max))` first.** A `COLLATE` on a `varchar` operand
- *   re-encodes it into the target collation's code page, and a Latin1 code
- *   page has no Chinese (or Cyrillic, or …) characters: they would become `?`.
- *   Widening to `nvarchar` first converts through the column's OWN code page
- *   into Unicode, so the collation only changes how characters compare, never
- *   which characters there are. An `nvarchar` column passes through unchanged.
- *
- * Applied to the comparand too, so the pattern is compared in the same terms.
+ * `nvarchar(36)` is exact: a GUID's text form is always 36 ASCII characters, so
+ * `LOWER` moves only the hex letters, and the `mssqlCaseExactSql` wrap around
+ * it changes no character. Applied ONLY to a column the remote catalog reports
+ * as `uniqueidentifier` (`primeMssqlGuidColumns`), never chosen from the
+ * comparand's shape: an `nvarchar` column holding GUID-shaped text keeps its
+ * own, case-exact text.
  */
-function mssqlCaseExact(expr: string): string {
-  return `CAST(${expr} AS nvarchar(max)) COLLATE Latin1_General_100_BIN2`;
+function mssqlGuidText(expr: string): string {
+  return `LOWER(CONVERT(nvarchar(36), ${expr}))`;
 }
 
 /**
- * The #6518 ASCII-only fold on SQL Server: `TRANSLATE` over the 26 letters,
- * applied to the {@link mssqlCaseExact} rendering. `LOWER()` is not used for
- * the reason `translate()` replaced it on Postgres: it folds `É` to `é`, the
- * over-fold the Q1 = A contract excludes. Under the binary collation
- * `TRANSLATE` matches code points, so exactly the 26 ASCII capitals move.
- * `TRANSLATE` is SQL Server 2017 (14.x) and later — the dialect floor this arm
- * declares.
+ * [#31395] The `$contains` family and `$icontains` over a SQL Server
+ * `uniqueidentifier` column: the core table's mssql arm (`dialectTextMatchSql`,
+ * so the same escape, case-exact wrap, `TRANSLATE` fold and bound `ESCAPE`)
+ * with the column read as {@link mssqlGuidText}. Reached only from
+ * {@link applyLike}, and only for a column the remote catalog reported as
+ * `uniqueidentifier`.
  */
-function mssqlAsciiLower(expr: string): string {
-  return `TRANSLATE(${mssqlCaseExact(expr)}, '${ASCII_UPPER_LETTERS}', '${ASCII_LOWER_LETTERS}')`;
+function mssqlGuidTextMatch(field: string, value: unknown, shape: TextMatchShape, negate: boolean, fold: boolean): { sql: string; bindings: unknown[] } {
+  const bindings: unknown[] = [];
+  const sql = dialectTextMatchSql(
+    { dialect: 'mssql', shape, value, negate, fold },
+    {
+      column: () => {
+        bindings.push(field);
+        return mssqlGuidText('??');
+      },
+      value: (v) => {
+        bindings.push(v);
+        return '?';
+      },
+    },
+  );
+  if (sql !== null) return { sql, bindings };
+  // Unreachable: the core table answers every mssql request; `null` is only the
+  // `'unknown'` residue, which the plain mssql emitter would hand back too.
+  return textMatchPredicate('mssql', field, value, shape, negate, fold);
 }
-
-/** Wrap an already-escaped comparand in the wildcards `shape` calls for. */
-function wrapTextMatchShape(escaped: string, shape: TextMatchShape, wildcard: string): string {
-  if (shape === 'starts') return `${escaped}${wildcard}`;
-  if (shape === 'ends') return `${wildcard}${escaped}`;
-  return `${wildcard}${escaped}${wildcard}`;
-}
-
-/** U+0000, spelled by its code point so no raw control byte sits in this file. */
-const NUL_CHARACTER = String.fromCharCode(0x00);
 
 /**
- * [#19999, #20024] The SQLite text match that reads the WHOLE comparand and the
- * WHOLE stored value — every `contains` / `ends` comparand, and a `starts`
- * comparand that holds U+0000.
- *
- * SQLite's `glob()` reads its pattern AND the stored value as C strings, so each
- * is cut at its first U+0000. Measured on better-sqlite3 (SQLite 3.53.4),
- * sql.js (3.49.1) and a local libSQL engine (3.45.1), all alike and none
- * raising:
- *
- * - **The comparand's cut (#19999).** `$contains` / `$endsWith` of a comparand
- *   that STARTS with U+0000 matched every row (the pattern was cut to `*`), and
- *   `$startsWith` of one matched the rows that are empty before their first
- *   U+0000, `''` among them.
- * - **The stored value's cut (#20024).** With a comparand WITHOUT U+0000, `GLOB`
- *   still saw a stored value only up to its first U+0000: `$contains: 'b'`
- *   missed `'a'` + U+0000 + `'b'`, `$endsWith: 'a'` returned it, and
- *   `$icontains: 'B'` missed `'A'` + U+0000 + `'B'`.
- *
- * So the comparand is compared whole, against the whole value, by constructs
- * each measured NUL-safe on those three engines first:
- *
- * | shape | predicate |
- * |---|---|
- * | `contains` | `instr(col, ?) > 0` |
- * | `starts` | `instr(col, ?) = 1` — the first occurrence IS the prefix |
- * | `ends` | `coalesce(substr(CAST(col AS BLOB), -length(CAST(? AS BLOB))), CAST(col AS BLOB)) = CAST(? AS BLOB)` |
- *
- * `instr()` compares bytes over the full length of both arguments, and `lower()`
- * folds every byte it is given. `length()` and `substr()` over TEXT do NOT —
- * they stop at the first U+0000 (`length('a' || char(0) || 'b')` is 1) — so the
- * suffix is taken over BLOB, where both count bytes. Comparing UTF-8 bytes is
- * comparing characters: UTF-8 is self-synchronising, so a byte suffix equal to
- * a valid UTF-8 comparand starts on a character boundary. A comparand longer
- * than a non-empty value yields the whole, shorter value, which is never equal
- * to it. Over a ZERO-LENGTH blob `substr` yields NULL, not the empty blob
- * (measured on all three engines: `typeof(substr(CAST('' AS BLOB), -1))` is
- * `null`), which would answer NULL for `''` where the answer is false: invisible
- * to a bare `$endsWith`, but a `$not` over it dropped the `''` row. So
- * `coalesce()` falls back to the value itself — `substr` answers NULL exactly
- * when the value is NULL or zero-length, and the value is then the right
- * stand-in: the empty blob, never equal to a comparand of one byte or more, or
- * NULL, which stays NULL as it does under `GLOB`.
- *
- * The EMPTY comparand never reaches the suffix construct: `-length('')` is
- * `-0`, which `substr` reads as "from the start", so the construct would ask
- * whether the whole value equals `''` and answer false for `'abc'`. An empty
- * string is a suffix — and a prefix, and a substring — of every value, so it
- * takes `instr(col, '') > 0` instead, which is 1 for every non-NULL value
- * (`instr('abc', '')` and `instr('', '')` are both 1 on all three engines) and
- * NULL for NULL, exactly as `GLOB '*'` answered it.
- *
- * Nothing is escaped: none of the three has a pattern language, so `*`, `?` and
- * `[` are literal by construction and the comparand is bound as written. The
- * fold is the GLOB arm's own `lower()` on both sides, ASCII-only; it only ever
- * arrives with `contains` (`$icontains`), and the other two shapes honour it
- * anyway, as the GLOB arm does. The negation
- * is `NOT (…)`, which is NULL for a NULL value exactly as `NOT GLOB` is, so the
- * NULL-safe wrapper `$notContains` puts around it composes unchanged (#5298).
- *
- * `starts` with a comparand WITHOUT U+0000 stays on `GLOB` in
- * {@link textMatchPredicate}, byte for byte: cutting the stored value at its
- * first U+0000 cannot change that answer (a prefix free of U+0000 lies wholly
- * before the value's first one, or the value does not start with it), and a
- * `GLOB` prefix pattern is the one text construct here an index can serve.
+ * [#31395] `$like` / `$ilike` over a SQL Server `uniqueidentifier` column:
+ * {@link likePatternPredicate}'s mssql construct with the column read as
+ * {@link mssqlGuidText}. Reached only from {@link applyLikePattern}.
  */
-function sqliteLengthAwareTextMatch(
-  field: string,
-  text: string,
-  shape: TextMatchShape,
-  negate: boolean,
-  fold: boolean,
-): { sql: string; bindings: unknown[] } {
-  const column = fold ? 'lower(??)' : '??';
-  const comparand = fold ? 'lower(?)' : '?';
-  const suffix = shape === 'ends' && text !== '';
-  const positive = suffix
-    ? `coalesce(substr(CAST(${column} AS BLOB), -length(CAST(${comparand} AS BLOB))), CAST(${column} AS BLOB))`
-      + ` = CAST(${comparand} AS BLOB)`
-    : `instr(${column}, ${comparand}) ${shape === 'starts' ? '= 1' : '> 0'}`;
+function mssqlGuidLikePattern(field: string, pattern: string, fold: boolean): { sql: string; bindings: unknown[] } {
+  const caseExact = fold ? mssqlAsciiLowerSql : mssqlCaseExactSql;
   return {
-    sql: negate ? `NOT (${positive})` : positive,
-    bindings: suffix ? [field, text, field, text] : [field, text],
+    sql: `${caseExact(mssqlGuidText('??'))} LIKE ${caseExact('?')} ESCAPE ?`,
+    bindings: [field, mssqlLikePattern(pattern), LIKE_ESCAPE_CHARACTER],
   };
 }
 
 /**
- * [#6518] MySQL's ASCII-only case fold: 26 `REPLACE`s over the BINARY rendering
- * of an expression.
+ * [#6518] The `$contains` family and `$icontains` as `{sql, bindings}` for
+ * knex's `whereRaw`, with `??` the column and `?` each value.
  *
- * Ugly, and the alternatives are all wrong rather than merely uglier — that is
- * the whole justification, so it is written down:
+ * [#31394] The construct table itself — one arm per dialect, the escaping and
+ * the ASCII fold, with the measurements behind every cell — moved to
+ * `@objectstack/core` (`dialectTextMatchSql`, `utils/text-match-sql.ts`), so
+ * the analytics compilers emit the SAME arms instead of a hand-held copy. This
+ * adapter is the knex half: the column goes out as an identifier binding, each
+ * value as a value binding, pushed in the order the placeholders appear. The
+ * emitted SQL and bindings are byte-identical to what this function built
+ * before the move, which every text-match suite in this package pins.
  *
- *   - `LOWER(x)` folds the full Unicode range (the defect this closes).
- *   - `LOWER(x)` on a binary string is documented as INEFFECTIVE, so casting
- *     first and folding after simply does not fold.
- *   - `CONVERT(x USING ascii)` maps every non-ASCII character to `?`, which
- *     COLLIDES `café` with `cafÉ` — strictly worse than over-folding.
- *   - No MySQL collation is case-insensitive for ASCII and exact elsewhere.
- *
- * Operating on `CAST(x AS BINARY)` rather than on the text is what makes it
- * provable without a live server: in binary space `REPLACE` matches bytes, so
- * no collation participates, and UTF-8 is self-synchronising — a byte in
- * `0x41..0x5A` can only ever be a real ASCII `A`..`Z`, never part of a
- * multi-byte character. Byte-wise ASCII lowering therefore IS the ruled fold.
- */
-function mysqlAsciiLowerBinary(expr: string): string {
-  let out = `CAST(${expr} AS BINARY)`;
-  for (let i = 0; i < ASCII_UPPER_LETTERS.length; i++) {
-    out = `REPLACE(${out}, '${ASCII_UPPER_LETTERS[i]}', '${ASCII_LOWER_LETTERS[i]}')`;
-  }
-  return out;
-}
-
-/**
- * [#6518] The one place a text predicate becomes SQL — `{sql, bindings}` for
- * knex's `whereRaw`, with `??` the column and `?` the pattern.
- *
- * # The defect this closes
- *
- * Before this, every dialect got `col LIKE ? ESCAPE ?` (and `LOWER()` on both
- * sides for `$icontains`), which made case sensitivity the DIALECT's answer
- * where #4706 rules it the CONTRACT's. Both halves over-matched — they returned
- * rows the filter excludes, which on an RLS read scope is over-reach (#3948),
- * not a loose filter:
- *
- * | | `$contains` family (must be case-SENSITIVE, Q2=A) | `$icontains` (folds ASCII ONLY, Q1=A) |
- * |---|---|---|
- * | SQLite | ✗ `LIKE` folds ASCII | ✓ `lower()` is ASCII-only |
- * | Postgres | ✓ `LIKE` is case-exact | ✗ `LOWER()` folds all of Unicode |
- * | MySQL | ✗ follows the collation | ✗ `LOWER()` folds all of Unicode |
- *
- * # What is emitted now, and why each cell
- *
- * - **SQLite → `GLOB`.** `LIKE`'s ASCII fold cannot be turned off per-statement;
- *   `PRAGMA case_sensitive_like` is a CONNECTION-global switch, so one query
- *   would change every other query's meaning. Of the operand-level tricks,
- *   `CAST(col AS BLOB) LIKE ?` is disqualified by something worse than
- *   failing: it means TWO DIFFERENT THINGS on the two SQLite builds this repo
- *   ships. Whether `LIKE` is false for a BLOB operand is not a property of
- *   SQLite the language — it is set when SQLite is COMPILED, by
- *   `SQLITE_LIKE_DOESNT_MATCH_BLOBS`. Measured over the shared
- *   `FILTER_TEXT_ROWS` fixture, `{name: {$contains: 'acme'}}` compiled to that
- *   construct:
- *
- *   | build | `SQLITE_LIKE_DOESNT_MATCH_BLOBS` | rows |
- *   |---|---|---|
- *   | better-sqlite3 13.0.3 (SQLite 3.53.4) | compiled in | `[]` |
- *   | sql.js 1.14.1 (SQLite 3.49.1) | absent | `['1','2']` — `ACME Corp` AND `acme corp` |
- *
- *   So one build silently answers nothing and the other silently answers
- *   exactly the ASCII over-fold this whole function exists to end, and which
- *   one a caller gets is decided by a flag upstream of us. That divergence is
- *   the rejection on its own: a construct whose meaning depends on how the
- *   driver's SQLite was BUILT cannot carry a read scope (#3948) whatever value
- *   it happens to return in any one container — the `[]` above is a build's
- *   answer, not SQLite's. The CAST itself is not the part that differs:
- *   `typeof CAST(name AS BLOB)` is `'blob'` on BOTH builds, so what diverges is
- *   purely `LIKE`'s rule for a blob operand, which is the compile-time half. So
- *   the operator has to change. `GLOB` is case-exact by definition, answers
- *   `['2']` on BOTH builds above, and carries its own
- *   escape mechanism ({@link escapeGlobComparand}). `lower()` in front of it is
- *   still the
- *   `$icontains` fold, and still ASCII-only: measured, `lower('CAFÉ')` is
- *   `'cafÉ'`, so `lower(name) GLOB '*café*'` answers row 4 and `'*cafÉ*'`
- *   answers row 3 — the Q1 = A boundary, executed rather than argued.
- *   `glob()` cuts its pattern AND the stored value at their first U+0000, so
- *   `GLOB` now serves only `starts` with a comparand free of U+0000 — the one
- *   shape the value's cut cannot change, and the one an index can serve.
- *   Every `contains` / `ends` comparand (#20024), and a `starts` comparand
- *   holding U+0000 (#19999), goes to {@link sqliteLengthAwareTextMatch}, whose
- *   `instr()` / BLOB-suffix constructs read both whole. Measured over an
- *   indexed TEXT column on all three SQLite engines, `EXPLAIN QUERY PLAN` was
- *   already `SCAN` for every `contains` / `ends` shape under `GLOB` (a leading
- *   `*` is never index-usable) and stays `SCAN`; `starts` keeps its `SEARCH`.
- * - **Postgres → `LIKE`, unchanged**, because `LIKE` there is already exact.
- *   Only the fold moves, from `LOWER()` to {@link ASCII_UPPER_LETTERS}-driven
- *   `translate()`. Measured live (PG 16, ICU database): `LOWER(name) LIKE
- *   LOWER('%café%')` returned rows 3 AND 4; the `translate()` form returns row
- *   4, and its `'%CAFÉ%'` mirror returns row 3.
- * - **MySQL → `LIKE` over `CAST(… AS BINARY)`**, which is byte-wise and
- *   therefore case-exact whatever the column's collation says. The fold adds
- *   {@link mysqlAsciiLowerBinary} on top. NOT executed here: no MySQL server was
- *   provisionable in the container that wrote this, so the mysql cell is a
- *   declared skip in the live matrix rather than a claimed pass, and the
- *   reasoning is written out on that helper instead.
- * - **SQL Server → `LIKE` over {@link mssqlCaseExact}** (`nvarchar(max)` under
- *   a `_BIN2` collation, so the database's case-insensitive default collation
- *   cannot fold the match), with {@link escapeMssqlLikeComparand}'s wider
- *   character class — `[` is a metacharacter there — and
- *   {@link mssqlAsciiLower}'s `TRANSLATE` for the fold. Executed on SQL Server
- *   2022 by the live mssql cell.
- * - **Oracle → `LIKE`, the Postgres arm's construct.** `LIKE` is byte-wise
- *   there under `NLS_COMP = BINARY`, which every Oracle session this driver
- *   opens pins (`ORACLE_SESSION_SETUP_SQL`) so a database or user default of
- *   `LINGUISTIC` cannot fold case behind the operator. The fold is the same
- *   `translate()` over the 26 ASCII letters — Oracle's `TRANSLATE` has the
- *   same signature — and the escape character is bound like everywhere else.
- *   Measured on Oracle 23ai: `name LIKE '%Caf%' ESCAPE '\'` answers the
- *   mixed-case row only; the folded form answers both spellings and not `CAFÉ`.
- * - **`'unknown'` → the pre-#6518 `LIKE`/`LOWER()` shape.** `dialectName` is
- *   `'unknown'` for a knex client this driver does not model,
- *   where `GLOB` is a syntax error and `CAST(… AS BINARY)` means something
- *   else. Emitting the old shape is not an endorsement of it — it is the only
- *   answer that still RUNS, and it is the residue the conformance ledger names.
- *
- * # Why one function and not four emitters
- *
- * The escaping is the P0 (#5567: an unescaped `%` matches every row), the fold
- * is the contract, and the two interact — the SQLite arm needs a DIFFERENT
- * escaped character class from the other three, which is exactly the kind of
- * divergence a second emitter drops on the floor. Every arm below therefore
- * builds its pattern from one of two named escape functions and one shared
- * {@link wrapTextMatchShape}, so "which characters are literal" is answered per
- * dialect in one readable place and can never be answered by accident.
+ * What stays HERE is the `'unknown'` residue, the one cell the two faces do
+ * not share: the pre-#6518 `LIKE` / `LOWER()` shape. `dialectName` is
+ * `'unknown'` for a knex client this driver does not model, where `GLOB` is a
+ * syntax error and `CAST(… AS BINARY)` means something else. Emitting the old
+ * shape is not an endorsement of it — it is the only answer that still RUNS,
+ * and it is the residue the conformance ledger names.
  */
 export function textMatchPredicate(
   dialect: SqlDialectName,
@@ -444,56 +222,28 @@ export function textMatchPredicate(
   negate: boolean,
   fold: boolean,
 ): { sql: string; bindings: unknown[] } {
-  if (dialect === 'sqlite') {
-    // [#19999, #20024] `glob()` cuts its pattern AND the stored value at their
-    // first U+0000. Only a `starts` comparand free of U+0000 is immune to both
-    // cuts; every other comparand is compared by a length-aware construct.
-    const text = String(value);
-    if (shape !== 'starts' || text.includes(NUL_CHARACTER)) {
-      return sqliteLengthAwareTextMatch(field, text, shape, negate, fold);
-    }
-    // GLOB takes no ESCAPE clause, so this arm binds two values, not three.
-    const pattern = wrapTextMatchShape(escapeGlobComparand(value), shape, '*');
-    const column = fold ? 'lower(??)' : '??';
-    const comparand = fold ? 'lower(?)' : '?';
-    return {
-      sql: `${column} ${negate ? 'NOT GLOB' : 'GLOB'} ${comparand}`,
-      bindings: [field, pattern],
-    };
-  }
-
-  if (dialect === 'mssql') {
-    // `[` is a fourth metacharacter here, so the comparand takes its own escape.
-    const caseExact = fold ? mssqlAsciiLower : mssqlCaseExact;
-    return {
-      sql: `${caseExact('??')} ${negate ? 'NOT LIKE' : 'LIKE'} ${caseExact('?')} ESCAPE ?`,
-      bindings: [field, wrapTextMatchShape(escapeMssqlLikeComparand(value), shape, '%'), LIKE_ESCAPE_CHARACTER],
-    };
-  }
-
-  const pattern = wrapTextMatchShape(escapeLikeComparand(value), shape, '%');
-  const keyword = negate ? 'NOT LIKE' : 'LIKE';
-  // The `ESCAPE` character is BOUND, never written as a literal: MySQL applies C
-  // escape syntax inside string literals, so `'\'` and `'\\'` are the same
-  // backslash spelled two ways per dialect, while a bound value has one
-  // spelling everywhere (#5567).
-  const bindings = [field, pattern, LIKE_ESCAPE_CHARACTER];
-
-  if (dialect === 'postgres' || dialect === 'oracle') {
-    const asciiLower = (expr: string) =>
-      fold ? `translate(${expr}, '${ASCII_UPPER_LETTERS}', '${ASCII_LOWER_LETTERS}')` : expr;
-    return { sql: `${asciiLower('??')} ${keyword} ${asciiLower('?')} ESCAPE ?`, bindings };
-  }
-
-  if (dialect === 'mysql') {
-    const caseExact = (expr: string) =>
-      fold ? mysqlAsciiLowerBinary(expr) : `CAST(${expr} AS BINARY)`;
-    return { sql: `${caseExact('??')} ${keyword} ${caseExact('?')} ESCAPE ?`, bindings };
-  }
+  const bindings: unknown[] = [];
+  const sql = dialectTextMatchSql(
+    { dialect, shape, value, negate, fold },
+    {
+      column: () => {
+        bindings.push(field);
+        return '??';
+      },
+      value: (v) => {
+        bindings.push(v);
+        return '?';
+      },
+    },
+  );
+  if (sql !== null) return { sql, bindings };
 
   const column = fold ? 'LOWER(??)' : '??';
   const comparand = fold ? 'LOWER(?)' : '?';
-  return { sql: `${column} ${keyword} ${comparand} ESCAPE ?`, bindings };
+  return {
+    sql: `${column} ${negate ? 'NOT LIKE' : 'LIKE'} ${comparand} ESCAPE ?`,
+    bindings: [field, textMatchLikePattern(shape, value), LIKE_ESCAPE_CHARACTER],
+  };
 }
 
 /**
@@ -655,13 +405,13 @@ function sqliteLikePatternMatch(field: string, pattern: string, fold: boolean): 
  *   passes them through untouched — the fold cannot corrupt the wildcards.
  * - **MySQL → `LIKE` over `CAST(… AS BINARY)`**, byte-wise and so case-exact
  *   whatever the column collation says; `$ilike` adds
- *   {@link mysqlAsciiLowerBinary} on both sides. Not executed here for the same
+ *   {@link mysqlAsciiLowerBinarySql} on both sides. Not executed here for the same
  *   reason its sibling records: no MySQL server is provisionable in this
  *   container, so the cell is a declared skip rather than a claimed pass.
- * - **SQL Server → `LIKE` over {@link mssqlCaseExact}**, the pattern carried
+ * - **SQL Server → `LIKE` over {@link mssqlCaseExactSql}**, the pattern carried
  *   through {@link mssqlLikePattern} so an unescaped `[` stays the literal it is
  *   in the shared pattern language; `$ilike` folds through
- *   {@link mssqlAsciiLower}.
+ *   {@link mssqlAsciiLowerSql}.
  * - **Oracle → the Postgres arm**, for the reasons {@link textMatchPredicate}
  *   gives: `LIKE` is byte-wise under the pinned `NLS_COMP = BINARY`, and
  *   `TRANSLATE` folds the 26 ASCII letters only.
@@ -683,7 +433,7 @@ export function likePatternPredicate(
   }
 
   if (dialect === 'mssql') {
-    const caseExact = fold ? mssqlAsciiLower : mssqlCaseExact;
+    const caseExact = fold ? mssqlAsciiLowerSql : mssqlCaseExactSql;
     return {
       sql: `${caseExact('??')} LIKE ${caseExact('?')} ESCAPE ?`,
       bindings: [field, mssqlLikePattern(pattern), LIKE_ESCAPE_CHARACTER],
@@ -700,7 +450,7 @@ export function likePatternPredicate(
 
   if (dialect === 'mysql') {
     const caseExact = (expr: string) =>
-      fold ? mysqlAsciiLowerBinary(expr) : `CAST(${expr} AS BINARY)`;
+      fold ? mysqlAsciiLowerBinarySql(expr) : `CAST(${expr} AS BINARY)`;
     return { sql: `${caseExact('??')} LIKE ${caseExact('?')} ESCAPE ?`, bindings };
   }
 
@@ -1014,15 +764,19 @@ export function applyNullSafeNegative(builder: any, method: string, field: strin
 }
 
 /** The body of `SqlDriver#applyLike`; the method's docblock there is its contract. */
-export function applyLike(this: Pick<PredicateEmitterHost, 'dialectName'>, builder: any, method: string, field: string, value: unknown, shape: TextMatchShape, negate = false, fold = false): void {
+export function applyLike(this: Pick<PredicateEmitterHost, 'dialectName'>, builder: any, method: string, field: string, value: unknown, shape: TextMatchShape, negate = false, fold = false, guidColumn = false): void {
   const rawMethod = method.startsWith('or') ? 'orWhereRaw' : 'whereRaw';
-  const { sql, bindings } = textMatchPredicate(this.dialectName, field, value, shape, negate, fold);
+  const { sql, bindings } = guidColumn && this.dialectName === 'mssql'
+    ? mssqlGuidTextMatch(field, value, shape, negate, fold)
+    : textMatchPredicate(this.dialectName, field, value, shape, negate, fold);
   builder[rawMethod](sql, bindings);
 }
 
 /** The body of `SqlDriver#applyLikePattern`; the method's docblock there is its contract. */
-export function applyLikePattern(this: Pick<PredicateEmitterHost, 'dialectName'>, builder: any, method: string, field: string, pattern: string, fold: boolean): void {
+export function applyLikePattern(this: Pick<PredicateEmitterHost, 'dialectName'>, builder: any, method: string, field: string, pattern: string, fold: boolean, guidColumn = false): void {
   const rawMethod = method.startsWith('or') ? 'orWhereRaw' : 'whereRaw';
-  const { sql, bindings } = likePatternPredicate(this.dialectName, field, pattern, fold);
+  const { sql, bindings } = guidColumn && this.dialectName === 'mssql'
+    ? mssqlGuidLikePattern(field, pattern, fold)
+    : likePatternPredicate(this.dialectName, field, pattern, fold);
   builder[rawMethod](sql, bindings);
 }

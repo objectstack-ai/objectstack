@@ -1160,10 +1160,11 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       revoked_reason: {
         label: "失効理由",
-        help: "キーが失効した理由で、誰が復元できるかを左右する場合に記録されます。管理者によるパスワードの強制リセット：キーを復元できるのはプラットフォーム管理者のみです。組織メンバーシップの終了：所有者が組織を離れたため、誰もキーを復元できません。組織のメンバーが新しいキーを作成します。キーを復元するとクリアされます。API キー一覧から失効させたキーでは空です。",
+        help: "キーが失効した理由で、誰が復元できるかを左右する場合に記録されます。管理者によるパスワードの強制リセット：キーを復元できるのはプラットフォーム管理者のみです。組織メンバーシップの終了：所有者が組織を離れたため、誰もキーを復元できません。組織のメンバーが新しいキーを作成します。管理者による一時停止：プラットフォーム管理者が自分のものではないキーを失効させたため、キーを復元できるのはプラットフォーム管理者のみです。キーを復元するとクリアされます。所有者が API キー一覧から失効させたキーでは空です。",
         options: {
           admin_password_reset: "管理者によるパスワードの強制リセット",
-          organization_membership_ended: "組織メンバーシップの終了"
+          organization_membership_ended: "組織メンバーシップの終了",
+          administrator_suspended: "管理者による一時停止"
         }
       },
       key: {
@@ -2635,6 +2636,55 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       order_key: {
         label: "並び順キー",
         help: "@better-auth/scim が管理する、安定したページネーションのための派生キー。直接書き込まないでください。"
+      },
+      created_at: {
+        label: "作成日時"
+      },
+      updated_at: {
+        label: "更新日時"
+      }
+    },
+    _views: {
+      all: {
+        label: "すべて"
+      }
+    }
+  },
+  sys_idp_group_mapping: {
+    label: "IdP グループマッピング",
+    pluralLabel: "IdP グループマッピング",
+    description: "ID プロバイダーのグループを、そのメンバーに付与する権限セットに対応付けます",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      source_kind: {
+        label: "ソース種別",
+        help: "グループを送信するもの：SCIM 接続、またはサインイン時の SSO プロバイダー。",
+        options: {
+          scim: "SCIM 接続",
+          sso: "SSO プロバイダー"
+        }
+      },
+      source_id: {
+        label: "ソース ID",
+        help: "グループが届く SCIM 接続の ID または SSO プロバイダーの ID（例：\"okta-prod\"）。"
+      },
+      group_external_id: {
+        label: "グループ外部 ID",
+        help: "ID プロバイダーが送信するグループの externalId。表示名とどちらか一方を設定し、両方は設定しません。"
+      },
+      group_display_name: {
+        label: "グループ表示名",
+        help: "グループの displayName（完全一致）。マッピングに外部 ID がない場合に使用します。"
+      },
+      permission_set: {
+        label: "権限セット",
+        help: "グループのメンバーに付与される権限セット。管理者セットは拒否されます。"
+      },
+      organization_id: {
+        label: "組織",
+        help: "付与が行われる組織：SCIM 接続または SSO プロバイダーを所有する組織。"
       },
       created_at: {
         label: "作成日時"

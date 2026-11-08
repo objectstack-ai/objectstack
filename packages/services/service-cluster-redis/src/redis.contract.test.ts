@@ -108,7 +108,7 @@ import {
 // per-test 5s timeout — the wiring tests below were flaky on slow CI for
 // exactly that reason (the first test paid the full import cost and timed out).
 import './index.js';
-import { defineCluster } from '@objectstack/service-cluster';
+import { defineCluster, readClusterDriverConnection } from '@objectstack/service-cluster';
 
 import { RedisPubSub } from './pubsub.js';
 import { RedisLock } from './lock.js';
@@ -243,5 +243,29 @@ describe('Redis driver — wiring', () => {
         });
         await cluster.close();
         await expect(client.set('post-close', '1')).resolves.toBe('OK');
+    });
+
+    // The shared `cache` of a multi-node deployment (`@objectstack/service-cache`)
+    // reaches this Redis through the connection the facade offers, instead of a
+    // second client configuration that could name a different server.
+    it('offers its connection — the client it uses and its key prefix — and nothing else claims it', async () => {
+        const client = makeClient();
+        const keyPrefix = uniquePrefix();
+        const cluster = defineCluster({
+            driver: 'redis',
+            nodeId: 'mock-node-3',
+            driverOptions: { client, keyPrefix },
+        });
+        const conn = readClusterDriverConnection(cluster, 'redis');
+        expect(conn?.client).toBe(client);
+        expect(conn?.keyPrefix).toBe(keyPrefix);
+        expect(readClusterDriverConnection(cluster, 'memory')).toBeUndefined();
+        await cluster.close();
+    });
+
+    it('offers the default `os:` prefix when none is configured', async () => {
+        const cluster = defineCluster({ driver: 'redis', nodeId: 'mock-node-4', driverOptions: { client: makeClient() } });
+        expect(readClusterDriverConnection(cluster, 'redis')?.keyPrefix).toBe('os:');
+        await cluster.close();
     });
 });

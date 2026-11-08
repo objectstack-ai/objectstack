@@ -1160,10 +1160,11 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       revoked_reason: {
         label: "撤销原因",
-        help: "密钥被撤销的原因，仅在它决定谁能恢复密钥时记录。管理员强制重置密码：只有平台管理员能恢复该密钥。组织成员资格已结束：所有者已离开组织，任何人都不能恢复该密钥，由组织成员创建新的密钥。密钥恢复后清除。从 API 密钥列表撤销的密钥此项为空。",
+        help: "密钥被撤销的原因，仅在它决定谁能恢复密钥时记录。管理员强制重置密码：只有平台管理员能恢复该密钥。组织成员资格已结束：所有者已离开组织，任何人都不能恢复该密钥，由组织成员创建新的密钥。已被管理员暂停：平台管理员撤销了不属于自己的密钥，只有平台管理员能恢复该密钥。密钥恢复后清除。所有者从 API 密钥列表撤销的密钥此项为空。",
         options: {
           admin_password_reset: "管理员强制重置密码",
-          organization_membership_ended: "组织成员资格已结束"
+          organization_membership_ended: "组织成员资格已结束",
+          administrator_suspended: "已被管理员暂停"
         }
       },
       key: {
@@ -2635,6 +2636,55 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       order_key: {
         label: "排序键",
         help: "由 @better-auth/scim 维护的派生稳定分页键；请勿直接写入。"
+      },
+      created_at: {
+        label: "创建时间"
+      },
+      updated_at: {
+        label: "更新时间"
+      }
+    },
+    _views: {
+      all: {
+        label: "全部"
+      }
+    }
+  },
+  sys_idp_group_mapping: {
+    label: "IdP 组映射",
+    pluralLabel: "IdP 组映射",
+    description: "将身份提供商的组映射到其成员被授予的权限集",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      source_kind: {
+        label: "来源类型",
+        help: "发送该组的来源：SCIM 连接，或登录时的 SSO 提供方。",
+        options: {
+          scim: "SCIM 连接",
+          sso: "SSO 提供方"
+        }
+      },
+      source_id: {
+        label: "来源 ID",
+        help: "该组经由的 SCIM 连接 ID 或 SSO 提供方 ID，例如 \"okta-prod\"。"
+      },
+      group_external_id: {
+        label: "组外部 ID",
+        help: "身份提供商发送的组 externalId。与显示名称二选一，不可同时设置。"
+      },
+      group_display_name: {
+        label: "组显示名称",
+        help: "组的 displayName，精确匹配。映射未指定外部 ID 时使用。"
+      },
+      permission_set: {
+        label: "权限集",
+        help: "授予该组成员的权限集。管理员权限集会被拒绝。"
+      },
+      organization_id: {
+        label: "组织",
+        help: "授权所在的组织：拥有该 SCIM 连接或 SSO 提供方的组织。"
       },
       created_at: {
         label: "创建时间"

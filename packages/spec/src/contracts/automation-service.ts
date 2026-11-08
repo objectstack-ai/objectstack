@@ -373,14 +373,20 @@ export interface ScreenFieldSpec {
      * Widget hint (text/select/boolean/number/date/file/…); the client maps it
      * to a field widget.
      *
-     * Four members are value domains the server re-checks on resume
+     * Nine members are value domains the server re-checks on resume
      * (`validateScreenInputs`): the three numeric kinds `'number'`,
      * `'currency'` and `'percent'` take a finite JSON number (a numeric
      * string is refused, ⛔ not coerced; the client renders all three as a
-     * numeric input, which posts a number), and `'file'` (#25801) takes the
+     * numeric input, which posts a number); `'file'` (#25801) takes the
      * id of an uploaded `sys_file` — the client
      * renders the platform upload widget and answers with the id the upload
-     * minted, never the expanded `{ id, name, url, … }` read form.
+     * minted, never the expanded `{ id, name, url, … }` read form; and the
+     * five string kinds `'text'`, `'textarea'`, `'email'`, `'url'` and
+     * `'phone'` (#31491) take a JSON string (an object, number, boolean or
+     * array is refused, ⛔ not coerced — `42` is not read as `'42'`). Only the
+     * shape is checked: the format of an email, URL or phone number is not.
+     * A refused value leaves the run paused, so a corrected resume continues
+     * it.
      *
      * One member is not an input at all: `'record_link'` shows the
      * {@link reference} record whose id {@link defaultValue} carries (served

@@ -2508,7 +2508,7 @@ describe('HttpDispatcher', () => {
         // the shared ADR-0106 case table (`domains/meta-object-fls.test.ts`).
         const AUTHOR = { userId: 'u1', systemPermissions: ['studio.access'] };
 
-        it('routes to protocol.listDrafts with packageId + type and returns drafts', async () => {
+        it('routes to protocol.listDrafts with ?package= + type and returns drafts', async () => {
             const listDrafts = vi.fn().mockResolvedValue({
                 drafts: [{ type: 'object', name: 'course', packageId: 'app.edu', updatedAt: 't1', updatedBy: 'ai' }],
             });
@@ -2518,7 +2518,8 @@ describe('HttpDispatcher', () => {
             });
 
             const result = await dispatcher.handleMetadata('_drafts', { request: {}, executionContext: { ...AUTHOR } } as any, 'GET', undefined, {
-                packageId: 'app.edu',
+                // [#31490] the wire spelling is `?package=`; it reaches listDrafts as `packageId`.
+                package: 'app.edu',
                 type: 'object',
             });
 

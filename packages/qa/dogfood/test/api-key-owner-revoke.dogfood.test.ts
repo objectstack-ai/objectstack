@@ -64,64 +64,66 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { type VerifyStack } from '@objectstack/verify';
 import { bootShowcase } from './showcase-boot.js';
 
-describe('#8053: a member revokes their OWN sys_api_key', () => {
-  let stack: VerifyStack;
-  /** The seeded platform admin — used ONLY to mint the cross-owner key. */
-  let adminToken: string;
-  /** The persona under test: an ordinary member, no roles, no grants. */
-  let memberToken: string;
+// The one showcase boot every describe below shares: the seeded platform
+// administrator, one ordinary member, and the helpers that drive the real routes.
+let stack: VerifyStack;
+/** The seeded platform admin — in the #8053 describe used ONLY to mint the cross-owner key. */
+let adminToken: string;
+/** The persona under test: an ordinary member, no roles, no grants. */
+let memberToken: string;
 
-  const MEMBER_EMAIL = 'apikey.owner.8053@verify.test';
+const MEMBER_EMAIL = 'apikey.owner.8053@verify.test';
 
-  /** Mint a key through the ONE mint path, as whoever holds `token`. */
-  const mintKey = async (token: string, name: string): Promise<{ id: string; raw: string }> => {
-    const res = await stack.apiAs(token, 'POST', '/keys', { name });
-    expect(res.status, await res.clone().text()).toBe(201);
+/** Mint a key through the ONE mint path, as whoever holds `token`. */
+const mintKey = async (token: string, name: string): Promise<{ id: string; raw: string }> => {
+  const res = await stack.apiAs(token, 'POST', '/keys', { name });
+  expect(res.status, await res.clone().text()).toBe(201);
+  const body: any = await res.json();
+  expect(body?.data?.id).toBeTruthy();
+  expect(body?.data?.key).toBeTruthy();
+  return { id: String(body.data.id), raw: String(body.data.key) };
+};
+
+/**
+ * Does this key still authenticate? Asked through a real read with NO bearer
+ * token, so the key is the only credential present. `showcase_task` is the
+ * card's own probe and is readable by a member via `showcase_member_default`
+ * — deliberately NOT `sys_api_key`, so a permission change on the object
+ * under test can never be mistaken for a credential verdict.
+ */
+const keyStillAuthenticates = async (raw: string): Promise<boolean> => {
+  const res = await stack.api('/data/showcase_task?$top=1', { headers: { 'x-api-key': raw } });
+  if (res.status === 200) return true;
+  // [#23367, ruling A] A revoked key is refused with its own located code,
+  // `403 API_KEY_REVOKED` — the credential recognised and its state refusing
+  // it. Any OTHER 403 would mean the key WAS accepted and something later
+  // refused — a different fact entirely — so the code decides, not the
+  // status. An unrecognised key keeps the generic 401.
+  if (res.status === 403) {
     const body: any = await res.json();
-    expect(body?.data?.id).toBeTruthy();
-    expect(body?.data?.key).toBeTruthy();
-    return { id: String(body.data.id), raw: String(body.data.key) };
-  };
-
-  /**
-   * Does this key still authenticate? Asked through a real read with NO bearer
-   * token, so the key is the only credential present. `showcase_task` is the
-   * card's own probe and is readable by a member via `showcase_member_default`
-   * — deliberately NOT `sys_api_key`, so a permission change on the object
-   * under test can never be mistaken for a credential verdict.
-   */
-  const keyStillAuthenticates = async (raw: string): Promise<boolean> => {
-    const res = await stack.api('/data/showcase_task?$top=1', { headers: { 'x-api-key': raw } });
-    if (res.status === 200) return true;
-    // [#23367, ruling A] A revoked key is refused with its own located code,
-    // `403 API_KEY_REVOKED` — the credential recognised and its state refusing
-    // it. Any OTHER 403 would mean the key WAS accepted and something later
-    // refused — a different fact entirely — so the code decides, not the
-    // status. An unrecognised key keeps the generic 401.
-    if (res.status === 403) {
-      const body: any = await res.json();
-      expect(body?.error?.code, 'a 403 on the key probe must be the key\'s own revocation').toBe('API_KEY_REVOKED');
-      return false;
-    }
-    expect(res.status, `revoked-key probe should be 401 or 403 API_KEY_REVOKED, got ${res.status}`).toBe(401);
+    expect(body?.error?.code, 'a 403 on the key probe must be the key\'s own revocation').toBe('API_KEY_REVOKED');
     return false;
-  };
+  }
+  expect(res.status, `revoked-key probe should be 401 or 403 API_KEY_REVOKED, got ${res.status}`).toBe(401);
+  return false;
+};
 
-  /** Read a key row back with the caller's own credentials. */
-  const readKey = async (token: string, id: string) => {
-    const res = await stack.apiAs(token, 'GET', `/data/sys_api_key/${id}`);
-    const body: any = res.status === 200 ? await res.json() : {};
-    return { status: res.status, row: body.record ?? body.data ?? {} };
-  };
+/** Read a key row back with the caller's own credentials. */
+const readKey = async (token: string, id: string) => {
+  const res = await stack.apiAs(token, 'GET', `/data/sys_api_key/${id}`);
+  const body: any = res.status === 200 ? await res.json() : {};
+  return { status: res.status, row: body.record ?? body.data ?? {} };
+};
 
-  beforeAll(async () => {
-    stack = await bootShowcase({});
-    adminToken = await stack.signIn();
-    memberToken = await stack.signUp(MEMBER_EMAIL);
-  }, 180_000);
+beforeAll(async () => {
+  stack = await bootShowcase({});
+  adminToken = await stack.signIn();
+  memberToken = await stack.signUp(MEMBER_EMAIL);
+}, 180_000);
 
-  afterAll(async () => { await stack?.stop?.(); });
+afterAll(async () => { await stack?.stop?.(); });
 
+describe('#8053: a member revokes their OWN sys_api_key', () => {
   // ── the fixture's own preconditions ───────────────────────────────────────
 
   it('[persona] the principal is an ordinary member resolving the platform baseline', async () => {
@@ -308,5 +310,40 @@ describe('#8053: a member revokes their OWN sys_api_key', () => {
     const deleted = await stack.apiAs(memberToken, 'DELETE', `/data/sys_api_key/${id}`);
     expect(deleted.status).toBe(405);
     expect((await deleted.json()).code).toBe('OBJECT_API_METHOD_NOT_ALLOWED');
+  });
+});
+
+describe('[objectstack-ai/cloud#3820, card 2] a platform administrator suspends a member\'s key, and only an administrator resumes it', () => {
+  it('⭐ the administrator\'s revoke refuses the key on its next call; the member\'s restore is refused 403; the administrator\'s restore brings the same key back', async () => {
+    const { id, raw } = await mintKey(memberToken, 'agent-key');
+    expect(await keyStillAuthenticates(raw), 'precondition: the member\'s key works').toBe(true);
+
+    // The exact request the `revoke_api_key` row action declares, as the administrator.
+    const revoked = await stack.apiAs(adminToken, 'PATCH', `/data/sys_api_key/${id}`, { revoked: true });
+    expect(revoked.status, await revoked.clone().text()).toBe(200);
+    expect(await keyStillAuthenticates(raw), 'refused on its very next call').toBe(false);
+    expect((await readKey(adminToken, id)).row).toMatchObject({ revoked: true, revoked_reason: 'administrator_suspended' });
+
+    // The exact request `restore_api_key` declares, as the member: refused, and nothing moves.
+    const memberRestore = await stack.apiAs(memberToken, 'PATCH', `/data/sys_api_key/${id}`, { revoked: false });
+    const memberText = await memberRestore.text();
+    expect(memberRestore.status, memberText).toBe(403);
+    expect(JSON.parse(memberText).code ?? JSON.parse(memberText).error?.code).toBe('PERMISSION_DENIED');
+    expect(memberText).toContain('suspended by a platform administrator');
+    expect(await keyStillAuthenticates(raw)).toBe(false);
+
+    const adminRestore = await stack.apiAs(adminToken, 'PATCH', `/data/sys_api_key/${id}`, { revoked: false });
+    expect(adminRestore.status, await adminRestore.clone().text()).toBe(200);
+    expect((await readKey(adminToken, id)).row).toMatchObject({ revoked: false });
+    expect((await readKey(adminToken, id)).row.revoked_reason ?? null, 'the reason clears on the restore').toBeNull();
+    expect(await keyStillAuthenticates(raw), 'resumed: the same key works with no re-issue').toBe(true);
+  });
+
+  it('CONTROL: the member\'s own revoke records no reason, and the member restores it as before', async () => {
+    const { id, raw } = await mintKey(memberToken, 'own-key');
+    expect((await stack.apiAs(memberToken, 'PATCH', `/data/sys_api_key/${id}`, { revoked: true })).status).toBe(200);
+    expect((await readKey(memberToken, id)).row.revoked_reason ?? null).toBeNull();
+    expect((await stack.apiAs(memberToken, 'PATCH', `/data/sys_api_key/${id}`, { revoked: false })).status).toBe(200);
+    expect(await keyStillAuthenticates(raw)).toBe(true);
   });
 });

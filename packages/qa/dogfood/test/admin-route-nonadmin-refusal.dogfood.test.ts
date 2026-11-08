@@ -313,6 +313,19 @@ function expectationsFor(targetUserId: string): Record<string, RouteExpectation>
       body: { credentialId: 'refusal-probe-credential' },
       note: 'the gate runs ahead of any body read; the admin passes it and lands on 404 RESOURCE_NOT_FOUND for the unknown credential',
     },
+    // The identity-provider group mapping door beside it: the same gate first.
+    // The save names a connection with no credential and the delete a mapping
+    // that does not exist, so nothing moves for the admin either.
+    'POST /api/v1/auth/admin/scim/set-group-mapping': {
+      bucket: 'objectstack-gate',
+      body: { connectionId: 'refusal-probe-unminted', groupExternalId: 'refusal-probe-group', permissionSet: 'refusal_probe_set' },
+      note: 'the gate runs ahead of any body read; the admin passes it and lands on 400 VALIDATION_FAILED on connectionId, since the probe connection has no credential',
+    },
+    'POST /api/v1/auth/admin/scim/delete-group-mapping': {
+      bucket: 'objectstack-gate',
+      body: { mappingId: 'refusal-probe-mapping' },
+      note: 'the gate runs ahead of any body read; the admin passes it and lands on 404 RESOURCE_NOT_FOUND for the unknown mapping',
+    },
     // ── #9653: the /admin/sso/* bridges, gated ahead of their delegation ────
     //
     // The ADR-0068 gate runs BEFORE the bridge re-dispatches into better-auth,

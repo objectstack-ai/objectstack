@@ -61,7 +61,6 @@ import type {
     InstallPackageRequest,
     InstallPackageResponse,
     ImportUnmanagedPackageRequest,
-    ImportUnmanagedPackageResponse,
     EnsureCustomizationPackageRequest,
     EnsureCustomizationPackageResponse,
 } from '@objectstack/spec/api';
@@ -264,6 +263,7 @@ import {
     packagePersistService,
     updatePackage,
 } from './protocol-package-install.js';
+import type { ImportUnmanagedPackageAnswer } from './protocol-package-install.js';
 // [#25467 cut 8] The runtime authoring gate and the restored-body doors.
 import {
     assertRuntimeAuthoringRules,
@@ -3814,6 +3814,8 @@ export class ObjectStackProtocolImplementation implements
         const host: ThisParameterType<typeof findServedOverlayRow> = {
             get engine() { return readEngine(); },
             findEnvironmentRow: (...a) => this.findEnvironmentRow(...a),
+            findEnvironmentRows: (...a) => this.findEnvironmentRows(...a),
+            shippedArtifactsOf: (...a) => this.shippedArtifactsOf(...a),
         };
         return findServedOverlayRow.call(host, args, activeRows);
     }
@@ -11154,10 +11156,14 @@ export class ObjectStackProtocolImplementation implements
      * `actor` is stated by the door that calls this verb, never by a body; it
      * is outside the published request for that reason, and so is `seedData`
      * (#30808): the door asked for the sample data, copied as `seed` items.
+     * [#31530] Likewise outside the published answer: `baseInstance`, the new
+     * base's `sys_packages` row (`version`, `created_at`) as its own write
+     * answered it, so the install-local door ties its copy record to the row
+     * without reading it back. Absent when that write named no stamp.
      */
     async importUnmanagedPackage(
         request: ImportUnmanagedPackageRequest & { actor?: string; seedData?: boolean },
-    ): Promise<ImportUnmanagedPackageResponse> {
+    ): Promise<ImportUnmanagedPackageAnswer> {
         // [#29985 codemod] The body moved to `protocol-package-commits.ts`; it reaches this class through `protocol-host.ts`.
         return ProtocolPackageCommitsFacet.importUnmanagedPackage(protocolHost(this), request);
     }

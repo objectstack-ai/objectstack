@@ -531,6 +531,35 @@ function declareFederationSweep(): void {
         expect(sortedIds(await driver.find(T, { where: { ref: REF.toUpperCase() } }, BYPASS))).toEqual([ID]);
         expect(sortedIds(await driver.find(T, { where: { ref: { $in: [REF] } } }, BYPASS))).toEqual([ID]);
       });
+      // [#31395] The text operators match the GUID as the lower-case text a
+      // read answers — case-exact ones against that form, folding ones either
+      // way — on `find` and `count` alike. SQL Server's own rendering is
+      // upper-case, which a lower-case fragment copied from a read missed.
+      const TEXT_MATCH: Array<[where: Record<string, unknown>, expected: string[]]> = [
+        [{ ref: { $contains: '9c0b-4ef8' } }, [ID]],
+        [{ ref: { $contains: '9C0B-4EF8' } }, []],
+        [{ ref: { $startsWith: 'a0eebc99' } }, [ID]],
+        [{ ref: { $startsWith: 'A0EEBC99' } }, []],
+        [{ ref: { $endsWith: '6bb9bd380a11' } }, [ID]],
+        [{ ref: { $endsWith: '6BB9BD380A11' } }, []],
+        [{ ref: { $notContains: '9c0b' } }, []],
+        [{ ref: { $notContains: '9C0B' } }, [ID]],
+        [{ ref: { $icontains: '9c0b' } }, [ID]],
+        [{ ref: { $icontains: '9C0B' } }, [ID]],
+        [{ ref: { $like: 'a0eebc99-%' } }, [ID]],
+        [{ ref: { $like: 'A0EEBC99-%' } }, []],
+        [{ ref: { $ilike: 'A0EEBC99-%' } }, [ID]],
+        [{ id: { $startsWith: '3f2504e0' } }, [ID]],
+        [{ id: { $startsWith: '3F2504E0' } }, []],
+        [{ name: { $startsWith: 'g' } }, [ID]],
+        [{ name: { $startsWith: 'G' } }, []],
+      ];
+      for (const [where, expected] of TEXT_MATCH) {
+        it(`[#31395] ${JSON.stringify(where)} answers ${JSON.stringify(expected)} on find and count`, async () => {
+          expect(sortedIds(await driver.find(T, { where: where as FilterCondition }, BYPASS))).toEqual(expected);
+          expect(await driver.count(T, { where: where as FilterCondition }, BYPASS)).toBe(expected.length);
+        });
+      }
       it('update by a GUID id lands', async () => {
         await driver.update(T, ID, { name: 'h' }, BYPASS);
         expect((await driver.findOne(T, { where: { id: ID } }, BYPASS))?.name).toBe('h');

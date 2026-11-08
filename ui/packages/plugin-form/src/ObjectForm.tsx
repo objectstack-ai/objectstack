@@ -16,7 +16,7 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import type { ObjectFormSchema, FormField, FormSchema, DataSource } from '@object-ui/types';
 import { SchemaRenderer, useSafeFieldLabel } from '@object-ui/react';
-import { pickLocalized, useObjectTranslation, useLocalization } from '@object-ui/i18n';
+import { pickLocalized, useObjectTranslation, useLocalization, withHomeAmountSource } from '@object-ui/i18n';
 import { useRecordInvalidation } from './recordInvalidation';
 import { mapFieldTypeToFormType, buildValidationRules, formatFileSize, fieldHelpText } from '@object-ui/fields';
 import { useIsMobile, toast } from '@object-ui/components';
@@ -1002,7 +1002,9 @@ const SimpleObjectForm: React.FC<{ schema: LocalizedObjectFormSchema; dataSource
           // object's declared field groups when no explicit sections are given.
           group: field.group,
           // Important: Pass the original field metadata so widgets can access properties like precision, currency, etc.
-          field: field,
+          // A home field (ADR-0144 D5) also carries the amount, rate and document
+          // date that produced it, so an authored section draws it with its hint.
+          field: withHomeAmountSource(field, objectSchema.fields, name),
           // A per-field widget override. `form.tsx` resolves `widget || type`, so this makes the
           // auto-generated (no-form-view) form honor the override just like the
           // authored-section path already does (sectionFields.ts).

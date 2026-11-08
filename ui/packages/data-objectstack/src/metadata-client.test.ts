@@ -174,7 +174,7 @@ describe('MetadataClient', () => {
       }),
     });
     const out = await c.listDrafts({ packageId: 'app.edu', type: 'object' });
-    expect(seen[0]).toBe('http://localhost:3000/api/v1/meta/_drafts?packageId=app.edu&type=object');
+    expect(seen[0]).toBe('http://localhost:3000/api/v1/meta/_drafts?package=app.edu&type=object');
     expect(out).toEqual([
       { type: 'object', name: 'course', packageId: 'app.edu', updatedAt: 't', updatedBy: 'ai' },
     ]);

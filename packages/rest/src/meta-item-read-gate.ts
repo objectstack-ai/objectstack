@@ -2603,8 +2603,10 @@ export type MetaQueryArityDoor = 'list' | 'book-tree' | 'drafts' | 'state';
  *    filter, ONE comma-separated value ({@link metaListNames}): a repeat would
  *    be two lists of names, of which reading either one drops the other.
  *  - `book-tree`: `?package=` scopes the book and doc reads.
- *  - `drafts`: `?packageId=` and `?type=` each narrow the draft list to one
- *    package and one type; a repeat reached `listDrafts` as an array.
+ *  - `drafts`: `?package=` and `?type=` each narrow the draft list to one
+ *    package and one type; a repeat reached `listDrafts` as an array. [#31490]
+ *    `?package=` is the list's spelling, read through the same binding; the
+ *    door read `?packageId=` before, which is retired.
  *  - `state`: `?from=` is ONE current state; a repeat became the joined name
  *    `'a,b'`, which matches no transition key, so the answer was a dead end.
  *
@@ -2613,7 +2615,7 @@ export type MetaQueryArityDoor = 'list' | 'book-tree' | 'drafts' | 'state';
 export const META_QUERY_ARITY_DOORS: Readonly<Record<MetaQueryArityDoor, readonly string[]>> = Object.freeze({
     list: Object.freeze(['package', 'preview', 'object', 'include', 'id', 'names']),
     'book-tree': Object.freeze(['package']),
-    drafts: Object.freeze(['packageId', 'type']),
+    drafts: Object.freeze(['package', 'type']),
     state: Object.freeze(['from']),
 });
 
@@ -2719,6 +2721,47 @@ export function metaListUnknownParamRefusal(metaType: string, query: unknown): M
 }
 
 /**
+ * [#31490] The closed query-parameter set of `GET /meta/_drafts` (AGENTS.md
+ * 〈Route & surface ownership〉 rule 5), measured from both transports' read
+ * points: `package` (the scope, read through `metaItemPackageBinding`, the
+ * list's own spelling and binding) and `type` (the one metadata type). The door
+ * read `?packageId=` and declared no set, so `?package=ID`, the spelling every
+ * sibling `/meta` read takes, was dropped and the drafts of every package
+ * answered `200`, as was any misspelt name. `packageId` is retired, not
+ * aliased: it is refused here like any other name the door does not read.
+ */
+export const META_DRAFTS_QUERY_PARAMS: readonly string[] = Object.freeze(['package', 'type']);
+
+/**
+ * [#31490] Rule 1 of {@link metaDraftsQueryRefusal} alone — RECOGNITION, for
+ * `RestServer`'s door, which asks the arity through `refuseRepeatedQueryParams`
+ * right after it, as the list door does. A bracketed spelling of one of the
+ * door's two filters (`package[`…, `type[`…) is left to
+ * {@link metaBracketedFilterRefusal}'s located sentence.
+ */
+export function metaDraftsUnknownParamRefusal(query: unknown): MetaItemQueryRefusal | undefined {
+    if (!query || typeof query !== 'object') return undefined;
+    const judged: Record<string, true> = {};
+    for (const key of Object.keys(query)) {
+        if (!key.startsWith('package[') && !key.startsWith('type[')) judged[key] = true;
+    }
+    const message = unknownQueryParamRefusalMessage(judged, META_DRAFTS_QUERY_PARAMS);
+    return message === undefined
+        ? undefined
+        : { status: 400, code: 'VALIDATION_ERROR', message, rule: 'unknown-parameter' };
+}
+
+/**
+ * [#31490] THE query decision of `GET /meta/_drafts`' entry, for the runtime
+ * dispatcher's twin: recognition ({@link metaDraftsUnknownParamRefusal}), then
+ * the door's arity ({@link metaQueryArityRefusal}), which unwraps a
+ * one-element array IN PLACE. Ask it before any read of the query.
+ */
+export function metaDraftsQueryRefusal(query: unknown): MetaItemQueryRefusal | undefined {
+    return metaDraftsUnknownParamRefusal(query) ?? metaQueryArityRefusal('drafts', query);
+}
+
+/**
  * [#29236, contract review 6672872746] `?names=` on the `package` list. A
  * `package` list item is keyed by its id (`manifest.id`) and carries no
  * `name`, so a names filter there could never match and would answer `200 []`
@@ -2798,7 +2841,7 @@ const META_BRACKETED_FILTERS: Readonly<Partial<Record<MetaQueryArityDoor, readon
         { param: 'package', names: 'package', takes: `${PACKAGE_ID_TAKES} ?package=ID`, served: 'tree', unscoped: 'read the tree across every package' },
     ] as const),
     drafts: Object.freeze([
-        { param: 'packageId', names: 'package', takes: `${PACKAGE_ID_TAKES} ?packageId=ID`, served: 'list', unscoped: 'list the drafts of every package' },
+        { param: 'package', names: 'package', takes: `${PACKAGE_ID_TAKES} ?package=ID`, served: 'list', unscoped: 'list the drafts of every package' },
         { param: 'type', names: 'metadata type', takes: 'one metadata type, spelled ?type=TYPE', served: 'list', unscoped: 'list the drafts of every type' },
     ] as const),
 });
@@ -2806,8 +2849,8 @@ const META_BRACKETED_FILTERS: Readonly<Partial<Record<MetaQueryArityDoor, readon
 /**
  * The answer of an arity door to a BRACKETED spelling of one of its narrowing
  * filters ({@link META_BRACKETED_FILTERS}): `?package[]=ID` or `?package[0]=ID`
- * on the list and the book tree, `?packageId[]=ID` or `?type[]=TYPE` on
- * `_drafts` — any key that opens `param[`. A client that serialises arrays
+ * on the list, the book tree and `_drafts`, or `?type[]=TYPE` on `_drafts` —
+ * any key that opens `param[`. A client that serialises arrays
  * qs-style sends it; every adapter hands the key through as spelled
  * (`readQuery` in `plugin-hono-server`, `readDispatchQuery` in
  * `@objectstack/hono`), so the door, which reads `query[param]`, read no

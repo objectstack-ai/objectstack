@@ -163,6 +163,8 @@ describe('a missing database client refuses the boot with ITS install (#24909)',
     ['better-sqlite3', 'sqlite', () => ({ filename: join(scratch, 'app.db') })],
     // #31328 — federation only, so the datasource declares `schemaMode: 'external'`.
     ['oracledb', 'oracle', () => ({ host: '127.0.0.1', port: 1, serviceName: 'FREEPDB1', username: 'app', schemaMode: 'external' })],
+    // SQL Server, federation only too; knex's `mssql` client requires `tedious`.
+    ['tedious', 'mssql', () => ({ host: '127.0.0.1', port: 1, database: 'app', username: 'app', schemaMode: 'external' })],
   ];
 
   it.each(arms)('%s absent: the %s default is refused, ending on the install of that client', async (client, driver, config) => {

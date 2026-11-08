@@ -988,7 +988,7 @@ export interface ChatbotEnhancedProps extends React.HTMLAttributes<HTMLDivElemen
   surfaceContextTitle?: string;
   /**
    * Live draft-status resolver: how many drafts are still PENDING in a
-   * package (e.g. `GET /metadata/_drafts?packageId=` count). When provided,
+   * package (e.g. `GET /metadata/_drafts?package=` count). When provided,
    * each draft card's Publish/Published affordance reflects the SERVER's
    * current state instead of this component's in-memory publish history —
    * so a reloaded conversation shows "Published" for work that went live,
