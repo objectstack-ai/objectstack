@@ -53,6 +53,24 @@ export {
     type ClusterDriverConnection,
 } from './driver-connection.js';
 
+// A remote driver's connection health and the local `cluster.resync` event it
+// emits when its connection returns after an outage: caches holding
+// cross-node state subscribe with `onClusterResync()` and re-read on it.
+export {
+    CLUSTER_RESYNC_EVENT,
+    ClusterDriverLiveness,
+    offerClusterDriverLiveness,
+    onClusterResync,
+    readClusterDriverHealth,
+    describeConnectionError,
+    redactCredentials,
+    type ClusterResyncEvent,
+    type ClusterResyncHandler,
+    type ClusterDriverHealth,
+    type ClusterDriverLivenessLogger,
+    type ClusterDriverLivenessOptions,
+} from './cluster-resync.js';
+
 export { MetadataClusterBridgePlugin } from './metadata-cluster-bridge-plugin.js';
 
 // [#11968] The `authz.invalidated` bridge + the non-optional boot-time posture

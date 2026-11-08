@@ -2616,6 +2616,12 @@ export interface ConnectorCredentialDoor {
      * {@link AutomationEngine.attachConnectorCredentialPubSub}.
      */
     attachClusterPubSub(pubsub: IPubSub, nodeId: string): () => void;
+    /**
+     * The `cluster.resync` answer: reconcile from the shared rows after a
+     * cluster outage lost peer writes — see
+     * {@link AutomationEngine.resyncConnectorCredentialPubSub}.
+     */
+    resyncFromCluster(): Promise<void>;
 }
 
 /**
@@ -5023,6 +5029,19 @@ export class AutomationEngine implements IAutomationService {
      */
     attachConnectorCredentialPubSub(pubsub: IPubSub, nodeId: string): () => void {
         return this.requireConnectorCredentialDoor('attachConnectorCredentialPubSub()').attachClusterPubSub(pubsub, nodeId);
+    }
+
+    /**
+     * The `cluster.resync` answer for lane 4: the cluster driver's connection
+     * came back after an outage, during which any `connector-credential.mutated`
+     * a peer published was lost (the bus is at-most-once). Called by
+     * `MetadataClusterBridgePlugin` on the driver's local `cluster.resync`
+     * event. Runs the reconcile a received signal runs — it re-reads the shared
+     * credential rows, so every instance naming a reference that changed during
+     * the outage re-materializes. A no-op until a transport is attached.
+     */
+    async resyncConnectorCredentialPubSub(): Promise<void> {
+        await this.requireConnectorCredentialDoor('resyncConnectorCredentialPubSub()').resyncFromCluster();
     }
 
     /** [#27237] `IAutomationService.listConnectorCredentialRefs` — references and states, never a value. */

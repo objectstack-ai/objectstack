@@ -663,6 +663,39 @@ export class DatasourceAdminService implements IDatasourceAdminService {
     return () => this.detachDatasourceMutationPubSub();
   }
 
+  /**
+   * The `cluster.resync` answer for this lane: the cluster driver's connection
+   * came back after an outage, during which any `datasource.mutated` a peer
+   * published was lost (the bus is at-most-once). Called by
+   * `MetadataClusterBridgePlugin` in `@objectstack/service-cluster` on the
+   * driver's local `cluster.resync` event; a no-op until a transport is
+   * attached, or when the host wired no `convergePool`.
+   *
+   * Converges every name a lost signal could have carried — each stored
+   * record (created or edited during the outage) and each pool this replica
+   * holds (deleted during it) — through the same per-name convergence a
+   * received signal runs, so it re-reads the shared record and builds,
+   * rebuilds or evicts exactly as a delivered hint would have. Resolves once
+   * every convergence settled; one name failing is logged and does not stop
+   * the others.
+   */
+  async resyncDatasourceMutationPubSub(): Promise<void> {
+    const converge = this.config.convergePool;
+    if (!this.clusterPubSub || !converge) return;
+    const names = new Set<string>();
+    for (const record of await this.config.listDatasourceRecords()) {
+      if (typeof record?.name === 'string' && record.name.length > 0) names.add(record.name);
+    }
+    for (const state of this.config.connectionStates?.() ?? []) {
+      if (typeof state?.name === 'string' && state.name.length > 0) names.add(state.name);
+    }
+    for (const name of names) this.enqueueConvergence(name, converge);
+    await Promise.all([...names].map((name) => this.convergeChains.get(name)));
+    this.logger?.info?.(
+      `datasource admin: re-converged ${names.size} datasource(s) after a cluster outage (node=${this.clusterNodeId})`,
+    );
+  }
+
   /** Tear down the cluster wiring. Safe to call multiple times. [#13805] */
   detachDatasourceMutationPubSub(): void {
     if (this.clusterUnsubscribe) {
