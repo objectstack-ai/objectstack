@@ -15,7 +15,8 @@
  *    when it is not a member, and admitted when it is.
  *  - A token for a non-member sent beside a member's cookie is judged as the
  *    token's principal, the one the request resolved.
- *  - A principal an API key admitted is judged as the key's owner.
+ *  - A principal an API key admitted is judged as the key's owner, on `/mcp`
+ *    and on a scoped data route alike.
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -131,6 +132,16 @@ describe('the environment-membership gate judges the resolved principal', () => 
     it('a principal an API key admitted, not a member: refused, naming the key\'s owner', async () => {
         const { dispatcher, membershipReads } = tenantHost({ keyOwner: OUTSIDER });
         const result = await dispatcher.dispatch('POST', '/mcp', MCP_CALL, {}, mcp({ 'x-api-key': API_KEY }));
+        expect(membershipRefusal(result), JSON.stringify(result.response?.body)).toEqual({ userId: OUTSIDER });
+        expect(membershipReads()).toEqual([OUTSIDER]);
+    });
+
+    it('a principal an API key admitted on a scoped non-MCP route, not a member: refused, naming the key\'s owner', async () => {
+        const { dispatcher, membershipReads } = tenantHost({ keyOwner: OUTSIDER });
+        const context: HttpProtocolContext = {
+            request: new Request('http://tenant.example/api/v1/data/task', { headers: { 'x-api-key': API_KEY } }),
+        };
+        const result = await dispatcher.dispatch('GET', '/data/task', undefined, {}, context);
         expect(membershipRefusal(result), JSON.stringify(result.response?.body)).toEqual({ userId: OUTSIDER });
         expect(membershipReads()).toEqual([OUTSIDER]);
     });

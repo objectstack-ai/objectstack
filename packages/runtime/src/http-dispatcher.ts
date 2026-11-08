@@ -38,6 +38,7 @@ import { DomainHandlerRegistry, type DomainRoute, type DomainHandlerDeps } from 
 // only — `actionExecutionDeps` hands the endpoint step the same `deps` object
 // every domain already passes to `callData`, without this file calling it.
 import type { ActionExecutionDeps } from './action-execution.js';
+import { admittingCredentialKind } from './security/admitting-credential.js';
 import { createAnalyticsDomain, handleAnalyticsRequest } from './domains/analytics.js';
 import { isServiceServeable } from './service-serveable.js';
 import { createI18nDomain, handleI18nRequest } from './domains/i18n.js';
@@ -1706,13 +1707,12 @@ export class HttpDispatcher {
         // (`resolveRequestScope`), whichever credential admitted it. A
         // principal an API key or an OAuth access token admitted (with or
         // without a cookie beside it) is the one judged, in the organization
-        // its resolution vetted. A session principal is judged by the session
-        // read above, as before.
+        // its resolution vetted; which credential that was is the one reading
+        // the api-action forward takes too (`admittingCredentialKind`). A
+        // session principal is judged by the session read above, as before.
         const resolved = context.executionContext;
-        const bearerAdmitted = context.admission?.credential === 'api_key'
-            || resolved?.principalKind === 'agent'
-            || resolved?.oauthScopes !== undefined;
-        if (bearerAdmitted && resolved?.userId) {
+        const admittedBy = admittingCredentialKind(context);
+        if ((admittedBy === 'api_key' || admittedBy === 'oauth') && resolved?.userId) {
             userId = resolved.userId;
             activeOrganizationId = resolved.tenantId;
         } else if (sessionUnread) {
