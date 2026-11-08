@@ -304,3 +304,315 @@ describe('#31328 introspection type strings', () => {
     expect(oracleColumnTypeString(row as any)).toBe(expected);
   });
 });
+
+// ── #31390 RAW(16) uuid columns bind through HEXTORAW ────────────────────────
+
+const UUID = '0f8fad5b-d9cb-469f-a165-70867728950e';
+const UUID_HEX = '0F8FAD5BD9CB469FA16570867728950E';
+const UUID_2 = '7c9e6679-7425-40de-944b-e07fc1f90ae7';
+const UUID_2_HEX = '7C9E6679742540DE944BE07FC1F90AE7';
+
+/**
+ * An Oracle driver whose catalog read is answered from `catalog` (remote
+ * table → its RAW(16) columns; a missing entry throws, as a failed read), and
+ * whose statements are captured instead of sent: `_query` records the SQL
+ * and bindings and answers `respond(obj)` as the rows.
+ */
+class OracleUuidProbe extends SqlDriver {
+  catalogReads: string[] = [];
+  sent: Array<{ sql: string; bindings: unknown[] }> = [];
+  respond: (obj: { sql: string; method?: string }) => unknown[] = () => [];
+  constructor(private readonly catalog: Record<string, string[]>) {
+    super(ORACLE_CONFIG as any);
+    (this as any).name = 'ora';
+    this.registerExternalObject({
+      name: 'acct',
+      external: { remoteName: 'ACCT', columnMap: { ACCT_ID: 'id', NAME: 'name' } },
+      fields: { name: { type: 'text' } },
+    } as any);
+    this.registerExternalObject({
+      name: 'ord',
+      external: {
+        remoteName: 'ORD',
+        columnMap: { ORD_ID: 'id', ACCT_REF: 'account', LEGACY_REF: 'legacy_account', NOTE: 'note' },
+      },
+      fields: {
+        account: { type: 'lookup', reference: 'acct' },
+        // The control: a lookup over a VARCHAR2 uuid column (the catalog does not list it).
+        legacy_account: { type: 'lookup', reference: 'acct' },
+        note: { type: 'text' },
+      },
+    } as any);
+    const client = (this as any).knex.client;
+    client.acquireConnection = async () => ({});
+    client.releaseConnection = async () => undefined;
+    client._query = async (_conn: unknown, obj: any) => {
+      this.sent.push({ sql: obj.sql, bindings: obj.bindings });
+      obj.response = this.respond(obj);
+      obj.rowsAffected = 1;
+      return obj;
+    };
+  }
+  protected override readOracleRawUuidColumns(remoteTable: string): Promise<string[]> {
+    this.catalogReads.push(remoteTable);
+    const columns = this.catalog[remoteTable];
+    return columns ? Promise.resolve(columns) : Promise.reject(new Error('ORA-00942 (stubbed)'));
+  }
+  prime(object: string): Promise<void> {
+    return (this as any).primeOracleRawUuidColumns(object);
+  }
+  compileWhere(object: string, where: FilterCondition): Knex.Sql {
+    const b = (this as any).getBuilder(object);
+    this.applyFilters(b, where);
+    return b.toSQL();
+  }
+  compileInsert(object: string, row: Record<string, unknown>): Knex.Sql {
+    const formatted = (this as any).applyWriteColumnMap(object, (this as any).formatInput(object, row));
+    return (this as any).getBuilder(object).insert(formatted).toSQL();
+  }
+}
+
+const CATALOG = { ACCT: ['ACCT_ID'], ORD: ['ORD_ID', 'ACCT_REF'] };
+const primed = async () => {
+  const p = new OracleUuidProbe(CATALOG);
+  await p.prime('acct');
+  await p.prime('ord');
+  return p;
+};
+const caught = (fn: () => unknown): Error & { code?: string; status?: number } => {
+  try {
+    fn();
+  } catch (e) {
+    return e as Error & { code?: string; status?: number };
+  }
+  throw new Error('expected a refusal');
+};
+
+describe('#31390 a RAW(16) uuid comparand binds as HEXTORAW(?) over its hex digits', () => {
+  it('equality on a lookup over a RAW(16) column', async () => {
+    const { sql, bindings } = (await primed()).compileWhere('ord', { account: UUID });
+    expect(sql).toBe('select * from "ORD" where "ACCT_REF" = HEXTORAW(?)');
+    expect(bindings).toEqual([UUID_HEX]);
+  });
+
+  it('$eq on the SYS_GUID key itself (the mapped id)', async () => {
+    const { sql, bindings } = (await primed()).compileWhere('acct', { id: { $eq: UUID } });
+    expect(sql).toBe('select * from "ACCT" where "ACCT_ID" = HEXTORAW(?)');
+    expect(bindings).toEqual([UUID_HEX]);
+  });
+
+  it('$in binds every member, upper- or lower-case input alike', async () => {
+    const { sql, bindings } = (await primed()).compileWhere('ord', { account: { $in: [UUID, UUID_2.toUpperCase()] } });
+    expect(sql).toBe('select * from "ORD" where "ACCT_REF" in (HEXTORAW(?), HEXTORAW(?))');
+    expect(bindings).toEqual([UUID_HEX, UUID_2_HEX]);
+  });
+
+  it('$ne keeps its null-safe shape around the bound comparand', async () => {
+    const { sql, bindings } = (await primed()).compileWhere('ord', { account: { $ne: UUID } });
+    expect(sql).toBe('select * from "ORD" where ("ACCT_REF" is null or "ACCT_REF" <> HEXTORAW(?))');
+    expect(bindings).toEqual([UUID_HEX]);
+  });
+
+  it('a null comparand stays IS NULL', async () => {
+    const { sql, bindings } = (await primed()).compileWhere('ord', { account: null });
+    expect(sql).toBe('select * from "ORD" where "ACCT_REF" is null');
+    expect(bindings).toEqual([]);
+  });
+
+  it('control: a lookup over a VARCHAR2 uuid column binds the text, as before', async () => {
+    const { sql, bindings } = (await primed()).compileWhere('ord', { legacy_account: UUID });
+    expect(sql).toBe('select * from "ORD" where "LEGACY_REF" = ?');
+    expect(bindings).toEqual([UUID]);
+  });
+
+  it('control: a uuid-shaped value in a text column binds the text — the value is never the evidence', async () => {
+    const { sql, bindings } = (await primed()).compileWhere('ord', { note: UUID });
+    expect(sql).toBe('select * from "ORD" where "NOTE" = ?');
+    expect(bindings).toEqual([UUID]);
+  });
+});
+
+describe('#31390 a comparand that is not uuid text is INVALID_FILTER, never sent', () => {
+  for (const [label, where] of [
+    ['equality', { account: 'not-a-uuid' }],
+    ['$eq with valid hex of another length', { account: { $eq: '0f8fad5b' } }],
+    ['$in holding one bad member', { account: { $in: [UUID, 'nope'] } }],
+    ['$ne with a number', { account: { $ne: 42 } }],
+    ['the key, undashed', { id: UUID_HEX }],
+  ] as const) {
+    it(`${label}: INVALID_FILTER / 400`, async () => {
+      const p = await primed();
+      const err = caught(() => p.compileWhere(label === 'the key, undashed' ? 'acct' : 'ord', where as FilterCondition));
+      expect(err.code).toBe('INVALID_FILTER');
+      expect(err.status).toBe(400);
+    });
+  }
+
+  it('through the find door: refused, and no statement reaches the database', async () => {
+    const p = await primed();
+    await expect(p.find('ord', { where: { account: 'not-a-uuid' } } as any)).rejects.toMatchObject({
+      code: 'INVALID_FILTER',
+      status: 400,
+    });
+    expect(p.sent).toEqual([]);
+  });
+});
+
+describe('#31390 a written RAW(16) uuid value binds as HEXTORAW(?)', () => {
+  it('insert: the key and the lookup bind through HEXTORAW, the text column as text', async () => {
+    const { sql, bindings } = (await primed()).compileInsert('ord', { id: UUID, account: UUID_2, legacy_account: UUID, note: 'x' });
+    expect(sql).toBe('insert into "ORD" ("ACCT_REF", "LEGACY_REF", "NOTE", "ORD_ID") values (HEXTORAW(?), ?, ?, HEXTORAW(?))');
+    expect(bindings).toEqual([UUID_2_HEX, UUID, 'x', UUID_HEX]);
+  });
+
+  it('a null write stays a null bind', async () => {
+    const { sql, bindings } = (await primed()).compileInsert('ord', { id: UUID, account: null });
+    expect(sql).toBe('insert into "ORD" ("ACCT_REF", "ORD_ID") values (?, HEXTORAW(?))');
+    expect(bindings).toEqual([null, UUID_HEX]);
+  });
+
+  it('a value that is not uuid text is VALIDATION_ERROR / 400 through create, and nothing is sent', async () => {
+    const p = await primed();
+    await expect(p.create('ord', { id: UUID, account: 'acct-17' })).rejects.toMatchObject({
+      code: 'VALIDATION_ERROR',
+      status: 400,
+    });
+    expect(p.sent).toEqual([]);
+  });
+
+  it('update by key: the SET value and the key bind through HEXTORAW, and the read-back is by the same key', async () => {
+    const p = await primed();
+    await p.update('ord', UUID, { account: UUID_2 });
+    expect(p.sent.map((s) => s.sql)).toEqual([
+      'update "ORD" set "ACCT_REF" = HEXTORAW(:1) where "ORD_ID" = HEXTORAW(:2)',
+      'select * from "ORD" where "ORD_ID" = HEXTORAW(:1) fetch next :2 rows only',
+    ]);
+    expect(p.sent[0]!.bindings).toEqual([UUID_2_HEX, UUID_HEX]);
+    expect(p.sent[1]!.bindings).toEqual([UUID_HEX, 1]);
+  });
+
+  it('delete and bulkDelete by key bind through HEXTORAW', async () => {
+    const p = await primed();
+    await p.delete('ord', UUID);
+    await p.bulkDelete('ord', [UUID, UUID_2]);
+    expect(p.sent.map((s) => [s.sql, s.bindings])).toEqual([
+      ['delete from "ORD" where "ORD_ID" = HEXTORAW(:1)', [UUID_HEX]],
+      ['delete from "ORD" where "ORD_ID" in (HEXTORAW(:1), HEXTORAW(:2))', [UUID_HEX, UUID_2_HEX]],
+    ]);
+  });
+
+  it('create reads its row back by the HEXTORAW key, matching an upper-case written id to the lower-case read', async () => {
+    const p = await primed();
+    p.respond = (obj) => (obj.sql.startsWith('select') ? [{ ORD_ID: UUID, ACCT_REF: UUID_2, NOTE: 'x' }] : []);
+    const row = await p.create('ord', { id: UUID.toUpperCase(), account: UUID_2, note: 'x' });
+    expect(p.sent.map((s) => s.sql)).toEqual([
+      'insert into "ORD" ("ACCT_REF", "NOTE", "ORD_ID") values (HEXTORAW(:1), :2, HEXTORAW(:3))',
+      'select * from "ORD" where "ORD_ID" in (HEXTORAW(:1))',
+    ]);
+    expect(row).toMatchObject({ id: UUID, account: UUID_2, note: 'x' });
+  });
+});
+
+describe('#31390 which columns: read from the catalog, once per object', () => {
+  it('the doors read the catalog once per object, not once per statement', async () => {
+    const p = new OracleUuidProbe(CATALOG);
+    await p.find('ord', { where: { account: UUID } } as any);
+    await p.count('ord', { where: { account: UUID } } as any);
+    await p.find('acct', { where: { id: UUID } } as any);
+    await p.find('ord', { where: { account: UUID_2 } } as any);
+    expect(p.catalogReads).toEqual(['ORD', 'ACCT']);
+    expect(p.sent.every((s) => s.sql.includes('HEXTORAW('))).toBe(true);
+  });
+
+  it('a failed catalog read records nothing: the statement binds text as before, and the next door asks again', async () => {
+    const p = new OracleUuidProbe({});
+    await p.find('ord', { where: { account: UUID } } as any);
+    expect(p.sent[0]).toMatchObject({ sql: 'select * from "ORD" where "ACCT_REF" = :1', bindings: [UUID] });
+    await p.find('ord', { where: { account: UUID } } as any);
+    expect(p.catalogReads).toEqual(['ORD', 'ORD']);
+  });
+
+  it('an empty catalog answer (no RAW(16) column) binds text, and is not asked again', async () => {
+    const p = new OracleUuidProbe({ ORD: [] });
+    await p.find('ord', { where: { account: UUID } } as any);
+    await p.find('ord', { where: { account: 'not-a-uuid' } } as any);
+    expect(p.sent.map((s) => s.bindings)).toEqual([[UUID], ['not-a-uuid']]);
+    expect(p.catalogReads).toEqual(['ORD']);
+  });
+
+  it('re-registering an object forgets its catalog reading', async () => {
+    const p = await primed();
+    p.registerExternalObject({
+      name: 'ord',
+      external: { remoteName: 'ORD', columnMap: { ORD_ID: 'id', ACCT_REF: 'account' } },
+      fields: { account: { type: 'lookup', reference: 'acct' } },
+    } as any);
+    expect(p.compileWhere('ord', { account: UUID }).sql).toBe('select * from "ORD" where "ACCT_REF" = ?');
+  });
+});
+
+describe('#31390 every other dialect binds exactly as before', () => {
+  const ORD = {
+    name: 'ord',
+    external: { remoteName: 'ORD', columnMap: { ORD_ID: 'id', ACCT_REF: 'account', NOTE: 'note' } },
+    fields: { account: { type: 'lookup', reference: 'acct' }, note: { type: 'text' } },
+  };
+  /** A non-Oracle driver whose uuid-column registry is POISONED: only the dialect guard keeps it out. */
+  const poisoned = (config: Record<string, unknown>) => {
+    const d = new SqlDriver({ ...config, schemaMode: 'external' } as any) as any;
+    d.name = 'other';
+    d.registerExternalObject(ORD);
+    d.oracleRawUuidFieldsByObject.set('ord', new Set(['id', 'account']));
+    d.readOracleRawUuidColumns = () => {
+      throw new Error('the catalog read is Oracle-only');
+    };
+    return d;
+  };
+
+  for (const [client, where, insert] of [
+    ['pg', 'select * from "ORD" where "ACCT_REF" = ?', 'insert into "ORD" ("ACCT_REF", "NOTE", "ORD_ID") values (?, ?, ?)'],
+    ['mysql2', 'select * from `ORD` where `ACCT_REF` = ?', 'insert into `ORD` (`ACCT_REF`, `NOTE`, `ORD_ID`) values (?, ?, ?)'],
+    ['mssql', 'select * from [ORD] where [ACCT_REF] = ?', 'insert into [ORD] ([ACCT_REF], [NOTE], [ORD_ID]) values (?, ?, ?)'],
+  ] as const) {
+    it(`${client}: comparands (coerceFilterValue) and written values (formatInput) are the text`, () => {
+      const d = poisoned({ client, connection: { host: '127.0.0.1', port: 1 } });
+      const sel = d.getBuilder('ord');
+      d.applyFilters(sel, { account: UUID });
+      expect(sel.toSQL().sql).toBe(where);
+      expect(sel.toSQL().bindings).toEqual([UUID]);
+      const sel2 = d.getBuilder('ord');
+      d.applyFilters(sel2, { account: 'not-a-uuid' });
+      expect(sel2.toSQL().bindings).toEqual(['not-a-uuid']);
+      const ins = d.getBuilder('ord').insert(d.applyWriteColumnMap('ord', d.formatInput('ord', { id: UUID, account: UUID_2, note: 'x' }))).toSQL();
+      expect(ins.sql).toBe(insert);
+      expect(ins.bindings).toEqual([UUID_2, 'x', UUID]);
+    });
+  }
+
+  it('sqlite: the doors (find, create, update, delete, bulkDelete) and the read-back send the same statements', async () => {
+    const d = poisoned({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true });
+    await d.connect();
+    try {
+      await d.knex.raw('create table ORD (ORD_ID text primary key, ACCT_REF text, NOTE text)');
+      const sent: Array<[string, unknown[]]> = [];
+      d.knex.on('query', (q: { sql: string; bindings: unknown[] }) => sent.push([q.sql, q.bindings]));
+      await d.create('ord', { id: UUID, account: UUID_2, note: 'x' });
+      await d.find('ord', { where: { account: UUID_2 } });
+      await d.update('ord', UUID, { account: UUID });
+      await d.readBackInsertedRows('ord', 'ord', [{ id: UUID }]);
+      await d.delete('ord', UUID);
+      await d.bulkDelete('ord', [UUID, UUID_2]);
+      expect(sent).toEqual([
+        ['insert into `ORD` (`ACCT_REF`, `NOTE`, `ORD_ID`) values (?, ?, ?) returning *', [UUID_2, 'x', UUID]],
+        ['select * from `ORD` where `ACCT_REF` = ?', [UUID_2]],
+        ['update `ORD` set `ACCT_REF` = ? where `ORD_ID` = ?', [UUID, UUID]],
+        ['select * from `ORD` where `ORD_ID` = ? limit ?', [UUID, 1]],
+        ['select * from `ORD` where `ORD_ID` in (?)', [UUID]],
+        ['delete from `ORD` where `ORD_ID` = ?', [UUID]],
+        ['delete from `ORD` where `ORD_ID` in (?, ?)', [UUID, UUID_2]],
+      ]);
+    } finally {
+      await d.disconnect();
+    }
+  });
+});
