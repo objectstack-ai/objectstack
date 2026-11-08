@@ -474,6 +474,11 @@ describe('[ADR-0090 D12, ruling of record 6663849489; #30758] canReadObject and 
  * units (what the read door confines a delegated read to), the delegable-scope
  * report, the explain coverage of a user, the write gate — and the read and
  * write doors themselves.
+ *
+ * [ADR-0123 D1/D2] A context that names no organization holds no subtree at
+ * all: every one of those answers is empty, the write gate refuses naming the
+ * missing active organization, and a context naming its organization keeps
+ * every answer.
  */
 describe('[ADR-0090 D12, ruling of record 6663849489] a delegated business-unit subtree never crosses an organization boundary, whether or not the caller\'s context names an organization — three postures', () => {
   const ORG_B = 'org_b';
@@ -495,7 +500,7 @@ describe('[ADR-0090 D12, ruling of record 6663849489] a delegated business-unit 
       { id: 'bum_b_member', user_id: 'u_b_member', business_unit_id: 'bu_b_linked', organization_id: ORG_B }, asOrgB);
   }
 
-  /** What the gate itself answers for `context`: covered units, placeable units, and whether it covers the other organization's member. */
+  /** What the gate itself answers for `context`: covered units, placeable units, and whether it covers a member of the scope and the other organization's member. */
   async function gateAnswers(h: Awaited<ReturnType<typeof boot>>, context: any) {
     const security = h.plugin as any;
     const sets = await security.resolvePermissionSetsForContext(context);
@@ -503,6 +508,7 @@ describe('[ADR-0090 D12, ruling of record 6663849489] a delegated business-unit 
     return {
       covered: [...(await gate.scopedBusinessUnitIds(sets, context)) as Set<string>].sort(),
       placeable: [...(await gate.describeDelegableScope(sets, context)).placeableBusinessUnitIds as string[]].sort(),
+      coversMember: await gate.scopesCoverUser(sets, 'u_target', context),
       coversOtherMember: await gate.scopesCoverUser(sets, 'u_b_member', context),
     };
   }
@@ -521,53 +527,70 @@ describe('[ADR-0090 D12, ruling of record 6663849489] a delegated business-unit 
           .toEqual([['bu_b_linked', 'bu_east'], ['bu_b_linked_child', 'bu_b_linked']]);
       });
 
-      it("the gate covers the scope's own organization's units only — with no organization on the context, and with one", async () => {
+      it("the gate covers the scope's own organization's units only for a context naming its organization, and nothing for a context naming no organization", async () => {
         const h = await boot(posture);
         await linkOtherOrganization(h);
-        for (const [label, context] of [['no organization', NO_ORGANIZATION], ['its organization', NARROW]] as const) {
-          expect(await gateAnswers(h, context), label).toEqual({ covered: IN_SCOPE, placeable: IN_SCOPE, coversOtherMember: false });
-        }
+        expect(await gateAnswers(h, NARROW)).toEqual({ covered: IN_SCOPE, placeable: IN_SCOPE, coversMember: true, coversOtherMember: false });
+        // A context that names no organization holds nothing.
+        expect(await gateAnswers(h, NO_ORGANIZATION)).toEqual({ covered: [], placeable: [], coversMember: false, coversOtherMember: false });
       });
 
-      it('the read door returns no unit of another organization to a context naming no organization', async () => {
+      it('the read door returns no unit to a context naming no organization', async () => {
         const h = await boot(posture);
         await linkOtherOrganization(h);
-        // `single` has no tenancy layer, so the delegated scope is the read's
-        // only bound; under `group`/`isolated` that layer reads nothing for a
-        // context naming no organization.
-        expect(await unitsRead(h, NO_ORGANIZATION)).toEqual(posture === 'single' ? IN_SCOPE : []);
+        // A context that names no organization holds nothing: its scope admits no read.
+        expect(await unitsRead(h, NO_ORGANIZATION)).toEqual([]);
         // CONTROL: the context naming its organization reads its scope, as before.
         expect(await unitsRead(h, NARROW)).toEqual(IN_SCOPE);
       });
 
-      it("the write gate refuses an assignment anchored in, and a direct grant to a member of, another organization's unit — and admits one inside the scope", async () => {
+      it("the write gate refuses an assignment anchored in, and a direct grant to a member of, another organization's unit — and admits one inside the scope — for a context naming its organization", async () => {
         const h = await boot(posture);
         await linkOtherOrganization(h);
-        for (const [label, context] of [['no organization', NO_ORGANIZATION], ['its organization', NARROW]] as const) {
-          for (const unit of ['bu_b_linked', 'bu_b_linked_child']) {
-            const r = await gateInsert(h, context, 'sys_user_position', { user_id: 'u_target', position: 'field_rep', business_unit_id: unit });
-            expect([r.status, r.code], `${label} · ${unit}: ${r.message}`).toEqual([403, 'DELEGATION_SCOPE_VIOLATION']);
-          }
-          const grant = await gateInsert(h, context, 'sys_user_permission_set', { user_id: 'u_b_member', permission_set: 'field_user' });
-          expect([grant.status, grant.code], `${label} · grant: ${grant.message}`).toEqual([403, 'DELEGATION_SCOPE_VIOLATION']);
-          // CONTROL: the gate has not gone dark — inside the scope it admits.
-          const inside = await gateInsert(h, context, 'sys_user_position', { user_id: 'u_target', position: 'field_rep', business_unit_id: 'bu_east_field' });
-          expect(inside, label).toEqual({ status: 200 });
+        for (const unit of ['bu_b_linked', 'bu_b_linked_child']) {
+          const r = await gateInsert(h, NARROW, 'sys_user_position', { user_id: 'u_target', position: 'field_rep', business_unit_id: unit });
+          expect([r.status, r.code], `${unit}: ${r.message}`).toEqual([403, 'DELEGATION_SCOPE_VIOLATION']);
+        }
+        const grant = await gateInsert(h, NARROW, 'sys_user_permission_set', { user_id: 'u_b_member', permission_set: 'field_user' });
+        expect([grant.status, grant.code], `grant: ${grant.message}`).toEqual([403, 'DELEGATION_SCOPE_VIOLATION']);
+        // CONTROL: the gate has not gone dark — inside the scope it admits.
+        const inside = await gateInsert(h, NARROW, 'sys_user_position', { user_id: 'u_target', position: 'field_rep', business_unit_id: 'bu_east_field' });
+        expect(inside).toEqual({ status: 200 });
+      });
+
+      it('the write gate refuses every write of a context naming no organization — inside the scope too — naming the missing active organization', async () => {
+        const h = await boot(posture);
+        await linkOtherOrganization(h);
+        // A context that names no organization holds nothing.
+        const writes: Array<[string, string, Record<string, unknown>]> = [
+          ['another organization\'s unit', 'sys_user_position', { user_id: 'u_target', position: 'field_rep', business_unit_id: 'bu_b_linked' }],
+          ['a member of another organization', 'sys_user_permission_set', { user_id: 'u_b_member', permission_set: 'field_user' }],
+          ['inside the scope', 'sys_user_position', { user_id: 'u_target', position: 'field_rep', business_unit_id: 'bu_east_field' }],
+          ['a member inside the scope', 'sys_user_permission_set', { user_id: 'u_target', permission_set: 'field_user' }],
+        ];
+        for (const [label, object, data] of writes) {
+          const r = await gateInsert(h, NO_ORGANIZATION, object, data);
+          expect([r.status, r.code], `${label}: ${r.message}`).toEqual([403, 'PERMISSION_DENIED']);
+          expect(r.message, label).toMatch(/no active organization/);
         }
       });
     });
   }
 
-  it("posture 'single' with its Default Organization: the write door refuses an assignment anchored in another organization's unit for a context naming no organization, and stores one inside the scope", async () => {
+  it("posture 'single' with its Default Organization: the write door stores nothing for a context naming no organization, inside the scope or outside it, and stores the assignment inside the scope for a context naming its organization", async () => {
     const h = await boot('single', { defaultOrganization: true });
     await linkOtherOrganization(h);
-    const assignAt = (unit: string) => outcome(() => h.engine.insert('sys_user_position',
-      { user_id: 'u_target', position: 'field_rep', business_unit_id: unit }, { context: NO_ORGANIZATION_NAMING_USERS } as any));
-    const refused = await assignAt('bu_b_linked');
-    expect([refused.status, refused.code], refused.message).toEqual([403, 'DELEGATION_SCOPE_VIOLATION']);
+    const assignAt = (unit: string, context: any) => outcome(() => h.engine.insert('sys_user_position',
+      { user_id: 'u_target', position: 'field_rep', business_unit_id: unit }, { context } as any));
+    // A context that names no organization holds nothing.
+    for (const unit of ['bu_b_linked', 'bu_east_field']) {
+      const refused = await assignAt(unit, NO_ORGANIZATION_NAMING_USERS);
+      expect([refused.status, refused.code], `${unit}: ${refused.message}`).toEqual([403, 'PERMISSION_DENIED']);
+      expect(refused.message, unit).toMatch(/no active organization/);
+    }
     expect(await storedPositions(h)).toEqual([]);
-    // CONTROL: the same door, context and position, inside the scope.
-    expect(await assignAt('bu_east_field')).toEqual({ status: 200 });
+    // CONTROL: the same door and position, for a context naming its organization.
+    expect(await assignAt('bu_east_field', NARROW)).toEqual({ status: 200 });
     expect(await storedPositions(h)).toEqual(['field_rep']);
   });
 });

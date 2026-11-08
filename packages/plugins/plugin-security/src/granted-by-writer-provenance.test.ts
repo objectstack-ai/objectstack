@@ -202,7 +202,10 @@ async function boot(opts: { security: boolean } = { security: true }): Promise<R
 
 const CALLERS = {
   'a tenant-level admin': { userId: ADMIN, positions: [], permissions: ['qa_tenant_admin'] },
-  'a scoped delegate': { userId: DELEGATE_USER, positions: [], permissions: ['qa_delegate'] },
+  // A delegated scope covers units of the active organization only (ADR-0123
+  // D2): the delegate's session carries the Default Organization the fixture
+  // rows were stamped with, as every `single` session does (ADR-0131 C1).
+  'a scoped delegate': { userId: DELEGATE_USER, positions: [], permissions: ['qa_delegate'], tenantId: 'org_default' },
 } as const;
 
 /** Each grant table, and a row on it every caller above may write. */

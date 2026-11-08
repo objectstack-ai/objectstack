@@ -29,13 +29,20 @@ const EAST_SCOPE = {
   assignablePermissionSets: ['sales_user', 'sub_admin'],
 };
 
+/**
+ * [ADR-0123 D2] The organization the harness tree belongs to, and that every
+ * harness context names: a delegated scope covers units of the caller's active
+ * organization only, and a context that names no organization holds nothing.
+ */
+const HARNESS_ORG = 'org_a';
+
 function makeHarness() {
   const tables: Record<string, any[]> = {
     sys_business_unit: [
-      { id: 'bu_hq', name: 'hq', parent_business_unit_id: null },
-      { id: 'bu_east', name: 'east', parent_business_unit_id: 'bu_hq' },
-      { id: 'bu_es', name: 'east_sales', parent_business_unit_id: 'bu_east' },
-      { id: 'bu_west', name: 'west', parent_business_unit_id: 'bu_hq' },
+      { id: 'bu_hq', name: 'hq', parent_business_unit_id: null, organization_id: HARNESS_ORG },
+      { id: 'bu_east', name: 'east', parent_business_unit_id: 'bu_hq', organization_id: HARNESS_ORG },
+      { id: 'bu_es', name: 'east_sales', parent_business_unit_id: 'bu_east', organization_id: HARNESS_ORG },
+      { id: 'bu_west', name: 'west', parent_business_unit_id: 'bu_hq', organization_id: HARNESS_ORG },
     ],
     sys_position: [
       { id: 'pos_sales', name: 'sales_rep' },
@@ -104,7 +111,8 @@ function makeHarness() {
     resolveSets: async (context: any) => SETS[context?.principal ?? ''] ?? [],
   });
 
-  const ctxOf = (principal: string, userId = `u_${principal}`) => ({ principal, userId, positions: [principal] });
+  const ctxOf = (principal: string, userId = `u_${principal}`) =>
+    ({ principal, userId, positions: [principal], organizationId: HARNESS_ORG });
   return { gate, ql, tables, ctxOf };
 }
 
@@ -816,6 +824,7 @@ describe('DelegatedAdminGate — describeDelegableScope', () => {
   it('a delegate gets their own subtree and only the positions they may hand out', async () => {
     const report = await h.gate.describeDelegableScope(
       await (h.gate as any).deps.resolveSets({ principal: 'delegate' }),
+      h.ctxOf('delegate'),
     );
 
     expect(report.isTenantAdmin).toBe(false);
@@ -838,6 +847,7 @@ describe('DelegatedAdminGate — describeDelegableScope', () => {
   it('agrees with the gate: every offered (unit, position) pair is one assert() accepts', async () => {
     const report = await h.gate.describeDelegableScope(
       await (h.gate as any).deps.resolveSets({ principal: 'delegate' }),
+      h.ctxOf('delegate'),
     );
     for (const business_unit_id of report.placeableBusinessUnitIds) {
       for (const position of report.assignablePositions) {
@@ -981,10 +991,10 @@ describe('DelegatedAdminGate — the anchor is picked by organization, not by ar
       ql: unscopedQl(),
       resolveSets: async () => sets,
     });
-    // `sales_east` exists in both organizations; a caller in NEITHER resolves
-    // by name as before — the `single`-posture surface, unchanged.
+    // `sales_east` exists in both organizations. A context that names no
+    // organization holds nothing: no scope, no unit (ADR-0123 D2).
     const orgLess = await gate.describeDelegableScope(sets as any, { userId: 'usr_delegate' });
-    expect(orgLess.placeableBusinessUnitIds).toEqual(['bu_0_sales_east']);
+    expect(orgLess).toEqual({ isTenantAdmin: false, scopes: [], placeableBusinessUnitIds: [], assignablePositions: [] });
     // A caller in a THIRD organization resolves nothing at all.
     const stranger = await gate.describeDelegableScope(sets as any, {
       userId: 'usr_delegate',
@@ -997,49 +1007,68 @@ describe('DelegatedAdminGate — the anchor is picked by organization, not by ar
 
 // ── A delegated subtree is one organization's, on a driver that scopes NOTHING ─
 //
-// [ADR-0090 D12] The harness `ql` ignores `context`, so the walk's child read
-// hands every organization's units to the gate and the row-level bound is the
-// only thing standing; the delegate's context names no organization. The
-// posture rig (`delegated-admin-own-name-set.posture.test.ts`) pins the rule
-// through the doors on a real engine; this half also pins the organization-less
-// root, which a real table cannot hold (its tenant column is NOT NULL,
-// ADR-0131 D1).
-describe("DelegatedAdminGate — a delegated subtree is one organization's, with no organization on the context", () => {
+// [ADR-0090 D12; ADR-0123 D2] The harness `ql` ignores `context`, so the walk's
+// child read hands every organization's units to the gate and the row-level
+// bound is the only thing standing. A context that names its organization
+// covers that organization's units only; a context that names no organization
+// holds nothing, whatever its units are stamped with — this half also pins the
+// organization-less root, which a real table cannot hold (its tenant column is
+// NOT NULL, ADR-0131 D1). The posture rig
+// (`delegated-admin-own-name-set.posture.test.ts`) pins the rule through the
+// doors on a real engine.
+describe("DelegatedAdminGate — a delegated subtree is one organization's, and a context that names no organization holds none", () => {
   /**
-   * Stamp every unit with `organizationId` (none: leave them organization-less),
-   * then link a unit of `linkedOrganization`, and one below it, under the scope
+   * Stamp every unit with `organizationId` (null: organization-less), then
+   * link a unit of `linkedOrganization`, and one below it, under the scope
    * root `bu_east`.
    */
   function linkUnderScopeRoot(organizationId: string | null, linkedOrganization: string | null) {
-    if (organizationId) for (const r of h.tables.sys_business_unit) r.organization_id = organizationId;
+    for (const r of h.tables.sys_business_unit) r.organization_id = organizationId;
     h.tables.sys_business_unit.push(
       { id: 'bu_linked', name: 'linked', parent_business_unit_id: 'bu_east', organization_id: linkedOrganization },
       { id: 'bu_linked_child', name: 'linked_child', parent_business_unit_id: 'bu_linked', organization_id: linkedOrganization },
     );
   }
-  const placeable = async () => [...(await h.gate.describeDelegableScope(
+  /** The delegate's context with no organization on it at all. */
+  const NO_ORGANIZATION = { principal: 'delegate', userId: 'u_delegate', positions: ['delegate'] };
+  const report = async (context: any) => h.gate.describeDelegableScope(
     await (h.gate as any).deps.resolveSets({ principal: 'delegate' }),
-    h.ctxOf('delegate'),
-  )).placeableBusinessUnitIds].sort();
-  const assignAt = (business_unit_id: string) =>
-    insertAssignment(h.ctxOf('delegate'), { user_id: 'u_east_1', position: 'sales_rep', business_unit_id });
+    context,
+  );
+  const placeable = async () => [...(await report(h.ctxOf('delegate'))).placeableBusinessUnitIds].sort();
+  const assignAt = (business_unit_id: string, context: any = h.ctxOf('delegate')) =>
+    insertAssignment(context, { user_id: 'u_east_1', position: 'sales_rep', business_unit_id });
 
-  for (const [label, root] of [['a stamped scope root', 'org_a'], ['an organization-less scope root', null]] as const) {
-    it(`${label}: the subtree stops at a unit stamped with another organization`, async () => {
-      linkUnderScopeRoot(root, 'org_b');
-      expect(await placeable()).toEqual(['bu_east', 'bu_es']);
-      for (const unit of ['bu_linked', 'bu_linked_child']) {
-        const err = await refusalOf(() => assignAt(unit));
-        expect([err.code, err.status], `${unit}: ${err.message}`).toEqual(['DELEGATION_SCOPE_VIOLATION', 403]);
-      }
-      // CONTROL: inside the subtree the same write is admitted.
-      await expect(assignAt('bu_es')).resolves.toBeUndefined();
-    });
+  it('a context naming its organization: the subtree stops at a unit stamped with another organization', async () => {
+    linkUnderScopeRoot(HARNESS_ORG, 'org_b');
+    expect(await placeable()).toEqual(['bu_east', 'bu_es']);
+    for (const unit of ['bu_linked', 'bu_linked_child']) {
+      const err = await refusalOf(() => assignAt(unit));
+      expect([err.code, err.status], `${unit}: ${err.message}`).toEqual(['DELEGATION_SCOPE_VIOLATION', 403]);
+    }
+    // CONTROL: inside the subtree the same write is admitted.
+    await expect(assignAt('bu_es')).resolves.toBeUndefined();
+  });
 
-    it(`CONTROL — ${label}: a unit of the root's own organization under the same link is inside the subtree`, async () => {
+  it("CONTROL — a context naming its organization: a unit of its own organization under the same link is inside the subtree", async () => {
+    linkUnderScopeRoot(HARNESS_ORG, HARNESS_ORG);
+    expect(await placeable()).toEqual(['bu_east', 'bu_es', 'bu_linked', 'bu_linked_child']);
+    await expect(assignAt('bu_linked_child')).resolves.toBeUndefined();
+  });
+
+  for (const [label, root] of [['a stamped scope root', HARNESS_ORG], ['an organization-less scope root', null]] as const) {
+    it(`${label}, a context naming no organization: no scope and no unit, and every assignment is refused naming the missing active organization`, async () => {
+      // A context that names no organization holds nothing — even over a tree
+      // whose every unit shares the root's organization.
       linkUnderScopeRoot(root, root);
-      expect(await placeable()).toEqual(['bu_east', 'bu_es', 'bu_linked', 'bu_linked_child']);
-      await expect(assignAt('bu_linked_child')).resolves.toBeUndefined();
+      expect(await report(NO_ORGANIZATION)).toEqual({
+        isTenantAdmin: false, scopes: [], placeableBusinessUnitIds: [], assignablePositions: [],
+      });
+      for (const unit of ['bu_east', 'bu_es', 'bu_linked', 'bu_linked_child']) {
+        const err = await refusalOf(() => assignAt(unit, NO_ORGANIZATION));
+        expect([err.code, err.status], `${unit}: ${err.message}`).toEqual(['PERMISSION_DENIED', 403]);
+        expect(String(err.message)).toMatch(/no active organization/);
+      }
     });
   }
 });
@@ -1623,10 +1652,11 @@ describe("[ADR-0090 D12; ruling of record 6649064874] an organization administra
  */
 function makeOwnNameHarness() {
   const tables: Record<string, any[]> = {
+    // The tree is the organization every context below names (ADR-0123 D2).
     sys_business_unit: [
-      { id: 'bu_hq', name: 'hq', parent_business_unit_id: null },
-      { id: 'bu_east', name: 'east', parent_business_unit_id: 'bu_hq' },
-      { id: 'bu_es', name: 'east_sales', parent_business_unit_id: 'bu_east' },
+      { id: 'bu_hq', name: 'hq', parent_business_unit_id: null, organization_id: DELEGATION_ORG },
+      { id: 'bu_east', name: 'east', parent_business_unit_id: 'bu_hq', organization_id: DELEGATION_ORG },
+      { id: 'bu_es', name: 'east_sales', parent_business_unit_id: 'bu_east', organization_id: DELEGATION_ORG },
     ],
     sys_user_position: [
       { id: 'held_rep', user_id: 'u_east_1', position: 'rep_pos', business_unit_id: 'bu_es' },
@@ -1688,7 +1718,7 @@ function makeOwnNameHarness() {
     resolveSets: async (c: any) => SETS[c?.principal ?? ''] ?? [],
     now: () => T0,
   });
-  const ctxOf = (principal: string) => ({ principal, userId: `u_${principal}`, positions: [] });
+  const ctxOf = (principal: string) => ({ principal, userId: `u_${principal}`, positions: [], organizationId: DELEGATION_ORG });
   const assign = (principal: string, position: string) => gate.assert({
     object: 'sys_user_position', operation: 'insert', context: ctxOf(principal),
     data: { user_id: 'u_east_1', position, business_unit_id: 'bu_es' },

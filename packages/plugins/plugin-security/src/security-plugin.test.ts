@@ -3756,10 +3756,12 @@ describe('explainAccessForCaller (ADR-0090 D6/D12)', () => {
   /** Middleware harness + in-memory tables for BU subtree / membership reads. */
   const makeExplainHarness = () => {
     const tables: Record<string, any[]> = {
+      // The organization the delegate's context names: a delegated scope
+      // covers units of the active organization only (ADR-0123 D2).
       sys_business_unit: [
-        { id: 'bu_hq', name: 'hq', parent_business_unit_id: null },
-        { id: 'bu_east', name: 'east', parent_business_unit_id: 'bu_hq' },
-        { id: 'bu_west', name: 'west', parent_business_unit_id: 'bu_hq' },
+        { id: 'bu_hq', name: 'hq', parent_business_unit_id: null, organization_id: 'org_1' },
+        { id: 'bu_east', name: 'east', parent_business_unit_id: 'bu_hq', organization_id: 'org_1' },
+        { id: 'bu_west', name: 'west', parent_business_unit_id: 'bu_hq', organization_id: 'org_1' },
       ],
       sys_business_unit_member: [
         { id: 'm1', business_unit_id: 'bu_east', user_id: 'u_east_1' },
@@ -3830,7 +3832,7 @@ describe('explainAccessForCaller (ADR-0090 D6/D12)', () => {
 
   it('a delegated admin may explain a user INSIDE their scope subtree without manage_users', async () => {
     const { plugin } = await boot();
-    const caller = { userId: 'u_delegate', positions: [], permissions: ['sub_admin'] };
+    const caller = { userId: 'u_delegate', positions: [], permissions: ['sub_admin'], tenantId: 'org_1' };
     const d = await plugin.explainAccessForCaller({ object: 'task', operation: 'read', userId: 'u_east_1' }, caller);
     expect(d.principal.userId).toBe('u_east_1');
     expect(d.object).toBe('task');
@@ -3838,7 +3840,7 @@ describe('explainAccessForCaller (ADR-0090 D6/D12)', () => {
 
   it('the same delegate is DENIED for a user OUTSIDE the subtree (fail closed)', async () => {
     const { plugin } = await boot();
-    const caller = { userId: 'u_delegate', positions: [], permissions: ['sub_admin'] };
+    const caller = { userId: 'u_delegate', positions: [], permissions: ['sub_admin'], tenantId: 'org_1' };
     await expect(
       plugin.explainAccessForCaller({ object: 'task', operation: 'read', userId: 'u_west_1' }, caller),
     ).rejects.toMatchObject({ name: 'PermissionDeniedError' });
