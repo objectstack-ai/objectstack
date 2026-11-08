@@ -1781,21 +1781,7 @@ export class SqlDriver implements IDataDriver {
    * catalog read records nothing, so the next read asks again.
    */
   protected async primeMssqlPagingKey(object: string): Promise<void> {
-    if (this.mssqlPagingKeyByObject.has(object)) return;
-    const remoteTable = this.physicalTableByObject[object];
-    if (remoteTable === undefined) return;
-    const remoteSchema = this.physicalSchemaByObject[object];
-    let keyColumns: string[];
-    try {
-      keyColumns = await this.introspectPrimaryKeys(
-        remoteSchema ? `${remoteSchema}.${remoteTable}` : remoteTable,
-      );
-    } catch {
-      return;
-    }
-    const keyColumn = keyColumns.length === 1 ? keyColumns[0]! : null;
-    const field = keyColumn === null ? null : (this.columnFieldByObject[object]?.[keyColumn] ?? keyColumn);
-    this.mssqlPagingKeyByObject.set(object, field);
+    return FieldMappingFacet.primeMssqlPagingKey.call(fieldMappingHost.of(this), object);
   }
 
   /**
@@ -9130,12 +9116,16 @@ export class SqlDriver implements IDataDriver {
       remoteColumn: (...a) => driver.remoteColumn(...a),
     }));
     fieldMappingHost.install((driver) => ({
+      get columnFieldByObject() { return driver.columnFieldByObject; },
       get fieldColumnByObject() { return driver.fieldColumnByObject; },
+      introspectPrimaryKeys: (...a) => driver.introspectPrimaryKeys(...a),
       get logger() { return driver.logger; },
       get managedObjectFields() { return driver.managedObjectFields; },
       get mssqlPagingKeyByObject() { return driver.mssqlPagingKeyByObject; },
       get nondeterministicPagingWarned() { return driver.nondeterministicPagingWarned; },
       paginationTieBreaker: (...a) => driver.paginationTieBreaker(...a),
+      get physicalSchemaByObject() { return driver.physicalSchemaByObject; },
+      get physicalTableByObject() { return driver.physicalTableByObject; },
     }));
     filterHelpersHost.install((driver) => ({
       applyContainsLike: (...a) => driver.applyContainsLike(...a),

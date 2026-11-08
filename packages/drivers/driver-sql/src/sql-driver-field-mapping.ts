@@ -43,12 +43,16 @@ import type { SqlDriver } from './sql-driver.js';
  * assigns.
  */
 export interface FieldMappingHost {
+  readonly columnFieldByObject: SqlDriver['columnFieldByObject'];
   readonly fieldColumnByObject: SqlDriver['fieldColumnByObject'];
+  introspectPrimaryKeys: SqlDriver['introspectPrimaryKeys'];
   readonly logger: SqlDriver['logger'];
   readonly managedObjectFields: SqlDriver['managedObjectFields'];
   readonly mssqlPagingKeyByObject: SqlDriver['mssqlPagingKeyByObject'];
   readonly nondeterministicPagingWarned: SqlDriver['nondeterministicPagingWarned'];
   paginationTieBreaker: SqlDriver['paginationTieBreaker'];
+  readonly physicalSchemaByObject: SqlDriver['physicalSchemaByObject'];
+  readonly physicalTableByObject: SqlDriver['physicalTableByObject'];
 }
 
 /** The bodies of the "Field mapping" section of `SqlDriver`: a stateless facet, called by the class's stubs. */
@@ -70,6 +74,25 @@ export class FieldMappingFacet {
     // its catalog by `primeMssqlPagingKey` — never a guess: an entry exists
     // only when the remote catalog named the key.
     return this.mssqlPagingKeyByObject.get(object) ?? null;
+  }
+
+  /** The body of `SqlDriver#primeMssqlPagingKey`; the method's docblock there is its contract. */
+  static async primeMssqlPagingKey(this: Pick<FieldMappingHost, 'columnFieldByObject' | 'introspectPrimaryKeys' | 'mssqlPagingKeyByObject' | 'physicalSchemaByObject' | 'physicalTableByObject'>, object: string): Promise<void> {
+    if (this.mssqlPagingKeyByObject.has(object)) return;
+    const remoteTable = this.physicalTableByObject[object];
+    if (remoteTable === undefined) return;
+    const remoteSchema = this.physicalSchemaByObject[object];
+    let keyColumns: string[];
+    try {
+      keyColumns = await this.introspectPrimaryKeys(
+        remoteSchema ? `${remoteSchema}.${remoteTable}` : remoteTable,
+      );
+    } catch {
+      return;
+    }
+    const keyColumn = keyColumns.length === 1 ? keyColumns[0]! : null;
+    const field = keyColumn === null ? null : (this.columnFieldByObject[object]?.[keyColumn] ?? keyColumn);
+    this.mssqlPagingKeyByObject.set(object, field);
   }
 
   /** The body of `SqlDriver#orderKeysFor`; the method's docblock there is its contract. */

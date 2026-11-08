@@ -498,6 +498,45 @@ function declareFederationSweep(): void {
       });
     });
 
+    // ── uniqueidentifier: the `uuid` type-compat row, held to its word ───────
+    //
+    // `DIALECT_ALIASES.mssql` maps `uniqueidentifier` to `uuid`, which a lookup
+    // or a text field reads exactly. That is only true if a GUID written as a
+    // string reads back as THAT string and filters by it: SQL Server compares
+    // GUIDs regardless of case, but returns them upper-case unless the
+    // connection asks for the canonical lower-case form.
+    describe('uniqueidentifier: a GUID string round-trips and filters by itself', () => {
+      const T = 'fed_guid';
+      const ID = '3f2504e0-4f89-41d3-9a0c-0305e82c3301';
+      const REF = 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11';
+      beforeAll(async () => {
+        await knex.raw(`IF OBJECT_ID(N'[${schema}].[${T}]') IS NOT NULL DROP TABLE [${schema}].[${T}]`);
+        await knex.raw(
+          `CREATE TABLE [${schema}].[${T}] ([id] uniqueidentifier NOT NULL PRIMARY KEY, [ref] uniqueidentifier NULL, [name] nvarchar(50) NULL)`,
+        );
+        tables.push(T);
+        driver.registerExternalObject({
+          name: T,
+          fields: { ref: { type: 'text' }, name: { type: 'text' } },
+          external: { remoteName: T, remoteSchema: schema },
+        });
+      });
+      it('create answers the GUIDs exactly as written', async () => {
+        const row = await driver.create(T, { id: ID, ref: REF, name: 'g' }, BYPASS);
+        expect(row).toMatchObject({ id: ID, ref: REF });
+      });
+      it('a read answers the canonical lower-case form, and filters by either case', async () => {
+        expect((await driver.findOne(T, { where: { id: ID } }, BYPASS))?.ref).toBe(REF);
+        expect(sortedIds(await driver.find(T, { where: { ref: REF } }, BYPASS))).toEqual([ID]);
+        expect(sortedIds(await driver.find(T, { where: { ref: REF.toUpperCase() } }, BYPASS))).toEqual([ID]);
+        expect(sortedIds(await driver.find(T, { where: { ref: { $in: [REF] } } }, BYPASS))).toEqual([ID]);
+      });
+      it('update by a GUID id lands', async () => {
+        await driver.update(T, ID, { name: 'h' }, BYPASS);
+        expect((await driver.findOne(T, { where: { id: ID } }, BYPASS))?.name).toBe('h');
+      });
+    });
+
     // ── CROSS_FIELD (#5222): refused on a federated object, on every dialect ──
     //
     // Cross-field push-down validates both column names against the object's

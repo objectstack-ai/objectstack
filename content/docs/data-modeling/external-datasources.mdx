@@ -536,6 +536,11 @@ What is different from the other SQL drivers:
   included), `bit` as boolean, `datetime2` / `datetimeoffset` / `smalldatetime` as
   datetime, `uniqueidentifier` as uuid, `money` / `decimal` as decimal. SQL Server's
   `timestamp` is `rowversion` — a binary row counter, not a date.
+- **GUIDs.** A `uniqueidentifier` reads back in the lower-case form
+  (`3f2504e0-4f89-…`), so a GUID written as a string reads back as that string, and
+  an equality or `$in` filter matches it in either case. Substring operators
+  (`$contains`, `$startsWith`) compare against SQL Server's own upper-case text form
+  of the GUID; filter a GUID by equality.
 - **Text matching** follows the platform's contract, not the database's collation:
   `$contains` / `$startsWith` / `$endsWith` / `$like` are case-exact even on SQL
   Server's case-insensitive default collations, and `$icontains` folds A–Z only.

@@ -6,6 +6,7 @@ import { strictObject } from '../shared/strict-object';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { CODE_DEFINED_CREDENTIAL_ROUTE, urlUserinfoUsername } from './driver/common.zod';
 import {
+  DATABASE_DRIVER_SELECTION_IDS,
   driverIsFederationOnly,
   RETIRED_DRIVER_ID_GUIDANCE,
   resolveDriverId,
@@ -626,7 +627,7 @@ function managedOnFederationOnlyDriverRefusal(driverId: string): string {
     + "or alters its own schema there, so it cannot be a `managed` datasource (the default when "
     + "`schemaMode` is omitted). Set `schemaMode: 'external'` (or `'validate-only'` to warn on "
     + 'drift instead of failing) and add an `external` block; to keep platform-owned tables, use a '
-    + 'postgres, mysql or sqlite datasource for them.';
+    + `datasource on a driver that can own them (${DATABASE_DRIVER_SELECTION_IDS.join(', ')}).`;
 }
 
 /**

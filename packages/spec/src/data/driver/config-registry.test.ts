@@ -582,6 +582,10 @@ describe('the `mssql` row: a federation-only driver', () => {
       expect(hits, JSON.stringify(result.error?.issues)).toHaveLength(1);
       expect(hits[0]!.message).toContain("The 'mssql' driver is served for federation only");
       expect(hits[0]!.message).toContain("schemaMode: 'external'");
+      // The drivers offered for platform-owned tables are the selection face,
+      // derived — never a hand list that a new selectable driver would miss.
+      for (const id of DATABASE_DRIVER_SELECTION_IDS) expect(hits[0]!.message).toContain(id);
+      expect(hits[0]!.message).not.toContain('mssql,');
     }
   });
 

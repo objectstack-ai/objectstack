@@ -230,6 +230,23 @@ export class ClassHeadFacet {
       // A function-valued `connection` (knex's per-acquire provider) is left
       // alone: the host is building each connection itself and owns its timeouts.
     }
+    // [#31327] SQL Server returns a `uniqueidentifier` as UPPER-case text, while
+    // it filters and writes by a GUID string in either case: written
+    // `3f25…`, read back `3F25…`, so a value would not survive its own round
+    // trip and two drivers would answer the same id in two spellings. tedious's
+    // `lowerCaseGuids` returns the canonical (RFC 9562) lower-case form instead.
+    // Set unless the host chose otherwise; a function-valued connection is the
+    // host building each connection itself, and is left alone. Placed after the
+    // connect-timeout block, which rebuilds `connection` from the original.
+    if (SqlDriver.MSSQL_FEDERATION_CLIENTS.has(String(knexConfig.client ?? ''))) {
+      const conn = bounded.connection;
+      if (conn && typeof conn === 'object') {
+        const options = ((conn as Record<string, any>).options ?? {}) as Record<string, any>;
+        if (options.lowerCaseGuids === undefined) {
+          bounded.connection = { ...(conn as object), options: { ...options, lowerCaseGuids: true } };
+        }
+      }
+    }
     return SqlDriver.withPostgresCalendarDayAsText(
       SqlDriver.withMysqlCalendarDayAsText(SqlDriver.withUtcSession(bounded)),
     );

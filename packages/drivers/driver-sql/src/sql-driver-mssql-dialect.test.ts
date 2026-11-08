@@ -57,6 +57,13 @@ describe('[#31327] the mssql dialect is modelled, not unknown', () => {
     expect(insert.sql).toBe('insert into [dbo].[Orders] ([a]) output inserted.* values (@p0)');
   });
 
+  it('asks tedious for lower-case GUIDs unless the host chose otherwise', () => {
+    const conn = (d: any) => d.getKnex().client.config.connection;
+    expect(conn(probe()).options).toMatchObject({ lowerCaseGuids: true });
+    const chosen = new SqlDriver({ ...CONFIG, connection: { options: { lowerCaseGuids: false, encrypt: false } } } as SqlDriverConfig) as any;
+    expect(conn(chosen).options).toEqual({ lowerCaseGuids: false, encrypt: false });
+  });
+
   it('refuses managed schema emission, naming the federation-only scope', () => {
     const d = probe() as any;
     let caught: (Error & { code?: string }) | undefined;
