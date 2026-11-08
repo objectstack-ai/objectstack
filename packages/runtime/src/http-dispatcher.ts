@@ -17,7 +17,7 @@ import {
     AuthzStoreUnavailableError,
     type AuthGate,
 } from '@objectstack/core';
-import { isMcpServerEnabled, looksLikeInternalErrorLeak, INTERNAL_ERROR_MESSAGE, resolveThrownHttpError, demotedDeclaredCode, declaredUserMessage, inProcessSessionReadInput, isEngineDuplicateRecordEnvelope, structuredCodeAnswer, driverNotNullRefusalAnswer } from '@objectstack/types';
+import { isMcpServerEnabled, looksLikeInternalErrorLeak, INTERNAL_ERROR_MESSAGE, declaredUserMessage, inProcessSessionReadInput, driverNotNullRefusalAnswer, thrownAnswerOf } from '@objectstack/types';
 import { measureServerTiming, allowPerfDisclosure, isPerfDisclosurePrincipal } from '@objectstack/observability';
 import { CoreServiceName, serviceUnavailableMessage, inProcessServiceMessage } from '@objectstack/spec/system';
 import type { AuthSessionApi, IDataEngine, IObjectQLEngine } from '@objectstack/spec/contracts';
@@ -389,43 +389,6 @@ type ClassifiedServiceLookup =
     | { readonly outcome: 'resolved'; readonly value: any }
     | { readonly outcome: 'never-registered' }
     | { readonly outcome: 'no-instance-in-scope'; readonly scopeId: string };
-
-/**
- * [#23686] The structured context `RestServer`'s duplicate-record arm states
- * beside its `UNIQUE_VIOLATION`, for the dispatcher envelope's `details`.
- * Asked only for the engine's own `DuplicateRecordError` (see
- * `HttpDispatcher.errorFromThrown`, "One wire spelling").
- *
- * ONE classification, not a third spelling: the fields are read off the arm
- * `structuredCodeAnswer` (`@objectstack/types`) answers the same throw
- * through, so this door carries what the REST door and the Hono doors carry,
- * each field only when the producer stated it, and an arm that grows a field
- * grows it here too. ⛔ Never list the fields here. The arm's own sentence
- * (`error`) and `code` are dropped because the envelope already carries both,
- * as `message` and `code`.
- *
- * The arm must AGREE with the envelope already decided, as at the Hono doors:
- * its status must be the thrown one and its code the envelope's, so it can
- * only add context, never change the answer. Disagreeing, it adds nothing.
- * The envelope's code for this class is itself read off the same arm
- * (`HttpDispatcher.errorFromThrown`, #23714), so this function spells no copy
- * of it either.
- *
- * ⛔ Deliberately not every arm. The dispatcher's other 409s
- * (`CONCURRENT_UPDATE`, `DELETE_RESTRICTED`) keep the body they have; widening
- * the context this door carries for them is a change of its own.
- */
-function duplicateArmContext(
-    thrown: unknown,
-    envelope: { status: number; code: string },
-): Record<string, unknown> | undefined {
-    const arm = structuredCodeAnswer(thrown);
-    if (arm === undefined || arm.status !== envelope.status || arm.body.code !== envelope.code) return undefined;
-    const context = Object.fromEntries(
-        Object.entries(arm.body).filter(([key]) => key !== 'error' && key !== 'code'),
-    );
-    return Object.keys(context).length > 0 ? context : undefined;
-}
 
 /**
  * The HTTP dispatch engine — translates an inbound (method, path, body, ctx)
@@ -1239,7 +1202,7 @@ export class HttpDispatcher {
      * registered code without being the engine's class) keeps its own code
      * and its own body. Beside the code,
      * the envelope's `details` carries what `RestServer`'s arm carries beside
-     * its own, read off that one classification ({@link duplicateArmContext})
+     * its own, read off that one classification (`thrownAnswerOf`, `@objectstack/types`, #31319)
      * rather than listed here: `developerMessage`, `object`, and `field` when
      * the driver named the column. `message` stays the thrown one, as on every
      * other code at this door and at the Hono doors; `declaredCode` stays
@@ -1252,59 +1215,25 @@ export class HttpDispatcher {
      * divergence is declared rather than closed by a second translator.
      */
     private errorFromThrown(e: any, fallbackStatus = 500) {
-        const thrown = resolveThrownHttpError(e, fallbackStatus);
-        // [#23686] The code this envelope carries: the resolver's, except the
-        // engine's unique-constraint envelope, which crosses HTTP as the one
-        // ruled wire spelling (see "One wire spelling" above).
-        //
-        // [#23714] That wire code is read off the shared classification's arm
-        // for the class (`structuredCodeAnswer`, the arm `RestServer` answers
-        // with), so this package spells no copy of it: the stamp stays where
-        // the error-code ledger lists it, under `@objectstack/types`. The
-        // resolver's code is kept only if that arm ever answered no string
-        // code for the class.
-        const engineDuplicate = isEngineDuplicateRecordEnvelope(e);
-        const duplicateArmCode = engineDuplicate ? structuredCodeAnswer(e)?.body.code : undefined;
-        const code = typeof duplicateArmCode === 'string' ? duplicateArmCode : thrown.code;
-        const armContext = engineDuplicate ? duplicateArmContext(e, { status: thrown.status, code }) : undefined;
-        const details = armContext ? { ...thrown.details, ...armContext } : thrown.details;
-        // [#9106] `code`, the NARROWED spelling — the same one the REST door
-        // has served since #8016, so the two doors now agree on `error.code`
-        // unconditionally (maintainer ruling 2026-08-16: `error.code` is a
-        // closed vocabulary at every door). A producer's unregistered spelling
-        // is not dropped: it rides the wire's `declaredCode`
-        // (`ApiErrorSchema.declaredCode`, the open author-authored channel),
-        // which is how a metadata app's own thrown code — the #7867 capability,
-        // measured as the tenant-authored limb no ledger can enumerate — still
-        // reaches the wire. Emitted only when the demote actually happened, so
-        // presence means demotion (see `demotedDeclaredCode`'s note).
-        //
-        // [#8087] The producer sweep is unchanged by this: platform producers
-        // must still register — `./dispatcher-error-vocabulary.ts` carries the
-        // classified list and `pnpm check:dispatcher-error-vocabulary` fails on
-        // an unswept producer, whose semantic code would otherwise silently
-        // demote off the wire. `error-envelope.conformance.test.ts` drives
-        // every dispatcher-reachable member of that list through this method
-        // and parses the body against `ApiErrorSchema`, which now PASSES for
-        // every body this door emits — the "parse every body it emits" half.
-        const declaredCode = demotedDeclaredCode(thrown);
-        // [commit 79c46da90] The producer-side user-facing marking rides as a declared
-        // sibling of `code`/`message` (`ApiErrorSchema.userMessage`), exactly
-        // like `declaredCode` — the shared resolver already answered whether
-        // the throw declared one (`declaredUserMessage`'s non-empty-string
-        // rule), so this door and the REST door agree by construction. Note
-        // `this.error`'s 5xx leak-withholding touches only `message`; the
-        // marked channel is authored user text, never the withheld prose.
+        // [#31319] The answer is composed ONCE, by `thrownAnswerOf`
+        // (`@objectstack/types`), the function the `/actions` door's reader
+        // (`actionsDoorAnswerOf`) answers its declared-status and rejection
+        // arms with. Every term the notes above describe (the resolver's
+        // closed code, the engine duplicate's wire spelling and arm context,
+        // the demoted `declaredCode`, the declared `userMessage`, the 5xx leak
+        // withhold) is that function's, so no door answering a thrown value
+        // carries a copy that could drift from the others. `this.error` stays
+        // the one construction point for the envelope.
+        const answer = thrownAnswerOf(e, fallbackStatus);
         const extra = {
-            ...(declaredCode !== undefined ? { declaredCode } : {}),
-            ...(thrown.userMessage !== undefined ? { userMessage: thrown.userMessage } : {}),
+            ...(answer.declaredCode !== undefined ? { declaredCode: answer.declaredCode } : {}),
+            ...(answer.userMessage !== undefined ? { userMessage: answer.userMessage } : {}),
         };
         return this.error(
-            thrown.message, thrown.status, details, code,
+            answer.message, answer.status, answer.details, answer.code,
             Object.keys(extra).length > 0 ? extra : undefined,
         );
     }
-
 
     /**
      * 404 Route Not Found — no route is registered for this path.
