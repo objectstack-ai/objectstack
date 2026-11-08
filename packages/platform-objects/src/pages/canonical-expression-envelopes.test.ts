@@ -172,6 +172,9 @@ const UNMAPPED_TYPE_EXEMPTIONS: Readonly<Record<string, string>> = {
   'mcp:authorized-assistants':
     'the user page\'s AI Assistants tab body (@object-ui/app-shell): the widget takes no props and reads '
     + 'the bound sys_user record, so its authored `properties` is `{}` and holds no expression key',
+  'security:effective-access':
+    'the user page\'s Permission Sets tab, above the grant list (@object-ui/app-shell): the widget takes no props '
+    + 'and reads the bound sys_user record, so its authored `properties` is `{}` and holds no expression key',
 };
 
 /** The authored node at an audit path such as `regions[0].components[2].properties.items[10].children[0]`. */

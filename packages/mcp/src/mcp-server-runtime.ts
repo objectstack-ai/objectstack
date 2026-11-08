@@ -1577,9 +1577,10 @@ export class MCPServerRuntime {
             // sentence; a fault (a bare `Error`, a crash) is the sanitised 500,
             // its thrown text withheld from the client and logged once, as the
             // door logs it.
-            // [#31273] …and so does a driver's own code (`SQLITE_BUSY`), which
-            // the door answers as a fault, not a refusal
-            // (`dataDoorRefusalEnvelope`).
+            // [#31273, #31341] …and so does a coded throw the door answers as a
+            // fault, not a refusal (`dataDoorRefusalEnvelope`): a driver's own
+            // code (`SQLITE_BUSY`), or a declared 5xx, whose code and status
+            // are kept and whose sentence is withheld unless `refusal: true`.
             const uri = `objectstack://objects/${objectName}/records/${recordId}`;
             const envelope = dataDoorRefusalEnvelope(err, objectName);
             let body: { error: string; code?: string; status?: number };

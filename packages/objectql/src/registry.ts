@@ -7629,7 +7629,7 @@ export class SchemaRegistry {
 
     // One name, one package holder for the bare-name registry types (a
     // picklist, a mapping, a dataset, an API, an object-less action, a flow, a
-    // webhook, a connector, an email template) — the item seam
+    // webhook, a connector, an email template, an agent, a skill) — the item seam
     // (`bare-name-one-holder.ts`; ADR-0048 §3.4 narrowed). Once the cold boot
     // has sealed the holders, a package registering one under a name another
     // package holds — and that it does not hold itself — is refused BEFORE

@@ -262,12 +262,17 @@ describe('ErrorCode (standard ∪ registered)', () => {
     }
   });
 
-  it('accepts the recycle bin\'s three restore refusal codes, registered ahead of their objectql producer', () => {
+  it('accepts the recycle bin\'s four restore refusal codes, registered ahead of their objectql producer', () => {
     // ADR-0148 D2: #30235 is the spec half; the engine's restore (#30237)
     // stamps them and asserts these exact strings by value — pinned here too,
     // and held equal to the spec's one spelling of them.
     const codes = Object.values(RECYCLE_BIN_RESTORE_REFUSAL_CODES);
-    expect(codes).toEqual(['RESTORE_UNIQUE_VALUE_TAKEN', 'RESTORE_PARENT_PURGED', 'RESTORE_PACKAGE_UNINSTALLED']);
+    expect(codes).toEqual([
+      'RESTORE_UNIQUE_VALUE_TAKEN',
+      'RESTORE_PARENT_PURGED',
+      'RESTORE_PACKAGE_UNINSTALLED',
+      'RESTORE_PARENT_IN_RECYCLE_BIN',
+    ]);
     for (const code of codes) {
       expect(ErrorCode.parse(code)).toBe(code);
       expect(ERROR_CODE_LEDGER['@objectstack/objectql'], `${code} registered under objectql`).toContain(code);
