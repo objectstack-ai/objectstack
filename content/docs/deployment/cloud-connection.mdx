@@ -178,7 +178,7 @@ protect it like any other secret.
 A file on one replica's disk is invisible to the others. So when the server
 declares several replicas (`OS_CLUSTER_REPLICAS` above 1, or
 `OS_EXPECT_MULTI_NODE=true`) **and** its [cluster driver](/docs/kernel/cluster)
-is a shared one such as Redis, the connection is kept in the database
+is Redis (`OS_CLUSTER_DRIVER=redis`), the connection is kept in the database
 instead, as the one row of the `sys_cloud_binding_credential` object, which
 every replica reads:
 
@@ -195,6 +195,12 @@ every replica reads:
 - **The database, not the cluster store, holds it.** The cluster store is a
   cache: flushing it, or running it without persistence, must never
   disconnect the server.
+- **It can be read before the server starts.** The multi-node licence check
+  runs before startup, so a host reads the row once at that point with
+  `readCloudBindingCredentialBeforeBoot` from `@objectstack/cloud-connection`.
+  The read opens one connection and closes it again before startup
+  continues, gives up after 3 seconds by default, and never writes. If it
+  fails, the replica starts as an unconnected one would.
 
 **Scaling out a server that is already connected.** The first start with
 several replicas declared moves the credential from
@@ -205,9 +211,10 @@ reads the file again, and the file does not follow connects or disconnects
 made meanwhile: disconnect and connect again after scaling down.
 
 A single server, a server whose cluster driver is the in-process `memory`
-one, and a server with no cluster service keep the file exactly as described
-above, and nothing is added to the database. Replicas declared over a shared
-cluster driver without the data engine composed cannot share the row: the
+one or any driver other than Redis, and a server with no cluster service keep
+the file exactly as described above, and nothing is added to the database.
+Replicas declared over Redis without the data engine composed cannot share
+the row: the
 server logs an `error` at start that says so, and each replica keeps its own
 file.
 

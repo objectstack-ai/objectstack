@@ -6,7 +6,7 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  * sys_cloud_binding_credential — the binding credential a SELF-HOSTED runtime
  * received at bind time (cloud ADR-0008), kept where EVERY replica of the
  * deployment reads it, when the deployment declares more than one replica
- * over a remote cluster driver.
+ * over the Redis cluster driver.
  *
  * A single node keeps the credential in `<cwd>/.objectstack/cloud-connection.json`
  * (`connection-credential-store.ts`) and never registers this object. Several
@@ -14,7 +14,7 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  * file under that replica's working directory is invisible to the others, so
  * their online licence check and every control-plane call they make present no
  * credential. With replicas declared (`OS_CLUSTER_REPLICAS` > 1 or
- * `OS_EXPECT_MULTI_NODE=true`) and a remote cluster driver, the plugin keeps
+ * `OS_EXPECT_MULTI_NODE=true`) and the Redis cluster driver, the plugin keeps
  * the credential here instead (`connection-credential-ledger.ts`).
  *
  * Why the database and not the cluster key-value store: the credential is the
@@ -52,7 +52,7 @@ export const SysCloudBindingCredential = ObjectSchema.create({
   // under a system context.
   access: { default: 'private' },
   description:
-    "This deployment's cloud binding credential, kept where every replica reads it. Registered only when several replicas are declared over a remote cluster driver; a single node keeps the credential in its local credential file.",
+    "This deployment's cloud binding credential, kept where every replica reads it. Registered only when several replicas are declared over the Redis cluster driver; a single node keeps the credential in its local credential file.",
   displayNameField: 'slot',
   nameField: 'slot', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
   highlightFields: ['slot', 'runtime_id', 'bound_at'],

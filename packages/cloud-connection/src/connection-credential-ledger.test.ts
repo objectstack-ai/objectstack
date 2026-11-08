@@ -17,8 +17,8 @@
  *    replica on another crypto key, an engine with no crypto provider and a
  *    runtime with no data engine each refuse by naming the remedy, and none is
  *    read as "not bound"; a single node's file is moved into the empty row once;
- *  - the plugin takes the shared row only for declared replicas over a remote
- *    cluster driver, moves the file before its first door, reports a missing
+ *  - the plugin takes the shared row only for declared replicas over the Redis
+ *    cluster driver (and never over another driver), moves the file before its first door, reports a missing
  *    data engine at `error`, and refuses a bind it cannot seal to the caller
  *    rather than answering it as connected;
  *  - two OS processes, each with its own working directory and credential
@@ -58,6 +58,7 @@ import {
 import { CloudConnectionPlugin } from './cloud-connection-plugin.js';
 import { SysCloudBindingCredential } from './sys-cloud-binding-credential.object.js';
 import { bindCatalogFromTables } from './__tests__/security-catalog.testkit.js';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PKG = resolve(HERE, '..');
@@ -210,7 +211,7 @@ function pluginContext(services: Record<string, unknown>) {
     return { ctx, registered, logs, fire };
 }
 
-describe('[#31554] the plugin chooses the shared row only for declared replicas over a remote driver', () => {
+describe('[#31554] the plugin chooses the shared row only for declared replicas over the Redis driver', () => {
     afterEach(() => { vi.unstubAllEnvs(); });
 
     it("registers the object, says so once, and moves a single node's file into the row before the first door", async () => {
@@ -252,8 +253,14 @@ describe('[#31554] the plugin chooses the shared row only for declared replicas 
         const engine = bindCatalogFromTables({
             find: (o: string, q: unknown) => (o === CLOUD_BINDING_CREDENTIAL_OBJECT ? ql.find(o, q as never) : Promise.resolve(grants[o] ?? [])),
             insert: (o: string, d: unknown, x: unknown) => ql.insert(o, d as never, x as never),
-            update: (o: string, d: unknown, x: unknown) => ql.update(o, d as never, x as never),
-            delete: (o: string, x: unknown) => ql.delete(o, x as never),
+            update: (o: string, d: unknown, x: unknown) => {
+                assertEngineUpdateDispatch(d as never, x as never);
+                return ql.update(o, d as never, x as never);
+            },
+            delete: (o: string, x: unknown) => {
+                assertEngineDeleteDispatch(x as never);
+                return ql.delete(o, x as never);
+            },
             resolveSecretField: (o: string, id: string, f: string) => ql.resolveSecretField(o, id, f),
         }, grants);
         const routes = new Map<string, (c: any) => Promise<any>>();
@@ -316,7 +323,7 @@ describe('[#31554] the plugin chooses the shared row only for declared replicas 
  * `CloudConnectionPlugin` (this checkout's source, through tsx) over a real
  * ObjectQL engine on the shared SQLite file, the local crypto provider on the
  * shared key, `OS_CLUSTER_REPLICAS=2` and a cluster service whose driver is
- * remote. It answers commands over IPC by calling the plugin's own doors and
+ * Redis. It answers commands over IPC by calling the plugin's own doors and
  * its `cloud-binding` service.
  */
 const REPLICA_SCRIPT = [

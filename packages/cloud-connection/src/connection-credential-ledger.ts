@@ -12,13 +12,19 @@
  *     {@link fileCredentialLedger} is a pass-through, so the path, the bytes
  *     and the 0600 mode do not move.
  *   - **Several replicas** — declared (`OS_CLUSTER_REPLICAS` > 1 or
- *     `OS_EXPECT_MULTI_NODE=true`) AND served by a remote cluster driver — keep
+ *     `OS_EXPECT_MULTI_NODE=true`) AND served by the Redis cluster driver — keep
  *     it in the one `sys_cloud_binding_credential` row of the database every
  *     replica shares ({@link SharedConnectionCredentialLedger}). A bind on any
  *     replica is read by all of them; an unbind clears it for all of them. Both
- *     conditions, never one (the rule every multi-replica card follows): a
- *     declaration over the in-process driver is the split-brain guard's to
- *     refuse, and a remote driver with nothing declared is a single node.
+ *     conditions, never one (the rule every multi-replica card follows:
+ *     {@link sharesCloudBindingCredential}): a declaration over the in-process
+ *     driver is the split-brain guard's to refuse, a declaration over any other
+ *     driver is not a topology these cards serve, and Redis with nothing
+ *     declared is a single node.
+ *
+ * Before the kernel, the host's config reads the same row once through
+ * `readCloudBindingCredentialBeforeBoot` (`connection-credential-preboot.ts`)
+ * for the multi-node licence gate.
  *
  * Why the database row and not the cluster key-value store, and how the row
  * is sealed: `sys-cloud-binding-credential.object.ts`.
@@ -42,6 +48,29 @@
  */
 
 import { ConnectionCredentialStore, type StoredConnectionCredential } from './connection-credential-store.js';
+import { declaresMultiNode } from '@objectstack/service-cluster';
+
+/**
+ * The one cluster driver whose replicas share the binding credential. The
+ * multi-replica cards take effect only over Redis (cloud#3814 R2/R3); the
+ * entitlement half gates on the same driver.
+ */
+export const CLOUD_BINDING_SHARED_CLUSTER_DRIVER = 'redis';
+
+/**
+ * Does this deployment keep the binding credential in the shared row? Exactly
+ * when replicas are declared (`declaresMultiNode`, the predicate the
+ * entitlement half reads, so the two licence halves cannot drift) AND the
+ * cluster driver is {@link CLOUD_BINDING_SHARED_CLUSTER_DRIVER}. The plugin
+ * asks it with the cluster service's driver; the pre-boot read asks it with
+ * `OS_CLUSTER_DRIVER`.
+ */
+export function sharesCloudBindingCredential(
+    env: Readonly<Record<string, string | undefined>>,
+    clusterDriver: string | undefined,
+): boolean {
+    return declaresMultiNode(env) && clusterDriver?.trim() === CLOUD_BINDING_SHARED_CLUSTER_DRIVER;
+}
 
 /** The object a shared binding credential lives in (`sys-cloud-binding-credential.object.ts`). */
 export const CLOUD_BINDING_CREDENTIAL_OBJECT = 'sys_cloud_binding_credential';
@@ -68,7 +97,7 @@ export const SHARED_CREDENTIAL_REFRESH_MS = 30_000;
 export interface ConnectionCredentialLedger {
     /**
      * `true` when the credential lives in the shared database row (replicas
-     * declared over a remote cluster driver); `false` on a single node, where
+     * declared over the Redis cluster driver); `false` on a single node, where
      * it lives in the local file.
      */
     readonly shared: boolean;
@@ -192,7 +221,7 @@ function normalized(credential: StoredConnectionCredential): StoredConnectionCre
 
 /**
  * The binding credential in the one `sys_cloud_binding_credential` row every
- * replica shares. Construct it only when replicas are declared over a remote
+ * replica shares. Construct it only when replicas are declared over the Redis
  * cluster driver, and only after the object is registered.
  */
 export class SharedConnectionCredentialLedger implements ConnectionCredentialLedger {

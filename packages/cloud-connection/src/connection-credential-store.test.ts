@@ -327,7 +327,8 @@ describe('CloudConnectionPlugin credential behavior', () => {
 /**
  * [#31554] The single node is untouched by the shared binding credential. A
  * node that declares no replicas — or declares them over the in-process
- * driver, or with no cluster service at all — keeps the credential in its
+ * driver, over any driver other than Redis, or with no cluster service at
+ * all — keeps the credential in its
  * file: the same path, the same bytes, mode 0600, nothing registered with the
  * manifest service for it, and the credential reader answering from the file.
  * The bytes below are the ones `ConnectionCredentialStore.write` produced
@@ -340,6 +341,7 @@ describe('[#31554] a single node keeps the binding credential in its file', () =
         ['no replicas declared, a remote cluster driver composed', { OS_CLUSTER_REPLICAS: '', OS_EXPECT_MULTI_NODE: '' }, { cluster: { driver: 'redis', nodeId: 'n1' } }],
         ['replicas declared over the in-process driver', { OS_CLUSTER_REPLICAS: '3', OS_EXPECT_MULTI_NODE: '' }, { cluster: { driver: 'memory', nodeId: 'n1' } }],
         ['replicas declared with no cluster service composed', { OS_CLUSTER_REPLICAS: '', OS_EXPECT_MULTI_NODE: 'true' }, {}],
+        ['replicas declared over a cluster driver other than Redis', { OS_CLUSTER_REPLICAS: '3', OS_EXPECT_MULTI_NODE: '' }, { cluster: { driver: 'postgres', nodeId: 'n1' } }],
     ];
 
     it.each(topologies)('%s: bind/poll writes the same file, bytes and mode, and registers nothing', async (_label, env, services) => {

@@ -154,12 +154,13 @@ import {
     SHARED_CREDENTIAL_REFRESH_MS,
     SharedConnectionCredentialLedger,
     fileCredentialLedger,
+    sharesCloudBindingCredential,
     type BindingCredentialEngine,
     type CloudBindingCredentialReader,
     type ConnectionCredentialLedger,
 } from './connection-credential-ledger.js';
 import { SysCloudBindingCredential } from './sys-cloud-binding-credential.object.js';
-import { declaresMultiNode, isInProcessClusterDriver } from '@objectstack/service-cluster';
+import { declaresMultiNode } from '@objectstack/service-cluster';
 import { createCloudBinding } from './cloud-binding.js';
 import { CLOUD_BINDING_SERVICE, type ICloudBindingService } from '@objectstack/spec/contracts';
 import { CLOUD_CONNECTION_CAPABILITY, CLOUD_CONNECTION_UI_BUNDLE } from './cloud-connection-ui.js';
@@ -348,7 +349,7 @@ export interface CloudConnectionPluginConfig {
      * `<cwd>/.objectstack/cloud-connection.json` — where the bind flow
      * persists the `oscc_…` runtime bearer for self-hosted runtimes.
      *
-     * A single node only: with several replicas declared over a remote cluster
+     * A single node only: with several replicas declared over the Redis cluster
      * driver the credential lives in the shared database row instead
      * (`connection-credential-ledger.ts`), and this file is read once, to move
      * a binding made before the deployment was scaled out.
@@ -358,7 +359,7 @@ export interface CloudConnectionPluginConfig {
      * How often, in ms, a replica re-reads the shared binding credential for
      * the `cloud-binding` service's synchronous readers. Default
      * {@link SHARED_CREDENTIAL_REFRESH_MS}. Read only when replicas are
-     * declared over a remote cluster driver; a single node has nothing to
+     * declared over the Redis cluster driver; a single node has nothing to
      * re-read. The plugin's own doors re-read at every request regardless.
      */
     sharedCredentialRefreshMs?: number;
@@ -386,7 +387,7 @@ export class CloudConnectionPlugin implements Plugin {
     /**
      * [#31554] Where the binding credential is read and written: the file
      * above on a single node, the shared database row when replicas are
-     * declared over a remote cluster driver. Chosen once, in `init()`.
+     * declared over the Redis cluster driver. Chosen once, in `init()`.
      */
     private ledger: ConnectionCredentialLedger;
     /** The read half of {@link ledger}, registered as {@link CLOUD_BINDING_CREDENTIAL_SERVICE}; follows the ledger `init()` chose. */
@@ -438,16 +439,16 @@ export class CloudConnectionPlugin implements Plugin {
     /**
      * [#31554] Where this boot keeps the binding credential.
      *
-     * The shared database row exactly when BOTH hold: replicas are declared
+     * The shared database row exactly when BOTH hold
+     * ({@link sharesCloudBindingCredential}): replicas are declared
      * (`declaresMultiNode`, the split-brain guard's own predicate) and the
-     * cluster service runs a remote driver (`isInProcessClusterDriver`, the
-     * guard's own vocabulary). Anything else is a single node, and gets the
-     * local file with nothing registered, nothing logged and nothing read
-     * differently. Read in `init()`: the cluster plugin and ObjectQL init
+     * cluster service runs the Redis driver. Anything else — a single node, the
+     * in-process driver, any other driver — gets the local file with nothing
+     * registered, nothing logged and nothing read differently. Read in `init()`: the cluster plugin and ObjectQL init
      * first when composed ({@link optionalDependencies}), so an absent cluster
      * service here is a fact, not a race.
      *
-     * Replicas declared over a remote driver with no `manifest` service to
+     * Replicas declared over the Redis driver with no `manifest` service to
      * register the object through is a consistency failure, not a choice: each
      * replica would keep its own file, and a bind would reach one of them. It is
      * reported once, at `error`, with the consequence and the fix, and the file
@@ -460,7 +461,7 @@ export class CloudConnectionPlugin implements Plugin {
             const cluster = ctx.getService<{ driver?: unknown } | undefined>('cluster');
             driver = typeof cluster?.driver === 'string' ? cluster.driver : undefined;
         } catch { /* no cluster service composed */ }
-        if (!driver || isInProcessClusterDriver(driver)) return this.ledger;
+        if (!sharesCloudBindingCredential(process.env, driver)) return this.ledger;
         try {
             ctx.getService<{ register(m: unknown): void }>('manifest').register({
                 id: 'com.objectstack.cloud.connection.credential',
@@ -475,11 +476,10 @@ export class CloudConnectionPlugin implements Plugin {
         } catch {
             // The registry's own error is not interpolated: this is the line an
             // operator acts on, and it must say what to do.
-            const report = ctx.logger?.error ?? ctx.logger?.warn;
-            report?.call(
-                ctx.logger,
-                '[CloudConnectionPlugin] several replicas are declared over the remote cluster driver '
-                    + `"${driver}", but no manifest service is composed to register the shared binding credential `
+            this.reportError(
+                ctx,
+                '[CloudConnectionPlugin] several replicas are declared over the Redis cluster driver, but no manifest '
+                    + 'service is composed to register the shared binding credential '
                     + '(sys_cloud_binding_credential). Each replica keeps its own credential file, so a bind made on one '
                     + 'replica is not seen by the others and their online licence checks present no credential. Compose the '
                     + 'data engine (ObjectQL) on every replica, or declare a single replica.',
@@ -487,11 +487,22 @@ export class CloudConnectionPlugin implements Plugin {
             return this.ledger;
         }
         ctx.logger?.info?.(
-            '[CloudConnectionPlugin] several replicas are declared over the remote cluster driver '
-                + `"${driver}": the cloud binding credential is kept in the shared database (sys_cloud_binding_credential), `
+            '[CloudConnectionPlugin] several replicas are declared over the Redis cluster driver: the cloud binding '
+                + 'credential is kept in the shared database (sys_cloud_binding_credential), '
                 + 'encrypted with the host crypto provider, and every replica reads it',
         );
         return new SharedConnectionCredentialLedger(() => this.resolveDataEngine(ctx));
+    }
+
+    /**
+     * One `error` line, on the logger's own receiver (its channels are methods
+     * that reach for `this`); a logger without an `error` channel gets `warn`.
+     */
+    private reportError(ctx: PluginContext, message: string): void {
+        const logger = ctx.logger;
+        if (!logger) return;
+        if (typeof logger.error === 'function') logger.error(message);
+        else logger.warn?.(message);
     }
 
     /** The data engine the shared row is read and written through — ObjectQL, resolved at call time. */
@@ -521,9 +532,8 @@ export class CloudConnectionPlugin implements Plugin {
             const message = err instanceof Error ? err.message : String(err);
             if (message === this.lastSharedReadFailure) return;
             this.lastSharedReadFailure = message;
-            const report = ctx.logger?.error ?? ctx.logger?.warn;
-            report?.call(
-                ctx.logger,
+            this.reportError(
+                ctx,
                 '[CloudConnectionPlugin] the shared cloud binding credential could not be read, so this replica keeps acting on '
                     + 'the binding it last read: a bind or a disconnect made on another replica is not seen here until a read '
                     + 'succeeds. Restore the database connection, and give every replica the same secret key (OS_SECRET_KEY '
@@ -550,9 +560,8 @@ export class CloudConnectionPlugin implements Plugin {
         } catch (err) {
             // Durability: the binding this node held is not where the replicas
             // read it, and nothing else will say so.
-            const report = ctx.logger?.error ?? ctx.logger?.warn;
-            report?.call(
-                ctx.logger,
+            this.reportError(
+                ctx,
                 `[CloudConnectionPlugin] the cloud binding credential in ${this.store.path} could not be moved into the shared `
                     + 'database, so no replica presents it to the cloud. Connect again from any replica (Setup, Cloud '
                     + `Connection): ${err instanceof Error ? err.message : String(err)}`,
