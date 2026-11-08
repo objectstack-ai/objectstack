@@ -922,6 +922,75 @@ export interface DisableDependentRule {
     fields: string[];
 }
 
+/**
+ * [#31232] The name the dependent-rule verdict is registered under on the
+ * protocol's pre-uninstall guard registry (`registerUninstallGuard`).
+ */
+export const PACKAGE_DEPENDENT_RULES_UNINSTALL_GUARD = 'runtime.package-dependent-rules';
+
+/** The protocols this process registered the dependent-rule guard on — once each. */
+const DEPENDENT_RULES_GUARD_REGISTERED = new WeakSet<object>();
+
+/**
+ * [#31232] The refusal an uninstall of `packageId` answers while an active
+ * validation rule of another enabled package reads a field the package adds
+ * through `objectExtensions`: the disable door's verdict
+ * ({@link readDisableDependentRules}) and sentence
+ * ({@link disableDependentRulesMessage}, in its uninstall form) under an
+ * uninstall lead, as the wire pair `409`
+ * `PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE`. `undefined` when no rule
+ * depends. Pure over `registry`. The one refusal both the uninstall verb's
+ * guard and `DELETE /packages/:id` answer.
+ */
+export function packageUninstallDependentRulesRefusal(
+    registry: unknown,
+    packageId: string,
+): { code: string; status: number; message: string } | undefined {
+    const dependents = readDisableDependentRules(registry, packageId);
+    if (dependents.length === 0) return undefined;
+    return {
+        code: PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE.code,
+        status: PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE.status,
+        message: disableDependentRulesMessage(`Package '${packageId}' cannot be uninstalled`, dependents, { operation: 'uninstall' }),
+    };
+}
+
+/**
+ * [#31232, ADR-0141 Open items 4] Register, once per kernel, the dependent-rule
+ * verdict as a pre-uninstall guard on the protocol
+ * ({@link PACKAGE_DEPENDENT_RULES_UNINSTALL_GUARD}, `registerUninstallGuard`),
+ * so the uninstall verb itself (`deletePackage`) refuses, before it reads or
+ * moves anything, an uninstall that would withdraw a field an active
+ * validation rule of another enabled package reads
+ * ({@link packageUninstallDependentRulesRefusal}). Once withdrawn, the rule
+ * cannot be evaluated and fails closed, so every write to its object would be
+ * refused with no package left to re-enable.
+ *
+ * Through the guard registry because every in-process caller of the verb (a
+ * host's own uninstall tool, install-local's pair-install undo, the
+ * unmanaged-import rollback) reaches it there, not only the package door:
+ * `@objectstack/metadata-protocol` does not know the schema registry's fold the
+ * verdict reads, and must not import this package. The mirror of
+ * `ensurePackageStateUninstallCleanup`, which registers the after-half.
+ *
+ * The registry is the engine's, resolved when the guard is asked, as the
+ * boot's withheld-field report resolves it. A kernel with no protocol, or a
+ * protocol without the guard registry, registers nothing, and its verb
+ * uninstalls as before.
+ */
+export function ensureDependentRulesUninstallGuard(ctx: { getService<T = unknown>(name: string): T }): void {
+    let protocol: { registerUninstallGuard?: (name: string, guard: (args: { packageId: string }) => { code: string; status: number; message: string } | undefined) => void } | undefined;
+    try { protocol = ctx.getService<any>('protocol'); } catch { return; }
+    if (!protocol || typeof protocol.registerUninstallGuard !== 'function') return;
+    if (DEPENDENT_RULES_GUARD_REGISTERED.has(protocol)) return;
+    DEPENDENT_RULES_GUARD_REGISTERED.add(protocol);
+    protocol.registerUninstallGuard(PACKAGE_DEPENDENT_RULES_UNINSTALL_GUARD, ({ packageId }) => {
+        let registry: unknown;
+        try { registry = ctx.getService<{ registry?: unknown }>('objectql')?.registry; } catch { registry = undefined; }
+        return packageUninstallDependentRulesRefusal(registry, packageId);
+    });
+}
+
 /** The fields one validation rule reads: on its own object, and one hop through a reference field. */
 interface RuleFieldReads {
     readonly own: Set<string>;
@@ -3787,15 +3856,21 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // and the environment's state exactly as they were. A package
             // already disabled withholds its fields already: the verdict is
             // empty and the uninstall proceeds as before.
-            const dependents = readDisableDependentRules(registry, id);
-            if (dependents.length > 0) {
+            //
+            // [#31232] Through {@link packageUninstallDependentRulesRefusal},
+            // the ONE refusal the uninstall verb's guard answers too
+            // (`ensureDependentRulesUninstallGuard`), so this door and every
+            // in-process caller of `deletePackage` answer the same code and
+            // the same words. Asked here as well, before the protocol is
+            // resolved, because a host whose protocol has no `deletePackage`,
+            // or that registered no guard, uninstalls through the registry
+            // below; with a guard registered, this answer comes first and the
+            // verb's guard is not reached on this path.
+            const dependentRefusal = packageUninstallDependentRulesRefusal(registry, id);
+            if (dependentRefusal) {
                 return {
                     handled: true,
-                    response: deps.error(
-                        disableDependentRulesMessage(`Package '${id}' cannot be uninstalled`, dependents, { operation: 'uninstall' }),
-                        PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE.status,
-                        { code: PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE.code },
-                    ),
+                    response: deps.error(dependentRefusal.message, dependentRefusal.status, { code: dependentRefusal.code }),
                 };
             }
             const protocol = await resolveProtocol(deps, _context);
