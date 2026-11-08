@@ -57,7 +57,6 @@
 
 import { isGrantActive, securityCatalogReaderOf, type SecurityCatalogReader } from '@objectstack/core';
 import { declaredHttpStatus } from '@objectstack/types';
-import { referenceTargetOf } from '@objectstack/spec/data';
 import type { AdminScope, AdminScopeParsed, PermissionSet } from '@objectstack/spec/security';
 import {
   ADMIN_FULL_ACCESS,
@@ -564,27 +563,23 @@ function namesTargetUser(t: DelegatedTarget): boolean {
 
 /**
  * Does the engine's reference check ask the caller's own read door about the
- * holder `object`'s write names, and refuse one it does not return? The live
- * schema's `user_id` is a non-`readonly` `lookup` / `user` reference to
- * `sys_user`, and `sys_user` is registered: the conditions under which
- * `assertReferencesResolve` (`@objectstack/objectql`) asks, and the same test
- * the grant-holder membership hook steps aside on
- * (`grant-holder-membership-refusal.ts`, `referenceCheckAsksCaller`). Anywhere
- * else, an engine that hands over no schema included, it answers no, and the
- * holder is judged on its memberships alone: the gate refuses no named holder
- * the write would not be refused for anyway.
+ * holder `object`'s write names, and refuse one it does not return? It asks
+ * when the live schema's `user_id` is a non-`readonly` `lookup` / `user`
+ * reference to `sys_user` and `sys_user` is registered
+ * (`assertReferencesResolve`, `@objectstack/objectql`; the grant-holder
+ * membership hook's `referenceCheckAsksCaller` steps aside on the same test).
+ * The direct-grant object declares that reference itself
+ * (`sys-user-permission-set.object.ts`), so its target is not resolved again
+ * here: the test reads only what a composition can still change, whether
+ * `sys_user` is registered and whether the live field is still a writable
+ * lookup. Anywhere else, an engine that hands over no schema included, it
+ * answers no, and the holder is judged on its memberships alone: the gate
+ * refuses no named holder the write would not be refused for anyway.
  */
 function referenceCheckAsksCallerAboutUser(ql: any, object: string): boolean {
-  if (typeof ql?.getSchema !== 'function') return false;
+  if (typeof ql?.getSchema !== 'function' || !ql.getSchema(GRANT_HOLDER_OBJECT)) return false;
   const def = ql.getSchema(object)?.fields?.[GRANT_HOLDER_FIELD];
-  if (!def || def.readonly === true || (def.type !== 'lookup' && def.type !== 'user')) return false;
-  let target: string | undefined;
-  try {
-    target = referenceTargetOf(def);
-  } catch {
-    return false;
-  }
-  return target === GRANT_HOLDER_OBJECT && Boolean(ql.getSchema(GRANT_HOLDER_OBJECT));
+  return Boolean(def) && def.readonly !== true && (def.type === 'lookup' || def.type === 'user');
 }
 
 export class DelegatedAdminGate {
