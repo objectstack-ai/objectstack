@@ -45,20 +45,20 @@ describe('paged reads of a columnMap-keyed federated object', () => {
     driver = run.driver;
     const rows = await driver.find('t', { limit: 2 });
     expect(rows.map((r: any) => r.id)).toEqual(['a', 'b']);
-    expect(run.sql.at(-1)).toMatch(/order by [`"]T_NO[`"] asc/);
+    expect(run.sql[run.sql.length - 1]).toMatch(/order by [`"]T_NO[`"] asc/);
   });
 
   it('a sorted page breaks its ties on the mapped key, in the last key’s direction', async () => {
     const run = await over({ T_NO: 'id', STATUS: 'status' });
     driver = run.driver;
     await driver.find('t', { orderBy: [{ field: 'status', order: 'desc' }], limit: 2 });
-    expect(run.sql.at(-1)).toMatch(/order by [`"]STATUS[`"] desc, [`"]T_NO[`"] desc/);
+    expect(run.sql[run.sql.length - 1]).toMatch(/order by [`"]STATUS[`"] desc, [`"]T_NO[`"] desc/);
   });
 
   it('an object with no mapped key is left alone: no column is guessed', async () => {
     const run = await over(undefined);
     driver = run.driver;
     await driver.find('t', { orderBy: [{ field: 'status', order: 'asc' }], limit: 2 }).catch(() => undefined);
-    expect(run.sql.at(-1)).not.toMatch(/[`"]id[`"]/);
+    expect(run.sql[run.sql.length - 1]).not.toMatch(/[`"]id[`"]/);
   });
 });
