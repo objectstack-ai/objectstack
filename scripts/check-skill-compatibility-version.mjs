@@ -347,6 +347,159 @@ export function deriveFrontmatter(text, pkgs) {
 }
 
 // ---------------------------------------------------------------------------
+// Body versions — the exact versions a skill's BODY names
+// ---------------------------------------------------------------------------
+//
+// The frontmatter is not the only place a skill names a release. A body names
+// one in two shapes, and both drifted while the frontmatter gate was green:
+// `references/bootstrap.md`'s starter package.json pinned `18.1.0` after the
+// workspace moved on, and a rule page named `18.3.0` while the package was
+// `18.2.0`. The contract here is the card's: a body version is EQUAL to that
+// package's workspace version, or it sits in a sentence that reads as history
+// (`since`, `removed in`, `until`, …) — a past release named as a past release.
+//
+//   install shape  `"@objectstack/<pkg>": "<x.y.z>"` (a `^`/`~` range spelled
+//                  the same way). Always judged, history wording or not: it is
+//                  what an author copies into a package.json.
+//   prose shape    `@objectstack/<pkg> <x.y.z>` or `@objectstack/<pkg>@<x.y.z>`.
+//
+// Frontmatter is skipped (the two derived lines are judged above), and so is
+// nothing else: a starter package.json lives in a fenced block on purpose.
+//
+// `deriveBodyVersions` is the pure derivation of every non-history body
+// version, kept apart from `deriveFrontmatter` because the token ratchet asks
+// that function which ONE line of a SKILL.md is the release stamp.
+
+const BODY_INSTALL_PIN_RE = /"@objectstack\/([a-z0-9][a-z0-9-]*)"(\s*:\s*")([~^]?)(\d+\.\d+\.\d+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?)"/g;
+const BODY_PROSE_VERSION_RE = /@objectstack\/([a-z0-9][a-z0-9-]*)([ @]v?)(\d+\.\d+\.\d+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?)/g;
+
+/** Words that make a sentence name a past release rather than the current one. */
+const HISTORY_RE = /\b(?:since|until|before|as of|(?:removed|retired|added|introduced|deprecated|renamed|changed|shipped|landed) in)\b/i;
+
+/** The frontmatter's line count (0 when there is none), so body scans start below it. */
+function frontmatterEnd(lines) {
+  if (lines[0]?.trim() !== '---') return 0;
+  const end = lines.findIndex((l, i) => i > 0 && l.trim() === '---');
+  return end === -1 ? 0 : end + 1;
+}
+
+/**
+ * Every body version in one file, each with its line, shape, the version
+ * named, and whether its sentence reads as history.
+ *
+ * @returns {Array<{line: number, shape: 'install' | 'prose', pkg: string, version: string, history: boolean}>}
+ */
+export function extractBodyVersions(text) {
+  const lines = text.split('\n');
+  const out = [];
+  const start = frontmatterEnd(lines);
+  // The sentence a match sits in, across line breaks (prose is wrapped): the
+  // paragraph (its run of non-blank lines) joined with spaces, cut back to the
+  // previous sentence end and forward to the next.
+  const sentenceAt = (i, col) => {
+    let top = i;
+    while (top - 1 >= start && lines[top - 1].trim() !== '') top -= 1;
+    let bottom = i;
+    while (bottom + 1 < lines.length && lines[bottom + 1].trim() !== '') bottom += 1;
+    const para = lines.slice(top, bottom + 1).join(' ');
+    const at = lines.slice(top, i).reduce((n, l) => n + l.length + 1, 0) + col;
+    const head = para.slice(0, at).split(/[.!?]\s+/).pop();
+    const tail = para.slice(at).split(/[.!?](?:\s|$)/)[0];
+    return `${head}${tail}`;
+  };
+  for (let i = start; i < lines.length; i += 1) {
+    for (const m of lines[i].matchAll(BODY_INSTALL_PIN_RE)) {
+      out.push({ line: i + 1, shape: 'install', pkg: `@objectstack/${m[1]}`, version: m[4], history: false });
+    }
+    for (const m of lines[i].matchAll(BODY_PROSE_VERSION_RE)) {
+      out.push({ line: i + 1, shape: 'prose', pkg: `@objectstack/${m[1]}`, version: m[3], history: HISTORY_RE.test(sentenceAt(i, m.index)) });
+    }
+  }
+  return out;
+}
+
+/**
+ * The body half of the check, over every skill markdown file.
+ *
+ * @param files [{ file, text }] every `*.md` under skills/
+ * @param pkgs  Map<name, {version, file}>
+ * @returns {{ problems: string[], count: number }}
+ */
+export function judgeBodyVersions(files, pkgs) {
+  const problems = [];
+  let count = 0;
+  for (const { file, text } of files) {
+    for (const v of extractBodyVersions(text)) {
+      count += 1;
+      const actual = pkgs.get(v.pkg);
+      if (!actual) {
+        problems.push(`${file}:${v.line}\n    names ${v.pkg} ${v.version}, but no workspace package is named ${v.pkg}\n` +
+          '    fix: correct the package name, or drop the version.');
+        continue;
+      }
+      if (v.version === actual.version || (v.shape === 'prose' && v.history)) continue;
+      problems.push(
+        `${file}:${v.line}\n` +
+        `    names:  ${v.pkg} ${v.version}   (${v.shape === 'install' ? 'an install pin an author copies' : 'prose that does not read as history'})\n` +
+        `    actual: ${v.pkg} ${actual.version}   (${actual.file})\n` +
+        (v.shape === 'install'
+          ? `    fix: run \`${FIX_COMMAND}\` — it rewrites the pin to "${actual.version}"; the version is derived, never typed.`
+          : `    fix: run \`${FIX_COMMAND}\` to name the current version, or say which past release it was ` +
+            '("since", "removed in", "until", …) if that is what the sentence means.'),
+      );
+    }
+  }
+  return { problems, count };
+}
+
+/**
+ * The `--fix` derivation for a body, pure: every body version that is not a
+ * history sentence becomes its package's workspace version (an install pin
+ * keeps its `^`/`~`). A version naming a package the workspace lacks is left
+ * for the check to refuse.
+ *
+ * @returns {{ text: string, changes: string[] }}
+ */
+export function deriveBodyVersions(text, pkgs) {
+  const lines = text.split('\n');
+  const changes = [];
+  const history = new Set(extractBodyVersions(text).filter((v) => v.history).map((v) => `${v.line}:${v.pkg}:${v.version}`));
+  for (let i = frontmatterEnd(lines); i < lines.length; i += 1) {
+    const to = (pkg, version) => {
+      const actual = pkgs.get(`@objectstack/${pkg}`);
+      if (!actual || actual.version === version || history.has(`${i + 1}:@objectstack/${pkg}:${version}`)) return null;
+      changes.push(`line ${i + 1}: @objectstack/${pkg} ${version} → ${actual.version}`);
+      return actual.version;
+    };
+    lines[i] = lines[i]
+      .replace(BODY_INSTALL_PIN_RE, (whole, pkg, sep, range, version) => {
+        const next = to(pkg, version);
+        return next === null ? whole : `"@objectstack/${pkg}"${sep}${range}${next}"`;
+      })
+      .replace(BODY_PROSE_VERSION_RE, (whole, pkg, sep, version) => {
+        const next = to(pkg, version);
+        return next === null ? whole : `@objectstack/${pkg}${sep}${next}`;
+      });
+  }
+  return { text: lines.join('\n'), changes };
+}
+
+/** Every `*.md` under skills/, as { file, text }, sorted by path. */
+export function readSkillMarkdown(root = REPO_ROOT) {
+  const out = [];
+  const walk = (rel) => {
+    for (const e of readdirSync(join(root, rel), { withFileTypes: true })) {
+      if (e.name === 'node_modules' || e.name.startsWith('.')) continue;
+      const child = `${rel}/${e.name}`;
+      if (e.isDirectory()) walk(child);
+      else if (e.isFile() && e.name.endsWith('.md')) out.push(child);
+    }
+  };
+  if (existsSync(join(root, SKILLS_DIR))) walk(SKILLS_DIR);
+  return out.sort().map((file) => ({ file, text: readFileSync(join(root, file), 'utf8') }));
+}
+
+// ---------------------------------------------------------------------------
 // Checks (pure — the self-test drives these with in-memory inputs)
 // ---------------------------------------------------------------------------
 
@@ -754,6 +907,16 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'stampedSkillPaths() equals the set --fix writes on an all-stale fixture, in walk order': 1,
   'a SKILL.md write outside stampedSkillPaths() stays unexpected under the guard\'s grep -vxF -f filter': 1,
   'stampedSkillPaths() THROWS on a tree with no skills, never an empty list': 1,
+  'body: an install pin at the workspace version → GREEN; one behind → RED naming file:line, both versions and the fix': 1,
+  'body: a ^/~ range pin is judged by its version and keeps its range under --fix': 1,
+  'body: prose at the current version → GREEN; a past version outside a history sentence → RED': 1,
+  'body: a past version in a history sentence (removed in / since / until), wrapped across lines → GREEN': 1,
+  'body: history wording one sentence away does not excuse a version': 1,
+  'body: an install pin is judged even when its sentence reads as history': 1,
+  'body: a body version naming a package the workspace lacks → RED': 1,
+  'body: frontmatter pins and the stamp are not body versions': 1,
+  'body: deriveBodyVersions rewrites every non-history version and nothing else; a second pass is a no-op': 1,
+  'body: the live catalog carries install pins to judge (lit control), every one naming a workspace package': 1,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -762,7 +925,106 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // the literal above, so the roster falls below this number; the table
 // cross-check in the floor block is the other half, and names WHICH label
 // collided.
-const SELF_TEST_BATTERY_FLOOR = 30;
+const SELF_TEST_BATTERY_FLOOR = 40;
+
+// The body-version rows of the self-test's derivation table, each a battery of
+// its own (see SELF_TEST_BATTERIES). A row throws to fail.
+function bodyVersionCases(PKGS) {
+  const V = PKGS.get('@objectstack/spec').version;
+  const md = (body) => `---\nname: x\ncompatibility: Requires @objectstack/spec 17.x\nmetadata:\n  version: "${V}"\n---\n\n${body}\n`;
+  const pkgJson = (v, range = '') => md(`\`\`\`json\n{ "dependencies": {\n  "@objectstack/spec": "${range}${v}",\n  "@objectstack/core": "${range}${v}"\n} }\n\`\`\``);
+  const judgeOne = (text) => judgeBodyVersions([{ file: 'skills/a/references/bootstrap.md', text }], PKGS);
+  const need = (cond, msg) => { if (!cond) throw new Error(msg); };
+  return [
+    {
+      label: 'body: an install pin at the workspace version → GREEN; one behind → RED naming file:line, both versions and the fix',
+      run: () => {
+        need(judgeOne(pkgJson(V)).problems.length === 0, 'a current pin was refused');
+        const r = judgeOne(pkgJson('17.0.0-rc.4'));
+        need(r.problems.length === 2, `want 2 problems, got ${r.problems.length}`);
+        need(r.problems[0].startsWith('skills/a/references/bootstrap.md:10') && r.problems[0].includes('17.0.0-rc.4')
+          && r.problems[0].includes(V) && r.problems[0].includes(FIX_COMMAND), r.problems[0]);
+      },
+    },
+    {
+      label: 'body: a ^/~ range pin is judged by its version and keeps its range under --fix',
+      run: () => {
+        need(judgeOne(pkgJson(V, '^')).problems.length === 0, 'a current ^ pin was refused');
+        need(judgeOne(pkgJson('16.0.0', '~')).problems.length === 2, 'a stale ~ pin was not refused');
+        const d = deriveBodyVersions(pkgJson('16.0.0', '~'), PKGS);
+        need(d.text === pkgJson(V, '~') && d.changes.length === 2, d.text);
+      },
+    },
+    {
+      label: 'body: prose at the current version → GREEN; a past version outside a history sentence → RED',
+      run: () => {
+        need(judgeOne(md(`Install @objectstack/spec ${V} and go.`)).problems.length === 0, 'current prose refused');
+        const r = judgeOne(md('Install @objectstack/spec@16.2.0 and go.'));
+        need(r.problems.length === 1 && r.problems[0].includes('does not read as history'), JSON.stringify(r.problems));
+      },
+    },
+    {
+      label: 'body: a past version in a history sentence (removed in / since / until), wrapped across lines → GREEN',
+      run: () => {
+        const text = md('`split` and `popover` were\nremoved in @objectstack/spec 16.2.0 (ADR-0087)\nand are refused. Present since @objectstack/spec 15.0.0. Accepted until @objectstack/core 16.0.0.');
+        const r = judgeOne(text);
+        need(r.problems.length === 0 && r.count === 3, JSON.stringify(r));
+        need(deriveBodyVersions(text, PKGS).changes.length === 0, '--fix rewrote a history sentence');
+      },
+    },
+    {
+      label: 'body: history wording one sentence away does not excuse a version',
+      run: () => {
+        const r = judgeOne(md('Removed in 16.0.0, sadly. Install @objectstack/spec 16.2.0 now.'));
+        need(r.problems.length === 1, JSON.stringify(r.problems));
+      },
+    },
+    {
+      label: 'body: an install pin is judged even when its sentence reads as history',
+      run: () => {
+        const r = judgeOne(md('Since the move: "@objectstack/spec": "16.0.0"'));
+        need(r.problems.length === 1 && r.problems[0].includes('an install pin'), JSON.stringify(r.problems));
+      },
+    },
+    {
+      label: 'body: a body version naming a package the workspace lacks → RED',
+      run: () => {
+        const r = judgeOne(md('"@objectstack/nope": "1.0.0"'));
+        need(r.problems.length === 1 && r.problems[0].includes('no workspace package is named @objectstack/nope'), JSON.stringify(r.problems));
+      },
+    },
+    {
+      label: 'body: frontmatter pins and the stamp are not body versions',
+      run: () => {
+        const text = `---\nname: x\ncompatibility: Requires @objectstack/spec 9.x and @objectstack/spec 9.0.0\nmetadata:\n  version: "9.0.0"\n---\n\nBody.\n`;
+        need(extractBodyVersions(text).length === 0, 'the frontmatter was read as body');
+        need(extractBodyVersions(md('Requires @objectstack/spec 17.x here.')).length === 0, 'an N.x pin was read as an exact version');
+      },
+    },
+    {
+      label: 'body: deriveBodyVersions rewrites every non-history version and nothing else; a second pass is a no-op',
+      run: () => {
+        const stale = md('Install @objectstack/spec 16.2.0. Removed in @objectstack/spec 16.0.0.\n\n```json\n"@objectstack/core": "16.2.0"\n```');
+        const want = md(`Install @objectstack/spec ${V}. Removed in @objectstack/spec 16.0.0.\n\n\`\`\`json\n"@objectstack/core": "${V}"\n\`\`\``);
+        const once = deriveBodyVersions(stale, PKGS);
+        need(once.text === want && once.changes.length === 2, once.text);
+        const twice = deriveBodyVersions(once.text, PKGS);
+        need(twice.text === once.text && twice.changes.length === 0, 'a second pass moved bytes');
+        need(deriveFrontmatter(once.text, PKGS).changes.length === 0, 'the body derivation touched the frontmatter');
+      },
+    },
+    {
+      label: 'body: the live catalog carries install pins to judge (lit control), every one naming a workspace package',
+      run: () => {
+        const pkgs = readWorkspacePackages();
+        const found = readSkillMarkdown().flatMap((f) => extractBodyVersions(f.text));
+        const install = found.filter((v) => v.shape === 'install');
+        need(install.length >= 1, `the live catalog yields ${install.length} install pin(s); the extractor stopped matching`);
+        need(found.every((v) => pkgs.has(v.pkg)), 'a live body version names a package the workspace lacks');
+      },
+    },
+  ];
+}
 
 function selfTest() {
   console.log('check-skill-compatibility-version self-test\n');
@@ -1133,6 +1395,7 @@ function selfTest() {
         }
       },
     },
+    ...bodyVersionCases(PKGS),
   ];
   for (const c of derivationCases) {
     registerCase(c.label);
