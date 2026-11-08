@@ -20,7 +20,7 @@ describe('SpecifierType', () => {
       'group', 'child_pane', 'info_banner', 'title_value',
       'text', 'textarea', 'password', 'email', 'url', 'phone',
       'number', 'toggle', 'select', 'radio', 'multiselect',
-      'slider', 'color', 'json', 'action_button',
+      'slider', 'color', 'json', 'map', 'action_button',
     ];
     for (const k of kinds) {
       expect(() => SpecifierType.parse(k)).not.toThrow();
@@ -192,6 +192,71 @@ describe('SpecifierSchema — layout-only specifiers', () => {
     expect(() =>
       SpecifierSchema.parse({ type: 'action_button', label: 'Test' })
     ).toThrow(/requires a 'handler'/);
+  });
+});
+
+describe('SpecifierSchema — `map`, keyed rows with typed value columns (#30208, ADR-0007 amended 2026-11-08)', () => {
+  const quotas = {
+    type: 'map',
+    key: 'quotas',
+    label: 'Row quotas',
+    keyColumn: { label: 'Object' },
+    columns: [{ name: 'rows', label: 'Max rows', kind: 'positive_integer' }],
+  } as const;
+  const overrides = {
+    type: 'map',
+    key: 'retention_overrides',
+    label: 'Retention overrides',
+    keyColumn: { label: 'Object' },
+    columns: [
+      { name: 'maxAge', label: 'Keep for', kind: 'duration' },
+      { name: 'expireAfter', label: 'Expire after', kind: 'duration' },
+    ],
+  } as const;
+
+  it('parses a one-column and a several-column map, keeping the columns as declared', () => {
+    const one = SpecifierSchema.parse(quotas);
+    expect(one.type).toBe('map');
+    expect(one.keyColumn).toEqual({ label: 'Object' });
+    expect(one.columns).toEqual([{ name: 'rows', label: 'Max rows', kind: 'positive_integer' }]);
+    const several = SpecifierSchema.parse(overrides);
+    // camelCase survives: the column name is the stored property.
+    expect(several.columns!.map((c) => c.name)).toEqual(['maxAge', 'expireAfter']);
+  });
+
+  it('is value-bearing: a map without a key is refused', () => {
+    const { key: _key, ...keyless } = quotas;
+    expect(() => SpecifierSchema.parse(keyless)).toThrow(/requires a 'key'/);
+  });
+
+  it('refuses a map without columns, with an empty column list, or without a key column', () => {
+    const { columns: _c, ...noColumns } = quotas;
+    expect(() => SpecifierSchema.parse(noColumns)).toThrow(/requires at least one value column in 'columns'/);
+    expect(() => SpecifierSchema.parse({ ...quotas, columns: [] })).toThrow(/requires at least one value column/);
+    const { keyColumn: _k, ...noKeyColumn } = quotas;
+    expect(() => SpecifierSchema.parse(noKeyColumn)).toThrow(/requires a 'keyColumn'/);
+  });
+
+  it('refuses a column kind outside the closed set, and a duplicate column', () => {
+    expect(() => SpecifierSchema.parse({
+      ...quotas, columns: [{ name: 'rows', label: 'Rows', kind: 'number' }],
+    })).toThrow();
+    expect(() => SpecifierSchema.parse({
+      ...overrides, columns: [overrides.columns[0], overrides.columns[0]],
+    })).toThrow(/Duplicate map column 'maxAge'/);
+  });
+
+  it('refuses `columns` and `keyColumn` on any other type', () => {
+    expect(() => SpecifierSchema.parse({
+      type: 'json', key: 'quotas', label: 'Row quotas', columns: quotas.columns,
+    })).toThrow(/must not declare 'columns' \(only a 'map' may\)/);
+    expect(() => SpecifierSchema.parse({
+      type: 'text', key: 'x', label: 'X', keyColumn: { label: 'Object' },
+    })).toThrow(/must not declare 'keyColumn'/);
+  });
+
+  it('`json` stays in the set for raw config', () => {
+    expect(SpecifierSchema.parse({ type: 'json', key: 'raw', label: 'Raw' }).type).toBe('json');
   });
 });
 

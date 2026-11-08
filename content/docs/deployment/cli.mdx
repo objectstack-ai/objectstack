@@ -167,9 +167,11 @@ Starts development mode. Three usage shapes:
 3. **Monorepo root** (cwd has `pnpm-workspace.yaml`) — orchestrates `pnpm -r dev` across packages.
 
 Once the local server is up, `os dev` in an interactive terminal offers
-**`d` to deploy**: it runs [`os deploy`](#os-deploy) in the same terminal, and
-when you are not logged in to ObjectOS Cloud the same key runs `os cloud login`
-first. Saving a file never deploys.
+**`d` to deploy**: it runs [`os deploy`](#os-deploy) in the same terminal. When
+the target is ObjectOS Cloud and you are not logged in, the same key runs
+`os cloud login` first. When the target is a runtime
+[`os environments use-runtime`](#deploy-to-a-self-hosted-runtime) remembered, the
+key deploys there and asks for no cloud login. Saving a file never deploys.
 
 ```bash
 os dev                     # Auto-compile cwd config, then start
