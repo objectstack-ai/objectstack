@@ -36,6 +36,7 @@ import type { SysMetadataRepository } from './sys-metadata-repository.js';
 import { ConflictError, assertProtocolCompat } from '@objectstack/metadata-core';
 import {
     planUnmanagedImport,
+    UNMANAGED_SEED_TYPE,
     unmanagedInstallPostureRefusal,
     unmanagedInstallRenameRefusal,
     type UnmanagedImportRenameRefusal,
@@ -550,17 +551,19 @@ export class ProtocolPackageCommitsFacet {
     }
 
     /** The body of `ObjectStackProtocolImplementation#importUnmanagedPackage`; the method's docblock there is its contract. */
-    static async importUnmanagedPackage(host: Pick<ProtocolHost, 'convertStoredItem' | 'engine' | 'installPackage' | 'isRuntimeCreateAllowed' | 'refuseOrganizationScopedWrite' | 'resolveFlowCanonicalizer' | 'rollBackUnmanagedImport' | 'saveMetaItem' | 'unmanagedImportCollisions'>, request: ImportUnmanagedPackageRequest & { actor?: string },): Promise<ImportUnmanagedPackageResponse> {
+    static async importUnmanagedPackage(host: Pick<ProtocolHost, 'convertStoredItem' | 'engine' | 'installPackage' | 'isRuntimeCreateAllowed' | 'refuseOrganizationScopedWrite' | 'resolveFlowCanonicalizer' | 'rollBackUnmanagedImport' | 'saveMetaItem' | 'unmanagedImportCollisions'>, request: ImportUnmanagedPackageRequest & { actor?: string; seedData?: boolean },): Promise<ImportUnmanagedPackageResponse> {
         const rawSourceId = (request as { manifest?: { id?: unknown } } | undefined)?.manifest?.id;
         const sourceLabel = typeof rawSourceId === 'string' && rawSourceId !== '' ? rawSourceId : '(unnamed)';
         // 1. FIRST, as on every package write verb.
         host.refuseOrganizationScopedWrite(`Package '${sourceLabel}'`, request);
 
-        // 2. The request, through its published declaration. The two keys that
-        //    are never a body's — the door's `actor`, and the organization the
-        //    refusal above has already judged — are read off before the parse.
-        const { actor, organizationId: _scopeJudgedAbove, ...body } =
-            (request ?? {}) as ImportUnmanagedPackageRequest & { actor?: string; organizationId?: unknown };
+        // 2. The request, through its published declaration. The keys that
+        //    are never a body's — the door's `actor`, the door's `seedData`
+        //    (#30808: the installer asked for the sample data), and the
+        //    organization the refusal above has already judged — are read off
+        //    before the parse.
+        const { actor, seedData, organizationId: _scopeJudgedAbove, ...body } =
+            (request ?? {}) as ImportUnmanagedPackageRequest & { actor?: string; seedData?: boolean; organizationId?: unknown };
         const declared = ImportUnmanagedPackageRequestSchema.safeParse(body);
         if (!declared.success) {
             const issues = zodIssuesToMetadataIssues(declared.error.issues);
@@ -581,6 +584,8 @@ export class ProtocolPackageCommitsFacet {
             // [#30794] Rename-on-install: judged by the plan, applied by the
             // duplicate's own engine (`package-namespace-rename.ts`).
             ...(declared.data.targetNamespace !== undefined ? { targetNamespace: declared.data.targetNamespace } : {}),
+            // [#30808] Each dataset as a `seed` item of the base: the receipt.
+            ...(seedData === true ? { seedData: true } : {}),
             // The save door's own predicate — registry-only, the hatch unread.
             isRuntimeCreatable: (type) => host.isRuntimeCreateAllowed(type),
             // The save door's own schema, asked which types declare the
@@ -648,7 +653,10 @@ export class ProtocolPackageCommitsFacet {
                 unconvertible.push(`${planned.type} '${declaredName}': ${e?.message ?? String(e)}`);
                 continue;
             }
-            if (rename === undefined) {
+            // [#30808] A seed item's records are data: the plan already named
+            // its object as the copy names it, and the free-text rewrite below
+            // would turn any record value spelled like an object name.
+            if (rename === undefined || planned.type === UNMANAGED_SEED_TYPE) {
                 prepared.push({ type: planned.type, name: planned.name, item: converted });
                 continue;
             }
