@@ -87,11 +87,15 @@ import { admittingCredentialKind, type AdmittingCredentialKind } from './securit
 import {
     GLOBAL_ACTION_OBJECT_KEY,
     actionHandlerObjectKeys,
+    actionHolderCoordinate,
     isObjectLessActionKey,
     reconcileActionRegistrations as reconcileActionRegistrationsPure,
+    resolveActionByPackage,
     resolveActionHandlerKeys,
     standaloneActionOwnerKey,
     SummaryRecomputeError,
+    type PackageScopedRefusal,
+    type PackageScopedRegistry,
 } from '@objectstack/objectql';
 import { earnedAnswerOf, staleSummaryRefusalOrThrow, withEarnedAnswer, type SummaryRecomputeRefusal } from '@objectstack/types';
 // [#28861] A landed write answers its success to the action handler's code.
@@ -5053,11 +5057,24 @@ export async function executeRegisteredAction(_deps: ActionExecutionDeps,
     objectName: string,
     candidates: string[],
     actionContext: any,
+    /**
+     * [ADR-0150 D4, #31673] The package coordinate of the declaration the
+     * caller resolved ({@link resolveRouteActionDeclaration}'s `packageId`):
+     * the engine then runs that package's handler under each probed key.
+     * Omitted, the call names no package — the engine's unqualified answer,
+     * unchanged.
+     */
+    packageId?: string,
 ): Promise<{ dispatched: boolean; result?: any }> {
     for (const obj of actionHandlerObjectKeys(objectName)) {
         for (const key of candidates) {
             try {
-                return { dispatched: true, result: await ql.executeAction(obj, key, actionContext) };
+                return {
+                    dispatched: true,
+                    result: await (packageId === undefined
+                        ? ql.executeAction(obj, key, actionContext)
+                        : ql.executeAction(obj, key, actionContext, { packageId })),
+                };
             } catch (err: any) {
                 if (!isActionNotRegisteredError(err)) throw err; // real handler failure → surface
             }
@@ -5376,6 +5393,83 @@ export async function actionHandlerOwnerRefusal(deps: ActionExecutionDeps,
 }
 
 
+/** What {@link resolveRouteActionDeclaration} answers. */
+export interface RouteActionDeclaration {
+    action: any;
+    obj: any;
+    degraded?: boolean;
+    reason?: string;
+    /**
+     * [ADR-0150 D3, #31673] The caller's package resolved the name to no one
+     * declaration: every candidate named, nothing picked.
+     */
+    refusal?: PackageScopedRefusal;
+    /**
+     * [ADR-0150 D4, #31673] The package coordinate of the resolved
+     * declaration, for a caller that named its package: the handler the
+     * dispatch runs is that package's (`executeRegisteredAction`).
+     */
+    packageId?: string;
+}
+
+/** Does `ql.registry` carry the reads R's resolver needs? */
+function packageScopedRegistryOf(ql: any): PackageScopedRegistry | undefined {
+    const registry = ql?.registry;
+    return registry
+        && typeof registry.packageScopedHoldersOf === 'function'
+        && typeof registry.getPackageScopedItem === 'function'
+        && typeof registry.getEnvironmentScopedItem === 'function'
+        && typeof registry.getAllPackages === 'function'
+        && typeof registry.getPackage === 'function'
+        ? registry as PackageScopedRegistry
+        : undefined;
+}
+
+/**
+ * [ADR-0150 D3/D4, #31673] The declaration a caller of package
+ * `callerPackageId` means by `actionName` on `objectName`, resolved through R
+ * ({@link resolveActionByPackage}) over the registry's `action` items.
+ * `undefined` when no registry item holds the name — the object's own
+ * declared actions and the metadata plane's rows are then read by the rungs
+ * of {@link resolveRouteActionDeclaration}, as for any caller.
+ *
+ * A resolved package holder's item is read back through the protocol's
+ * execution face with that package as the qualifier, so a disabled package's
+ * item is withheld here exactly as the by-name read withholds it (#25308);
+ * the environment's own item through the same read, unqualified.
+ */
+async function resolveRouteActionByPackage(deps: ActionExecutionDeps,
+    requestContext: HttpProtocolContext,
+    args: { ql: any; objectName: string; actionName: string; envId?: string; callerPackageId: string; obj: any },
+): Promise<RouteActionDeclaration | undefined> {
+    const { ql, objectName, actionName, envId, callerPackageId, obj } = args;
+    const registry = packageScopedRegistryOf(ql);
+    if (!registry) return undefined;
+    const resolution = resolveActionByPackage<any>(registry, { objectName, actionName, callerPackageId });
+    if (resolution.status === 'not-found') return undefined;
+    if (resolution.status === 'refused') return { action: undefined, obj, refusal: resolution };
+    const packageId = actionHolderCoordinate(resolution);
+    const protocol = await deps.resolveService(requestContext, 'protocol', envId) as ExposureDeclarationRead | undefined;
+    const byName = typeof protocol?.getMetaItemForExecution === 'function'
+        ? protocol.getMetaItemForExecution
+        : typeof protocol?.getMetaItem === 'function' ? protocol.getMetaItem : undefined;
+    if (!byName) return { action: resolution.item, obj, packageId };
+    let envelope: unknown;
+    try {
+        envelope = await byName.call(protocol, {
+            type: 'action', name: actionName,
+            ...(resolution.holder.kind === 'package' ? { packageId } : {}),
+        });
+    } catch (err: any) {
+        return { action: undefined, obj, degraded: true, reason: err?.message ?? String(err) };
+    }
+    const item: any = (envelope as { item?: unknown } | null | undefined)?.item;
+    const owner = item && typeof item === 'object' ? standaloneActionOwnerKey(item) : undefined;
+    const declared = item !== null && typeof item === 'object' && item.name === actionName
+        && (owner === objectName || isObjectLessActionKey(owner));
+    return { action: declared ? item : undefined, obj, packageId };
+}
+
 /**
  * Resolve the DECLARATION behind a `<object>/<action>` route pair — the
  * single source the REST `/actions` route reads for the ADR-0066 D4
@@ -5406,9 +5500,18 @@ export async function actionHandlerOwnerRefusal(deps: ActionExecutionDeps,
  */
 export async function resolveRouteActionDeclaration(deps: ActionExecutionDeps,
     requestContext: HttpProtocolContext,
-    args: { ql: any; objectName: string; actionName: string; envId?: string },
-): Promise<{ action: any; obj: any; degraded?: boolean; reason?: string }> {
-    const { ql, objectName, actionName, envId } = args;
+    args: {
+        ql: any; objectName: string; actionName: string; envId?: string;
+        /**
+         * [ADR-0150 D3/D4, #31673] The package the caller belongs to — an app's
+         * navigation, a qualified address. Given, the declaration is the one
+         * {@link resolveActionByPackage} resolves for that package; omitted,
+         * the call names no package and resolves as it always has.
+         */
+        callerPackageId?: string;
+    },
+): Promise<RouteActionDeclaration> {
+    const { ql, objectName, actionName, envId, callerPackageId } = args;
 
     let obj: any;
     try {
@@ -5417,6 +5520,18 @@ export async function resolveRouteActionDeclaration(deps: ActionExecutionDeps,
             ql?.registry?.getObject?.(objectName);
     } catch {
         obj = undefined; // schema unresolved → handler-only action
+    }
+
+    // [ADR-0150 D3/D4, #31673] A caller that names its package resolves the
+    // bare name by the ONE rule — its own package's declaration on this object
+    // (else object-less), else the unique holder in its declared closure, else
+    // a refusal naming every candidate — through R's resolver, never by the
+    // first match the rungs below take.
+    if (typeof callerPackageId === 'string' && callerPackageId !== '') {
+        const byPackage = await resolveRouteActionByPackage(deps, requestContext, {
+            ql, objectName, actionName, envId, callerPackageId, obj,
+        });
+        if (byPackage !== undefined) return byPackage;
     }
     const embedded = Array.isArray(obj?.actions)
         ? obj.actions.find((a: any) => a?.name === actionName)

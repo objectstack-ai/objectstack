@@ -66,6 +66,7 @@ import {
 // replacement text and the `/data` door's shared reads, so this door's crash
 // reading cannot drift from the `/data` door's. ⛔ Never re-inline its arms.
 import { actionsDoorAnswerOf, earnedAnswerOf, staleSummaryAnswerLines, type SummaryRecomputeRefusal } from '@objectstack/types';
+import { standardErrorCodeForHttpStatus } from '@objectstack/spec/api';
 // [ADR-0029 D9.6] The ONE "does a code package ship this?" reading, which the
 // activation write below asks to name the ledger row's package.
 import { isCodeArtifactBody, isTenantAuthored } from '@objectstack/metadata-core';
@@ -580,6 +581,9 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
     // read it.
     let actionSchema: any;
     let actionDef: any;
+    // [ADR-0150 D4, #31673] The resolved declaration's package coordinate, for
+    // a caller that named its package: the handler the dispatch runs is its.
+    let declarationPackageId: string | undefined;
     {
         // Standalone declarations (ObjectQL registry artifacts / Studio-
         // authored `action` rows) resolve here too, so a route whose action
@@ -593,6 +597,22 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
         });
         actionSchema = declaration?.obj;
         actionDef = declaration?.action;
+        declarationPackageId = declaration?.packageId;
+
+        // [ADR-0150 D3/D5, #31673] A caller that names its package and whose
+        // bare name resolves to no one declaration — two holders in its
+        // closure, or holders outside it — is answered with every candidate,
+        // never a pick. No door names a package yet: the qualified address
+        // (G1 #31691) and the Console's held package (U #31671) pass it.
+        if (declaration.refusal) {
+            return {
+                handled: true,
+                response: deps.error(declaration.refusal.message, 409, {
+                    code: standardErrorCodeForHttpStatus(409),
+                    candidates: declaration.refusal.candidates,
+                }),
+            };
+        }
 
         // [ADR-0110 D3] Resolution is a TRICHOTOMY, and only one branch may
         // dispatch. This block used to be a `try { … } catch { /* no gate to
@@ -818,6 +838,7 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
     // `../action-invocation-audit.ts`.
     const answer = await dispatchAdmittedRestAction(deps, _context, {
         objectName, actionName, actionDef, actionType, subject, record, recordId, reqParams, ql, ec, userFromAuth,
+        declarationPackageId,
     });
     const answered: any = answer.response;
     const answeredStatus: number = typeof answered?.status === 'number' ? answered.status : 500;
@@ -864,9 +885,11 @@ async function dispatchAdmittedRestAction(
         ql: any;
         ec: any;
         userFromAuth: ReturnType<typeof actorUserFromExecutionContext>;
+        /** [ADR-0150 D4, #31673] The resolved declaration's package coordinate, when the caller named its package. */
+        declarationPackageId?: string;
     },
 ): Promise<HttpDispatcherResult> {
-    const { objectName, actionName, actionDef, actionType, subject, record, recordId, reqParams, ql, ec, userFromAuth } = admitted;
+    const { objectName, actionName, actionDef, actionType, subject, record, recordId, reqParams, ql, ec, userFromAuth, declarationPackageId } = admitted;
     try {
         // ── declarative update ── [#15079] FIRST, ahead of the `type` switch
         // and ahead of the trusted-mode plumbing below. Contract point 1 reads
@@ -1076,6 +1099,7 @@ async function dispatchAdmittedRestAction(
             deps, ql, objectName,
             actionExec.resolveActionHandlerKeys(actionDef, actionName),
             actionContext,
+            declarationPackageId,
         );
         const result = dispatch.result;
         if (!dispatch.dispatched) {

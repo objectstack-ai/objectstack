@@ -35,6 +35,7 @@ import type { ActionActivationRow, ActionActivationStore, ActionActivationWriteO
 import type { ObjectQL } from './engine.js';
 import { standaloneActionOwnerKey } from './action-governance.js';
 import { actionHandlerCoordinate, ENVIRONMENT_ACTION_COORDINATE } from './action-handler-coordinate.js';
+import { handlerOwnerPackageId } from './bare-name-one-holder.js';
 
 /**
  * One registered action handler. [#30065] `override` marks a declared action
@@ -229,23 +230,23 @@ export class ActionsFacet {
 
   /**
    * [ADR-0150 D4, #31673] The handler a call naming package `packageId` runs
-   * under `key`: that package's own; else, when exactly ONE handler is
-   * registered under the key in any coordinate, that one — a handler is code,
-   * not a metadata item, and a declaration's `target` is commonly bound by
-   * host code with no package, so one handler is the one the declaration
-   * reaches, never a pick; else none. ⛔ Never another package's handler
-   * while two or more are registered: that is the guess ADR-0150's red lines
-   * refuse.
+   * under `key`: that package's own; else, when exactly ONE host-bound
+   * handler is registered under the key — bound by host code or a plugin, not
+   * by a package (`app:<id>`, {@link handlerOwnerPackageId}) — that one: a
+   * declaration's `target` is commonly bound by host code, so it is the
+   * handler the declaration reaches, not a pick; else none. ⛔ Never another
+   * package's handler, and never one of two host-bound handlers: that is the
+   * guess ADR-0150's red lines refuse.
    */
   static packageScopedHandler(this: Pick<ActionsHost, 'packageActions'>, key: string, packageId: string): ActionHandlerEntry | undefined {
     const own = this.packageActions.get(packageId)?.get(key);
     if (own !== undefined) return own;
-    const all: ActionHandlerEntry[] = [];
+    const hostBound: ActionHandlerEntry[] = [];
     for (const slot of this.packageActions.values()) {
       const entry = slot.get(key);
-      if (entry !== undefined) all.push(entry);
+      if (entry !== undefined && handlerOwnerPackageId(entry.package ?? '') === (entry.package ?? '')) hostBound.push(entry);
     }
-    return all.length === 1 ? all[0] : undefined;
+    return hostBound.length === 1 ? hostBound[0] : undefined;
   }
 
   /** The body of `ObjectQL#listRegisteredActions`; the method's docblock there is its contract. */

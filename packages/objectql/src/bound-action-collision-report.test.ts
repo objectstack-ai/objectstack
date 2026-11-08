@@ -249,3 +249,77 @@ describe('ObjectQL.registerAction on a key another owner holds', () => {
         expect(await engine.executeAction('bc_org', 'rename', {})).toBe(2);
     });
 });
+
+/**
+ * [ADR-0150 D4, #31673] The handler half of the action's
+ * `(package, objectName, name)` key: each package's handler under one object
+ * and name is kept, and a call that names its package runs its own.
+ */
+describe('ObjectQL action handlers keyed (package, objectName, name)', () => {
+    const OWNER = 'com.test.owner';
+    const TWIN = 'com.test.twin';
+
+    it('two packages\' handlers for one object and name coexist: a call naming each package runs its own', async () => {
+        const engine = new ObjectQL();
+        engine.registerAction('bc_org', 'rename', () => 'owner', `app:${OWNER}`);
+        engine.registerAction('bc_org', 'rename', () => 'twin', `app:${TWIN}`);
+        expect(await engine.executeAction('bc_org', 'rename', {}, { packageId: OWNER })).toBe('owner');
+        expect(await engine.executeAction('bc_org', 'rename', {}, { packageId: TWIN })).toBe('twin');
+    });
+
+    it('[#31697 interim] a call that names no package keeps today\'s answer exactly: the last registration runs', async () => {
+        // Ruling 6728550494 (epic #31527, option B): whether this call refuses
+        // when two packages hold one object and name is #31697's decision.
+        const engine = new ObjectQL();
+        engine.registerAction('bc_org', 'rename', () => 'owner', `app:${OWNER}`);
+        engine.registerAction('bc_org', 'rename', () => 'twin', `app:${TWIN}`);
+        expect(await engine.executeAction('bc_org', 'rename', {})).toBe('twin');
+        engine.registerAction('bc_org', 'rename', () => 'owner again', `app:${OWNER}`);
+        expect(await engine.executeAction('bc_org', 'rename', {})).toBe('owner again');
+    });
+
+    it('withdrawing one package keeps the other\'s handler for a call naming it', async () => {
+        const engine = new ObjectQL();
+        engine.registerAction('bc_org', 'rename', () => 'owner', `app:${OWNER}`);
+        engine.registerAction('bc_org', 'rename', () => 'twin', `app:${TWIN}`);
+        engine.removeActionsByPackage(`app:${TWIN}`);
+        expect(await engine.executeAction('bc_org', 'rename', {}, { packageId: OWNER })).toBe('owner');
+        await expect(engine.executeAction('bc_org', 'rename', {}, { packageId: TWIN })).rejects.toThrow(/not found/);
+    });
+
+    it('a call naming a package with no handler of its own runs the ONE handler under the key — a host-bound target', async () => {
+        const engine = new ObjectQL();
+        engine.registerAction('bc_org', 'rename', () => 'host');
+        expect(await engine.executeAction('bc_org', 'rename', {}, { packageId: OWNER })).toBe('host');
+    });
+
+    it('never runs another package\'s handler, nor one of two host-bound handlers', async () => {
+        const engine = new ObjectQL();
+        engine.registerAction('bc_org', 'rename', () => 'owner', `app:${OWNER}`);
+        await expect(engine.executeAction('bc_org', 'rename', {}, { packageId: 'com.test.third' })).rejects.toThrow(/not found/);
+        engine.registerAction('bc_org', 'rename', () => 'host');
+        expect(await engine.executeAction('bc_org', 'rename', {}, { packageId: 'com.test.third' })).toBe('host');
+        engine.registerAction('bc_org', 'rename', () => 'plugin', 'com.test.plugin');
+        await expect(engine.executeAction('bc_org', 'rename', {}, { packageId: 'com.test.third' })).rejects.toThrow(/not found/);
+    });
+
+    it('handlers on two objects under one name are two keys for every caller', async () => {
+        const engine = new ObjectQL();
+        engine.registerAction('bc_org', 'rename', () => 'org', `app:${OWNER}`);
+        engine.registerAction('bc_person', 'rename', () => 'person', `app:${TWIN}`);
+        expect(await engine.executeAction('bc_org', 'rename', {})).toBe('org');
+        expect(await engine.executeAction('bc_person', 'rename', {})).toBe('person');
+        expect(await engine.executeAction('bc_person', 'rename', {}, { packageId: TWIN })).toBe('person');
+    });
+
+    it('a declared override binds over its base package\'s handler; withdrawing it restores the base\'s', async () => {
+        const engine = new ObjectQL();
+        engine.registerAction('bc_org', 'rename', () => 'base', `app:${OWNER}`);
+        engine.registerAction('bc_org', 'rename', () => 'twin', `app:${TWIN}`);
+        engine.registerActionOverride('bc_org', 'rename', () => 'override', 'app:com.test.custom', OWNER);
+        expect(await engine.executeAction('bc_org', 'rename', {}, { packageId: OWNER })).toBe('override');
+        expect(await engine.executeAction('bc_org', 'rename', {}, { packageId: TWIN })).toBe('twin');
+        engine.removeActionsByPackage('app:com.test.custom');
+        expect(await engine.executeAction('bc_org', 'rename', {}, { packageId: OWNER })).toBe('base');
+    });
+});
