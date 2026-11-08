@@ -433,6 +433,12 @@ export {
   type SecurityCatalogSources,
   type SecurityCatalogEntry,
   type SecurityCatalogReader,
+  // ADR-0150 D3/D4/D7 — permission sets by (package, name), the resolver handed in.
+  resolveCatalogReference,
+  type SecurityCatalogPackageScope,
+  type SecurityCatalogScopedOutcome,
+  type SecurityCatalogReferenceScope,
+  type SecurityCatalogResolution,
 } from './security-catalog.js';
 
 // ADR-0131 D3/D4/D10 — the junction rows turned into the `permissionSets` each

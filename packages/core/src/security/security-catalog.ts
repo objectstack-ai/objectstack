@@ -51,19 +51,60 @@
  * misses the platform's own permission sets, so a resolver reading it would
  * fail the platform administrator anchor closed.
  *
- * ## A name two packages ship — ruled: there is only ever one holder
+ * ## Permission sets are keyed by (package, name) — ADR-0150 D3/D4/D7
  *
- * The by-name read takes no package context, because an assignment carries
- * only the name (ADR-0131 D4). So a name two installed packages both shipped
- * would resolve by the registry's own precedence — measured before the ruling:
- * the FIRST-registered package's body, or whichever package stored an override.
- * The maintainer ruled that ambiguity out instead (Q4 = A on #15196): each
- * catalog type holds one name per deployment, and the engine registry refuses
- * a package registering a name an installed package, the environment catalog
- * or a built-in already holds (`@objectstack/objectql`,
- * `security-catalog-namespace.ts`). So this read never chooses between two
- * packages' bodies; a stored override in the bare slot is the holder's own
- * (ADR-0005), and it answers ahead of the holder's shipped body.
+ * A permission set is behavioural metadata (ADR-0150 D1 bucket 2): its
+ * identity is `(package, name)`, and a bare name resolves by ADR-0150 D3 —
+ * the caller's own package, else the unique holder in its declared dependency
+ * closure (plus `sys`), else a refusal naming every candidate; a caller with
+ * no package resolves environment-wide (the environment's own item, else the
+ * unique package holder, else the refusal). This read does not implement that
+ * rule: it is `resolvePackageScopedName` in `@objectstack/objectql` (child R
+ * of epic #31527), which core cannot import, so the security plugin hands it
+ * in bound to the engine registry ({@link SecurityCatalogPackageScope}).
+ *
+ *  - **Who asks.** A stored grant (`sys_user_permission_set`) carries only the
+ *    name today (its package column is ADR-0150 D8's R1), so it — and every
+ *    other by-name read with no position — resolves as a caller with no
+ *    package. A position's `permissionSets` resolves from the package that
+ *    declared the position (ADR-0150 D7), passed as
+ *    {@link SecurityCatalogReferenceScope.position}. Three positions are the
+ *    environment's reference instead, resolved as a caller with no package:
+ *    an environment-authored position; an ADR-0005 overlay of a package's
+ *    position, or a declared override in its paired `.custom` package (ADR-0150
+ *    D3: a reference written in an environment-authored overlay is the
+ *    environment's, never the customized package's); and the audience anchors
+ *    `everyone` and `guest`, whose bindings the platform composes from the
+ *    deployment's configuration and its administrators' acceptance of package
+ *    defaults (ADR-0090 D5/D9), the binding ADR-0150 D7 gives to the
+ *    environment.
+ *  - **A refusal confers nothing and is never a guess.** A name the rule
+ *    refuses (two holders, or no holder the caller may reach) resolves to no
+ *    definition here, so it grants nothing, and {@link
+ *    SecurityCatalogReader.resolveReference} names every candidate — the boot
+ *    report prints them (plugin-security `catalog-reference-report.ts`).
+ *    ⛔ No first-registered fallback, and no metadata-service answer for a
+ *    caller with a package: the metadata service reads by name only, so asking
+ *    it for a package caller would be the environment-wide guess ADR-0150 D3
+ *    refuses.
+ *  - **The list** answers one entry per `(package, name)` holder, plus the
+ *    environment's own item — never one entry per name picked among holders.
+ *  - **Positions are unchanged** (ADR-0150 D7, ruled Q2 = A): one
+ *    environment-wide slot per name, by the registry's own read, and the
+ *    one-holder refusal (`@objectstack/objectql`,
+ *    `security-catalog-namespace.ts`) still refuses a second package holder.
+ *    So do capabilities, which are bucket 1 (`NS.SHORT`).
+ *  - **Phase 1 still stands.** The same refusal holds every permission-set
+ *    name to one holder per environment until its ADR-0150 D9 child narrows
+ *    it, so for every reference with a package-less or in-closure holder the
+ *    answer is the one the registry's by-name read gave before. What changes
+ *    is the reference a package's position makes to a set it cannot reach:
+ *    one only the environment holds (ADR-0150 D3 (a), the declared narrowing),
+ *    or one a package outside its declared closure holds.
+ *
+ * A registry the catalog is handed without a package scope (a test stand-in
+ * holding one item per name) is read by name, as before; every reader the
+ * security plugin binds to an engine carries the scope.
  *
  * ## What this read does NOT answer
  *
@@ -100,6 +141,7 @@
  * same loud failure the resolver raises for an unreadable permission store.
  */
 
+import { AUDIENCE_ANCHOR_POSITIONS } from '@objectstack/spec/identity';
 import { AuthzStoreUnavailableError } from './authz-store-unavailable.js';
 
 /** The three catalog types ADR-0131 D3 gives one home. */
@@ -139,12 +181,71 @@ export interface SecurityCatalogMetadataService {
   listDiagnosed?(type: string): Promise<{ items?: readonly unknown[]; degraded?: boolean; errors?: readonly string[] }>;
 }
 
+/**
+ * [ADR-0150 D3] How the package-scoped resolver answered for one name — the
+ * shape of `resolvePackageScopedName`'s answer (`@objectstack/objectql`), as
+ * the catalog reads it, with each candidate already described in the
+ * resolver's own words.
+ */
+export type SecurityCatalogScopedOutcome =
+  | {
+      readonly status: 'resolved';
+      /** The holder's item: its ADR-0005 overlay when one binds to it, else its own. */
+      readonly item: unknown;
+      /** The package that holds it, or `null` for the environment's own item. */
+      readonly holderPackageId: string | null;
+    }
+  | { readonly status: 'not-found' }
+  | {
+      readonly status: 'refused';
+      /** The resolver's reason (`ambiguous-in-closure`, `ambiguous-in-environment`, `outside-closure`). */
+      readonly reason: string;
+      /** Every candidate of the step that refused, described. */
+      readonly candidates: readonly string[];
+      /** The resolver's one sentence: the item, every candidate, what to do. */
+      readonly message: string;
+    };
+
+/**
+ * [ADR-0150 D3/D4] The package-scoped half of the catalog read, handed in by
+ * whoever binds the catalog to an engine (the security plugin), because the
+ * one resolver lives in `@objectstack/objectql` and core cannot import it.
+ * ⛔ An implementation answers from `resolvePackageScopedName` and the
+ * registry's package-scoped reads only — never a second rule.
+ */
+export interface SecurityCatalogPackageScope {
+  /**
+   * The permission set `name` resolves to for a caller of package
+   * `callerPackageId` (`null`: a caller with no package) — ADR-0150 D3.
+   */
+  resolvePermissionSet(name: string, callerPackageId: string | null): SecurityCatalogScopedOutcome;
+  /**
+   * Every holder's item of the permission-set name: one per package holder
+   * (each its ADR-0005 overlay when one binds to it, else its own item), then
+   * the environment's own item when it holds one.
+   */
+  permissionSetHolders(name: string): ReadonlyArray<{ readonly packageId: string | null; readonly item: unknown }>;
+  /**
+   * Is `definition` package `packageId`'s own shipped item of `(type, name)`,
+   * rather than an environment-authored row, an ADR-0005 overlay or a paired
+   * `.custom` override that the registry serves under the same name?
+   */
+  isPackageItem(type: SecurityCatalogType, name: string, packageId: string, definition: unknown): boolean;
+}
+
 /** Where the catalog read looks. Both readers are required: neither holds the whole catalog. */
 export interface SecurityCatalogSources {
   /** ObjectQL's `SchemaRegistry` — `engine.registry`. */
   registry: SecurityCatalogRegistry;
   /** The kernel `metadata` service. */
   metadata: SecurityCatalogMetadataService;
+  /**
+   * [ADR-0150 D3/D4] Permission sets by `(package, name)` (module doc). The
+   * security plugin hands it to every reader it builds over an engine
+   * registry; without it the registry is read by name, which is only right
+   * for a stand-in that holds one item per name.
+   */
+  packageScope?: SecurityCatalogPackageScope;
 }
 
 /** One catalog definition, as the reader that answered holds it. */
@@ -163,15 +264,72 @@ export interface SecurityCatalogEntry {
   readonly packageId?: string;
 }
 
-/** The catalog read. Both members answer the same question, so they never disagree. */
+/**
+ * [ADR-0150 D7] Who refers to the name being resolved. Omitted: a by-name read
+ * with no package (a stored grant, a door), resolved environment-wide.
+ */
+export interface SecurityCatalogReferenceScope {
+  /**
+   * The position whose `permissionSets` names the permission set: the set
+   * resolves from the package that declared the position (module doc). Read
+   * for a permission set only.
+   */
+  readonly position?: SecurityCatalogEntry;
+}
+
+/** [ADR-0150 D3] A by-name read's whole answer — a refusal included, naming every candidate. */
+export type SecurityCatalogResolution =
+  | { readonly status: 'resolved'; readonly entry: SecurityCatalogEntry }
+  | { readonly status: 'not-found' }
+  | {
+      readonly status: 'refused';
+      readonly reason: string;
+      readonly candidates: readonly string[];
+      readonly message: string;
+    };
+
+/** The catalog read. Its members answer the same question, so they never disagree. */
 export interface SecurityCatalogReader {
-  /** The definition a name resolves to, or `undefined` when no reader holds one. */
-  resolve(type: SecurityCatalogType, name: string): Promise<SecurityCatalogEntry | undefined>;
-  /** One entry per name — each the entry {@link SecurityCatalogReader.resolve} answers for it. */
+  /**
+   * The definition a name resolves to, or `undefined` when no reader holds one
+   * — or when ADR-0150 D3 refuses the name for this reference, which confers
+   * nothing ({@link SecurityCatalogReader.resolveReference} says why).
+   */
+  resolve(type: SecurityCatalogType, name: string, scope?: SecurityCatalogReferenceScope): Promise<SecurityCatalogEntry | undefined>;
+  /**
+   * {@link SecurityCatalogReader.resolve}'s whole answer: a refusal is told
+   * apart from a miss and names every candidate. Optional for a hand-made
+   * reader; the one {@link createSecurityCatalogReader} builds carries it.
+   */
+  resolveReference?(type: SecurityCatalogType, name: string, scope?: SecurityCatalogReferenceScope): Promise<SecurityCatalogResolution>;
+  /**
+   * One entry per name — each the entry {@link SecurityCatalogReader.resolve}
+   * answers for it — except permission sets, which list one entry per
+   * `(package, name)` holder plus the environment's own item (ADR-0150 D4).
+   */
   list(type: SecurityCatalogType): Promise<SecurityCatalogEntry[]>;
 }
 
+/**
+ * [ADR-0150 D3] The whole answer for a reference, from a reader with or
+ * without {@link SecurityCatalogReader.resolveReference}: a reader without it
+ * answers resolved or not-found, never a refusal it cannot tell apart.
+ */
+export async function resolveCatalogReference(
+  catalog: SecurityCatalogReader,
+  type: SecurityCatalogType,
+  name: string,
+  scope?: SecurityCatalogReferenceScope,
+): Promise<SecurityCatalogResolution> {
+  if (typeof catalog.resolveReference === 'function') return catalog.resolveReference(type, name, scope);
+  const entry = await catalog.resolve(type, name, scope);
+  return entry ? { status: 'resolved', entry } : { status: 'not-found' };
+}
+
 type Definition = Record<string, unknown>;
+
+/** The `_packageId` a row rehydrated from `sys_metadata` carries: not a package. */
+const OVERLAY_PROVENANCE_SENTINEL = 'sys_metadata';
 
 function isDefinition(value: unknown): value is Definition {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -225,6 +383,20 @@ export function createSecurityCatalogReader(sources: SecurityCatalogSources): Se
     throw new TypeError(
       'security catalog: the metadata service is required (get, list) — '
         + 'it holds the stack-declared positions the engine registry does not.',
+    );
+  }
+  const packageScope = sources.packageScope;
+  if (
+    packageScope !== undefined
+    && (
+      typeof packageScope?.resolvePermissionSet !== 'function'
+      || typeof packageScope?.permissionSetHolders !== 'function'
+      || typeof packageScope?.isPackageItem !== 'function'
+    )
+  ) {
+    throw new TypeError(
+      'security catalog: a package scope must carry resolvePermissionSet, permissionSetHolders and isPackageItem — '
+        + 'a partial one would read some permission sets by (package, name) and others by name alone.',
     );
   }
 
@@ -308,15 +480,86 @@ export function createSecurityCatalogReader(sources: SecurityCatalogSources): Se
     return Array.isArray(items) ? items : [];
   };
 
+  /**
+   * [ADR-0150 D3/D7] The package a position's `permissionSets` resolve from,
+   * or `null` for the environment's reference (module doc): an
+   * environment-authored position, an overlay or `.custom` override of a
+   * package's position, and the audience anchors.
+   */
+  const referenceCaller = (scope: SecurityCatalogPackageScope, position: SecurityCatalogEntry | undefined): string | null => {
+    if (!position) return null;
+    if ((AUDIENCE_ANCHOR_POSITIONS as readonly string[]).includes(position.name)) return null;
+    const owner = position.packageId;
+    if (owner === undefined || owner === OVERLAY_PROVENANCE_SENTINEL) return null;
+    if (position.source === 'registry' && !scope.isPackageItem('position', position.name, owner, position.definition)) return null;
+    return owner;
+  };
+
+  /** A permission set by ADR-0150 D3 through the package scope (module doc). */
+  const resolvePermissionScoped = async (
+    scope: SecurityCatalogPackageScope,
+    name: string,
+    reference: SecurityCatalogReferenceScope | undefined,
+  ): Promise<SecurityCatalogResolution> => {
+    const caller = referenceCaller(scope, reference?.position);
+    let outcome: SecurityCatalogScopedOutcome;
+    try {
+      outcome = scope.resolvePermissionSet(name, caller);
+    } catch (error) {
+      throw unreadable('registry', 'permission', error);
+    }
+    if (outcome.status === 'refused') {
+      // ⛔ Never a fallback: a refusal is the answer, and it confers nothing.
+      return { status: 'refused', reason: outcome.reason, candidates: [...outcome.candidates], message: outcome.message };
+    }
+    if (outcome.status === 'resolved') {
+      const definition = servable(outcome.item, name);
+      if (definition) return { status: 'resolved', entry: entry('permission', definition, 'registry') };
+    }
+    // Nothing the registry may serve. The metadata service reads by name only,
+    // so it answers a caller with no package, never a package's reference.
+    if (caller !== null) return { status: 'not-found' };
+    const declared = await fromMetadata('permission', name);
+    return declared ? { status: 'resolved', entry: entry('permission', declared, 'metadata') } : { status: 'not-found' };
+  };
+
+  const resolveReference = async (
+    type: SecurityCatalogType,
+    name: string,
+    reference?: SecurityCatalogReferenceScope,
+  ): Promise<SecurityCatalogResolution> => {
+    assertCatalogType(type);
+    if (typeof name !== 'string' || name === '') return { status: 'not-found' };
+    if (type === 'permission' && packageScope) return resolvePermissionScoped(packageScope, name, reference);
+    const registered = fromRegistry(type, name);
+    if (registered) return { status: 'resolved', entry: entry(type, registered, 'registry') };
+    const declared = await fromMetadata(type, name);
+    return declared ? { status: 'resolved', entry: entry(type, declared, 'metadata') } : { status: 'not-found' };
+  };
+
+  /** [ADR-0150 D4] Every holder's entry of a permission-set name, one per `(package, name)`. */
+  const permissionHolderEntries = (scope: SecurityCatalogPackageScope, name: string): SecurityCatalogEntry[] => {
+    let holders: ReadonlyArray<{ readonly packageId: string | null; readonly item: unknown }>;
+    try {
+      holders = scope.permissionSetHolders(name) ?? [];
+    } catch (error) {
+      throw unreadable('registry', 'permission', error);
+    }
+    const out: SecurityCatalogEntry[] = [];
+    for (const holder of holders) {
+      const definition = servable(holder?.item, name);
+      if (definition) out.push(entry('permission', definition, 'registry'));
+    }
+    return out;
+  };
+
   return {
-    async resolve(type, name) {
-      assertCatalogType(type);
-      if (typeof name !== 'string' || name === '') return undefined;
-      const registered = fromRegistry(type, name);
-      if (registered) return entry(type, registered, 'registry');
-      const declared = await fromMetadata(type, name);
-      return declared ? entry(type, declared, 'metadata') : undefined;
+    async resolve(type, name, reference) {
+      const answer = await resolveReference(type, name, reference);
+      return answer.status === 'resolved' ? answer.entry : undefined;
     },
+
+    resolveReference,
 
     async list(type) {
       assertCatalogType(type);
@@ -347,6 +590,19 @@ export function createSecurityCatalogReader(sources: SecurityCatalogSources): Se
       for (const name of names) {
         if (name === undefined || seen.has(name)) continue;
         seen.add(name);
+        if (type === 'permission' && packageScope) {
+          // [ADR-0150 D4] One entry per (package, name) holder, never one
+          // picked among them; the metadata service only where the registry
+          // serves no holder of the name.
+          const held = permissionHolderEntries(packageScope, name);
+          if (held.length > 0) {
+            out.push(...held);
+            continue;
+          }
+          const fromMeta = declaredByName.get(name);
+          if (fromMeta) out.push(entry(type, fromMeta, 'metadata'));
+          continue;
+        }
         // Each name gets the answer the by-name read gives it: the registry's
         // own precedence first, the metadata service's body only where the
         // registry serves nothing under that name.
