@@ -133,3 +133,56 @@ describe('the picklist boot audit', () => {
     expect(servedValues(ql, 'pb_member', 'tier')).toEqual(['gold']);
   });
 });
+
+/**
+ * [ADR-0150 D3 (a), child E6] A packaged field whose list only an
+ * environment-authored item holds: the package-scoped resolver refuses it, and
+ * that refusal is a refused REFERENCE (no options served, every value refused),
+ * never a refused boot. An artifact arriving after the seal with such a
+ * reference is refused by the install door, naming the environment.
+ */
+describe('the picklist boot audit — a list only the environment holds (ADR-0150 D3 (a))', () => {
+  const ENV_LIST = { name: 'industry', label: 'Industry', options: [{ label: 'Technology', value: 'technology' }] };
+  /** Registers the environment's own list (no package) during init, as a stored row's hydration does. */
+  const environmentList = {
+    name: 'env-list',
+    dependencies: ['com.objectstack.engine.objectql'],
+    init: async (ctx: PluginContext) => {
+      ctx.getService<ObjectQL>('objectql').registry.registerItem('picklist', { ...ENV_LIST }, 'name');
+    },
+  };
+
+  it('boots, serving the package field with no options', async () => {
+    const { kernel, use } = kernelWith(
+      new ObjectQLPlugin(),
+      environmentList,
+      registering('app', [{ id: 'com.test.boot.app', name: 'app', objects: [ACCOUNT] }]),
+    );
+    await use();
+    await kernel.bootstrap();
+    const ql = kernel.getService<ObjectQL>('objectql');
+    expect(servedValues(ql, 'pb_account', 'industry')).toEqual([]);
+    expect(ql.registry.findEnvironmentHeldPicklistReferences()).toEqual([
+      expect.objectContaining({ object: 'pb_account', field: 'industry', packageId: 'com.test.boot.app' }),
+    ]);
+  });
+
+  it('after the boot, an artifact naming it is refused before ANY of it registers, naming the environment', async () => {
+    const { kernel, use } = kernelWith(new ObjectQLPlugin(), environmentList);
+    await use();
+    await kernel.bootstrap();
+    const manifest = kernel.getService<ManifestService>('manifest');
+    expect(() => manifest.register({ id: 'com.test.late', name: 'late', objects: [ACCOUNT] }))
+      .toThrow(/references picklist 'industry' \(The picklist "industry" is held outside the declared dependency closure of package "com\.test\.late": the environment/);
+    expect(kernel.getService<ObjectQL>('objectql').registry.getObject('pb_account')).toBeUndefined();
+  });
+
+  it('CONTROL — an artifact naming a list a package it depends on holds registers after the boot', async () => {
+    const { kernel, use } = kernelWith(new ObjectQLPlugin(), registering('lists', [{ id: 'com.test.boot.lists', name: 'lists', picklists: [ENV_LIST] }]));
+    await use();
+    await kernel.bootstrap();
+    const manifest = kernel.getService<ManifestService>('manifest');
+    await manifest.register({ id: 'com.test.late', name: 'late', dependencies: { 'com.test.boot.lists': '^1.0.0' }, objects: [ACCOUNT] });
+    expect(servedValues(kernel.getService<ObjectQL>('objectql'), 'pb_account', 'industry')).toEqual(['technology']);
+  });
+});
