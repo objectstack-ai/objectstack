@@ -279,6 +279,11 @@ const en = {
     // Under an empty field that a visible update action's static `patch` would
     // make required (objectstack#28382). `{{action}}` is the action's label.
     requiredForAction: 'Required to run “{{action}}”.',
+    // objectstack#28104 — the marker under a create-form field an AI chat
+    // draft filled (the record-write card's "Open the full form"), shown until
+    // the person edits the field, and the page notice above such a form.
+    aiSuggested: 'AI suggestion',
+    aiDraftNotice: 'AI filled in the fields marked “AI suggestion” from the chat. Nothing is saved until you check them and save.',
     // The size-limit hint the flat `ObjectForm` appends to a `file` or `image`
     // field's description when the field declares `maxSize` (objectui#12156).
     // `{{size}}` is the formatted limit ("10.0 MB"); only the words translate.

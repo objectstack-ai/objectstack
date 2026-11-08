@@ -198,6 +198,8 @@ const es = {
     deniedDescription: "No tienes permiso para editar este campo.",
     serverDefaultHint: "Se establece automáticamente al guardar.",
     requiredForAction: "Obligatorio para ejecutar «{{action}}».",
+    aiSuggested: "Sugerencia de IA",
+    aiDraftNotice: "La IA rellenó desde el chat los campos marcados como «Sugerencia de IA». No se guarda nada hasta que los revise y guarde.",
     maxFileSize: "Tamaño máximo: {{size}}",
     masterDetail: {
       loadingColumns: "Cargando columnas…",

@@ -203,6 +203,8 @@ const zhHant = {
     deniedDescription: '您沒有此欄位的編輯權限。',
     serverDefaultHint: '儲存時自動設定。',
     requiredForAction: '執行「{{action}}」時必填。',
+    aiSuggested: 'AI 建議',
+    aiDraftNotice: 'AI 已根據聊天預填標為「AI 建議」的欄位。檢查並儲存之前不會寫入任何內容。',
     maxFileSize: '最大檔案大小：{{size}}',
     masterDetail: {
       loadingColumns: '正在載入列…',

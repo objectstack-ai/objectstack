@@ -191,6 +191,8 @@ const de = {
     deniedDescription: "Sie haben keinen Bearbeitungszugriff auf dieses Feld.",
     serverDefaultHint: "Wird beim Speichern automatisch gesetzt.",
     requiredForAction: "Erforderlich, um „{{action}}“ auszuführen.",
+    aiSuggested: "KI-Vorschlag",
+    aiDraftNotice: "Die KI hat die mit „KI-Vorschlag“ markierten Felder aus dem Chat ausgefüllt. Gespeichert wird erst, wenn Sie sie prüfen und speichern.",
     maxFileSize: "Maximale Größe: {{size}}",
     masterDetail: {
       loadingColumns: "Spalten werden geladen…",

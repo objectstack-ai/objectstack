@@ -193,6 +193,8 @@ const fr = {
     deniedDescription: "Vous n'avez pas l'autorisation de modifier ce champ.",
     serverDefaultHint: "Défini automatiquement lors de l'enregistrement.",
     requiredForAction: "Requis pour exécuter « {{action}} ».",
+    aiSuggested: "Suggestion de l'IA",
+    aiDraftNotice: "L'IA a rempli depuis la discussion les champs marqués « Suggestion de l'IA ». Rien n'est enregistré tant que vous ne les avez pas vérifiés et enregistrés.",
     maxFileSize: "Taille maximale : {{size}}",
     masterDetail: {
       loadingColumns: "Chargement des colonnes…",

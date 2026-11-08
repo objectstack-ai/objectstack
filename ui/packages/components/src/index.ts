@@ -108,6 +108,9 @@ export { PageHeaderTrailingContext } from './renderers/layout/page-header-traili
 export { PageHeaderPhoneContext } from './renderers/layout/page-header-phone-context';
 export type { PageHeaderPhoneFace } from './renderers/layout/page-header-phone-context';
 export type { PageHeaderActionsProps } from './renderers/layout/containers';
+// The form's host slot (objectstack#28104): the console's create page names
+// the fields an AI chat draft filled, and the form marks them until edited.
+export { SuggestedFieldsContext } from './renderers/form/suggested-fields-context';
 
 // The field-face seam (objectui#13216): the slot `@object-ui/fields` fills
 // with its read-face registry when it loads, so `page:header` can draw a

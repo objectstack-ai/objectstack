@@ -191,6 +191,8 @@ const ko = {
     deniedDescription: "이 필드를 편집할 권한이 없습니다.",
     serverDefaultHint: "저장 시 자동으로 설정됩니다.",
     requiredForAction: "'{{action}}' 실행에 필요합니다.",
+    aiSuggested: "AI 제안",
+    aiDraftNotice: "채팅 내용을 바탕으로 AI가 'AI 제안'으로 표시된 필드를 채웠습니다. 확인하고 저장하기 전에는 아무것도 저장되지 않습니다.",
     maxFileSize: "최대 크기: {{size}}",
     masterDetail: {
       loadingColumns: "열 로드 중…",

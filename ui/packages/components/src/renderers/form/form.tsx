@@ -47,6 +47,7 @@ import { createSafeTranslation } from '@object-ui/i18n';
 import type { RendererHostProps } from '../../lib/renderer-host-props';
 import { currencyCodeFieldNames, useUsedCurrencyCodes, withUsedCurrencyCodes } from './usedCurrencyCodes';
 import { usePatchingUpdateActions } from './actionRequirements';
+import { SuggestedFieldsContext } from './suggested-fields-context';
 
 /**
  * A submit refusal as the banner and the toast draw it: one string as itself,
@@ -515,6 +516,10 @@ const useSafeFormTranslation = createSafeTranslation(
     // action's static `patch` would make required (see `actionOutcomes`).
     // Byte-identical to the `en` pack.
     'form.requiredForAction': 'Required to run “{{action}}”.',
+    // objectstack#28104 — the mark under a field whose opening value an AI
+    // chat draft suggested (see `SuggestedFieldsContext`). Byte-identical to
+    // the `en` pack.
+    'form.aiSuggested': 'AI suggestion',
   },
   'common.selectOption',
 );
@@ -1222,10 +1227,23 @@ function renderFieldDescription(
   description: string | undefined,
   serverDefaultHint: string | undefined,
   actionRequirementHints: readonly string[] = [],
+  suggestedHint?: string,
 ): React.ReactNode {
-  if (!description && !serverDefaultHint && actionRequirementHints.length === 0) return null;
+  if (!description && !serverDefaultHint && actionRequirementHints.length === 0 && !suggestedHint) return null;
   return (
     <FormDescription>
+      {/* objectstack#28104 — first, so the mark reads before the field's own
+          help: the value in the control came from an AI chat draft and the
+          person has not changed it yet. Inside the same `<FormDescription>`
+          for the serverDefaultHint's reason: it is announced with the field. */}
+      {suggestedHint && (
+        <span
+          className="mb-0.5 mr-1.5 inline-flex items-center rounded-sm bg-primary/10 px-1.5 py-0.5 text-xs font-medium text-primary"
+          data-ai-suggested="true"
+        >
+          {suggestedHint}
+        </span>
+      )}
       {description}
       {serverDefaultHint && (
         <span className={description ? 'block' : undefined} data-server-default-hint="true">
@@ -1641,6 +1659,9 @@ function BuiltinTextarea({
 ComponentRegistry.register('form',
   ({ schema, className, onAction, disabled: hostDisabled, ...props }: { schema: FormSchema; className?: string; onAction?: (action: any) => void; disabled?: boolean; [key: string]: unknown } & RendererHostProps) => {
     const { t } = useSafeFormTranslation();
+    // objectstack#28104 — the fields the host says AI suggested the opening
+    // value of; each is marked while it still holds that value.
+    const suggestedFields = React.useContext(SuggestedFieldsContext);
     // Prefix for the label ids the GROUP-labelled fields need (objectui#3961).
     // Owned here, not derived from `<FormItem>`'s own `useId()`: that id lives in
     // a context published INSIDE `FormItem`, and this renderer builds the label
@@ -4096,6 +4117,15 @@ ComponentRegistry.register('form',
                         }),
                       )
                       .map((outcome) => t('form.requiredForAction', { action: outcome.label }))
+                  : undefined,
+                // objectstack#28104 — marked while the control still holds the
+                // value the AI chat draft opened it on: the opening value, under
+                // the same empty-ish comparison the dirty check uses, so a
+                // widget normalizing on mount does not read as an edit. The
+                // person's first change takes the mark away.
+                suggestedFields?.has(name) &&
+                  valuesEqualForDirty(defaultValues?.[name], formField.value)
+                  ? t('form.aiSuggested')
                   : undefined,
               )}
               <FormMessage />
