@@ -4869,10 +4869,10 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         // operator in the log.
         let copyRecordFailure: string | undefined;
         let copyRecordSaid: string | undefined;
-        const tie = await this.unmanagedCopyInstance(ctx, result.targetPackageId);
+        const tie = this.unmanagedCopyInstance(ctx, result.targetPackageId, result.baseInstance);
         if ('failure' in tie) {
             copyRecordFailure = tie.failure;
-            copyRecordSaid = 'the package store did not answer with the new base\'s row';
+            copyRecordSaid = 'the import did not answer with the new base\'s stored row';
         } else {
             try {
                 this.unmanagedCopies.write({
@@ -5892,34 +5892,32 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
     };
 
     /**
-     * [#30808] The base instance a new copy's record is tied to: the package
-     * store's row of `baseId` ({@link readUnmanagedCopyInstance}). No
-     * `instance` on a runtime with no `package` service (the record's reach is
-     * then by id alone — the residual its module docblock states); a
-     * `failure`, and so no record, when the store holds no readable row —
-     * which is also what a passing store error reads as, since the store
-     * answers `null` for it. That copy stays unrecorded (`copyRecord` says
-     * so); no door records it later. The copy is still installed, and
-     * reseed, count and purge answer 404 for it (#31425 measured: the store's
-     * `null` cannot be told from "no row" here; a follow-up has the import
-     * answer the base row's stamp itself).
+     * [#30808, #31530] The base instance a new copy's record is tied to: the
+     * base's `sys_packages` row (`version`, `created_at`) as the import's own
+     * write answered it (`baseInstance`), never a read of the store after
+     * the import. A read could meet a passing store fault, which the store's
+     * `get` answers as `null`, and leave the copy unrecorded for good (#31425).
+     * No `instance` on a runtime with no `package` service (the record's
+     * reach is then by id alone: the residual its module docblock states). A
+     * `failure`, and so no record, when there is a `package` service but the
+     * import named no stored row (a package service that states no stamp):
+     * the copy then stays unrecorded and `copyRecord` says so, failing closed
+     * as before. The purge, reseed and count doors read the row again and
+     * compare it with this instance ({@link readUnmanagedCopyInstance}).
      */
-    private unmanagedCopyInstance = async (
+    private unmanagedCopyInstance = (
         ctx: PluginContext,
         baseId: string,
-    ): Promise<{ instance?: UnmanagedCopyInstance } | { failure: string }> => {
+        stored: { version?: unknown; createdAt?: unknown } | undefined,
+    ): { instance?: UnmanagedCopyInstance } | { failure: string } => {
+        if (typeof stored?.version === 'string' && stored.version !== ''
+            && typeof stored.createdAt === 'string' && stored.createdAt !== '') {
+            return { instance: { version: stored.version, createdAt: stored.createdAt } };
+        }
         let store: Partial<UnmanagedCopyPackageStore> | undefined;
         try { store = ctx.getService<Partial<UnmanagedCopyPackageStore>>('package'); } catch { return {}; /* no package store */ }
         if (typeof store?.get !== 'function') return {};
-        let held: UnmanagedCopyInstance | null | undefined;
-        try {
-            held = await readUnmanagedCopyInstance(store as UnmanagedCopyPackageStore, baseId);
-        } catch (err: any) {
-            return { failure: `the package store could not be read for '${baseId}': ${err?.message ?? err}` };
-        }
-        if (held === null) return { failure: `the package store holds no row of '${baseId}'` };
-        if (held === undefined) return { failure: `the package store's row of '${baseId}' carries no readable version and created_at` };
-        return { instance: held };
+        return { failure: `the import named no stored row of '${baseId}' (its package store stated no version and created_at)` };
     };
 
     /**

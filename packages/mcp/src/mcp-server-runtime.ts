@@ -11,9 +11,19 @@ import type {
   McpAuthoringInjection,
   McpAuthoringToolContext,
   McpTokenPrincipal,
+  McpToolCallPrincipal,
+  McpToolInterceptor,
   ToolRegistry,
   ToolExecutionResult,
 } from './types.js';
+import {
+  EMPTY_TOOL_CALL_PRINCIPAL,
+  routeToolCallsThrough,
+  toolCallPrincipalOf,
+  toolExecutionContextOf,
+  type McpCallerExecutionContext,
+} from './tool-call-interceptor.js';
+import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { wireBridgeTools, grantsAuthoringTools, thrownRefusalEnvelope, dataDoorAnswerOf, dataDoorRefusalEnvelope } from './mcp-http-tools.js';
 import { isServerFault, logServerFault } from '@objectstack/types';
 import type {
@@ -947,6 +957,28 @@ export type McpObjectView = Pick<IMetadataService, 'listObjects' | 'getObject'>;
 const runtimeObjectViews = new WeakMap<MCPServerRuntime, McpObjectView>();
 
 /**
+ * [#31605] The long-lived server's principal: the `OS_MCP_STDIO_API_KEY`
+ * identity the plugin resolves per call (ADR-0101), bound by the plugin once
+ * it has one. Read at each call, never captured — the plugin bridges the AI
+ * tools before it resolves the key, and a runtime nobody binds keeps serving
+ * exactly as before. Package-internal, like {@link setRuntimeObjectView}.
+ */
+const runtimeStdioPrincipals = new WeakMap<MCPServerRuntime, () => Promise<ExecutionContext>>();
+
+/**
+ * [#31605] Bind the long-lived server's principal. Two readers: the bridged AI
+ * tools run with it as their execution context ({@link MCPServerRuntime.bridgeTools}),
+ * and a tool-call interceptor reads it as the principal of every stdio call.
+ * Package-internal; not re-exported from `index.ts`.
+ */
+export function setRuntimeStdioPrincipal(
+  runtime: MCPServerRuntime,
+  resolvePrincipal: () => Promise<ExecutionContext>,
+): void {
+  runtimeStdioPrincipals.set(runtime, resolvePrincipal);
+}
+
+/**
  * [#25245] Give `runtime`'s two object resources `objects` to read in place of
  * the metadata service. Read at each `resources/read`, so the call may come
  * before or after `bridgeResources`. `index.ts` does not publish it.
@@ -1385,6 +1417,18 @@ function authoringInstructions(
 }
 
 /**
+ * [#31605] Who an HTTP request was admitted as, as the HOST resolved it — the
+ * input `handleHttpRequest` projects every tool call's interceptor principal
+ * from. Only the members {@link McpCallerExecutionContext} names are read.
+ */
+export interface McpHttpCaller {
+  /** The request's resolved `ExecutionContext` (the credential's, never a header's). */
+  executionContext?: McpCallerExecutionContext;
+  /** The environment the host dispatched this request for. */
+  environmentId?: string;
+}
+
+/**
  * MCPServerRuntime — Bridges ObjectStack kernel services to the Model Context Protocol.
  *
  * Responsibilities:
@@ -1409,6 +1453,8 @@ export class MCPServerRuntime {
   private readonly config: Required<Pick<MCPServerRuntimeConfig, 'name' | 'version'>> & MCPServerRuntimeConfig;
   private transport: StdioServerTransport | undefined;
   private started = false;
+  /** [#31605] The host-installed tool-call interceptor; single slot. */
+  private toolInterceptor: McpToolInterceptor | undefined;
 
   constructor(config: MCPServerRuntimeConfig = {}) {
     this.config = {
@@ -1463,6 +1509,21 @@ export class MCPServerRuntime {
         instructions: this.config.instructions ?? 'ObjectStack MCP Server — access data objects, AI tools, and agent prompts.',
       },
     );
+
+    // [#31605] Before any tool registers: every tool on the long-lived server
+    // (bridged AI tools, the data tools, a plugin's own on `mcp:ready`) runs
+    // through the interceptor slot. `start()` attaches only the stdio
+    // transport, so its calls are stamped `stdio`; their principal is the key
+    // the plugin bound, resolved at the call.
+    routeToolCallsThrough(this.mcpServer, {
+      transport: 'stdio',
+      interceptor: () => this.toolInterceptor,
+      principal: async () => {
+        const resolve = runtimeStdioPrincipals.get(this);
+        return resolve ? toolCallPrincipalOf(await resolve()) : EMPTY_TOOL_CALL_PRINCIPAL;
+      },
+      logger: this.config.logger,
+    });
   }
 
   /** The underlying McpServer instance (for advanced use cases). */
@@ -1473,6 +1534,33 @@ export class MCPServerRuntime {
   /** Whether the server is currently connected and running. */
   get isStarted(): boolean {
     return this.started;
+  }
+
+  // ── Tool-call interceptor ──────────────────────────────────────
+
+  /**
+   * [#31605] Install the interceptor every MCP tool call passes through, on
+   * both transports and every registration path (see
+   * {@link McpToolInterceptor} for the allow / deny / replace contract).
+   * Single slot: installing replaces any previous interceptor. Read at each
+   * call, so it applies to tools already registered and to every later
+   * per-request server.
+   *
+   * Neutral: the runtime holds no policy. With none installed, every tool call
+   * runs exactly as it did before this seam existed.
+   */
+  setToolInterceptor(interceptor: McpToolInterceptor): void {
+    this.toolInterceptor = interceptor;
+  }
+
+  /** [#31605] Remove the installed tool-call interceptor, if any. */
+  clearToolInterceptor(): void {
+    this.toolInterceptor = undefined;
+  }
+
+  /** [#31605] Whether a tool-call interceptor is installed. */
+  hasToolInterceptor(): boolean {
+    return this.toolInterceptor !== undefined;
   }
 
   // ── Tool Bridge ────────────────────────────────────────────────
@@ -1486,16 +1574,31 @@ export class MCPServerRuntime {
    * for `inputSchema`. Its safety annotations come from what the definition
    * declares — see {@link safetyAnnotations}. The handler delegates to the
    * ToolRegistry's execute path.
+   *
+   * [#31605] Once the plugin has bound the stdio principal
+   * ({@link setRuntimeStdioPrincipal}), each call resolves it and passes it as
+   * the registry's execution context — the key's user as `actor` — so a
+   * registry runs the tool as that user and a governed one sees an actor. The
+   * principal is resolved per call (ADR-0101: a revoked key stops working on
+   * the next call), and a key that no longer resolves refuses the call. A
+   * runtime with no principal bound calls `execute(call)` with one argument,
+   * as before.
    */
   bridgeTools(toolRegistry: ToolRegistry): void {
     const tools = toolRegistry.getAll();
     const logger = this.config.logger;
+    const execute = async (call: ToolCallPart): Promise<ToolExecutionResult> => {
+      const resolvePrincipal = runtimeStdioPrincipals.get(this);
+      if (!resolvePrincipal) return toolRegistry.execute(call);
+      return toolRegistry.execute(call, toolExecutionContextOf(await resolvePrincipal()));
+    };
 
     for (const tool of tools) {
-      // The long-lived (stdio) bridge: the registry's own `execute(call)`,
-      // one argument, exactly as before [#26464] moved the registration body
-      // out of this class so the HTTP authoring bridge could share it.
-      registerToolFromDefinition(this.mcpServer, tool, (call) => toolRegistry.execute(call), logger);
+      // The long-lived (stdio) bridge: the registry's own `execute`, with the
+      // stdio principal as its context once one is bound — the registration
+      // body is the one [#26464] moved out of this class so the HTTP
+      // authoring bridge could share it.
+      registerToolFromDefinition(this.mcpServer, tool, execute, logger);
     }
 
     logger?.info(`[MCP] Bridged ${tools.length} tools from ToolRegistry`);
@@ -2056,6 +2159,9 @@ export class MCPServerRuntime {
    * @param opts.authoring    [#26464] The host's authoring registry plus the token principal and environment
    *                          that become each call's provenance; registered only for a `metadata:write` grant.
    *                          [#31022] Its optional `instructions` answer `initialize` under that same grant.
+   * @param opts.caller       [#31605] The `ExecutionContext` the host admitted this request as and the
+   *                          environment it dispatched it for: the principal a tool-call interceptor reads
+   *                          for every call on this request. Read only when an interceptor is installed.
    */
   async handleHttpRequest(
     request: Request,
@@ -2065,6 +2171,7 @@ export class MCPServerRuntime {
       authInfo?: unknown;
       toolOptions?: RegisterObjectToolsOptions & RegisterActionToolsOptions;
       authoring?: McpAuthoringInjection;
+      caller?: McpHttpCaller;
     } = {},
   ): Promise<Response> {
     // [#25759] This transport answers POST and nothing else. It is stateless
@@ -2125,6 +2232,19 @@ export class MCPServerRuntime {
           'ObjectStack MCP Server — query and modify your app\'s data objects as tools.',
       },
     );
+
+    // [#31605] Before any tool registers on this request's server. The
+    // principal is projected from the host's `caller` alone — `request` is not
+    // in reach of it, so no header can name another user, client, organization
+    // or environment — once per request, and only if an interceptor asks.
+    const caller = opts.caller;
+    let callerPrincipal: McpToolCallPrincipal | undefined;
+    routeToolCallsThrough(server, {
+      transport: 'http',
+      interceptor: () => this.toolInterceptor,
+      principal: () => (callerPrincipal ??= toolCallPrincipalOf(caller?.executionContext, caller?.environmentId)),
+      logger: this.config.logger,
+    });
 
     if (skillBridge) {
       registerSkillPrompts(server, skillBridge);

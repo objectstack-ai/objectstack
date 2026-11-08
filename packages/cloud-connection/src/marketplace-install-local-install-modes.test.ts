@@ -662,7 +662,13 @@ describe('install-local — an unmanaged copy\'s sample data, asked for with `se
      * driver error (a lock timeout, a dropped connection) is caught, logged and
      * answered `null`; only the seam-unreadable refusal escapes, as a 503.
      */
-    function world(opts: { packageStore?: boolean; grantless?: boolean } = {}) {
+    function world(opts: {
+        packageStore?: boolean; grantless?: boolean;
+        /** [#31530] A passing store fault armed when the import returns: the next store `get` meets it. */
+        faultAfterImport?: 'ordinary' | 'seam';
+        /** [#31530] The import's write names no stored row (a package service that states no stamp). */
+        noBaseInstance?: boolean;
+    } = {}) {
         const tables: Record<string, Row[]> = {};
         const objects = new Map<string, any>();
         const packages = new Map<string, { manifest: Record<string, unknown> }>();
@@ -687,7 +693,8 @@ describe('install-local — an unmanaged copy\'s sample data, asked for with `se
                 return null;
             }
         });
-        const storeFault = (kind: 'ordinary' | 'seam') => { fault = kind; };
+        /** Arm a fault for the next store `get`; `undefined` disarms one that was never met (a passing fault). */
+        const storeFault = (kind: 'ordinary' | 'seam' | undefined) => { fault = kind; };
         const writes: string[] = [];
         let nextId = 0;
         const known = (object: string) => {
@@ -763,7 +770,8 @@ describe('install-local — an unmanaged copy\'s sample data, asked for with `se
                 });
             }
             packages.set(targetPackageId, { manifest: { id: targetPackageId, namespace: source.namespace } });
-            packageRows.set(targetPackageId, { version: '1.0.0', created_at: `2026-11-08 07:00:${String(++stamp).padStart(2, '0')}` });
+            const baseRow = { version: '1.0.0', created_at: `2026-11-08 07:00:${String(++stamp).padStart(2, '0')}` };
+            packageRows.set(targetPackageId, baseRow);
             const copied: Array<{ type: string; name: string }> = [];
             for (const o of source.objects ?? []) {
                 objects.set(o.name, o);
@@ -778,7 +786,12 @@ describe('install-local — an unmanaged copy\'s sample data, asked for with `se
                     copied.push({ type: 'seed', name });
                 }
             }
-            return { sourcePackageId: source.id, targetPackageId, namespace: source.namespace, copiedCount: copied.length, copied, strippedLocks: [] };
+            if (opts.faultAfterImport !== undefined) fault = opts.faultAfterImport;
+            return {
+                sourcePackageId: source.id, targetPackageId, namespace: source.namespace, copiedCount: copied.length, copied, strippedLocks: [],
+                // [#31530] The base row as the import's own write answered it; none with no package service.
+                ...(opts.packageStore === false || opts.noBaseInstance ? {} : { baseInstance: { version: baseRow.version, createdAt: baseRow.created_at } }),
+            };
         });
         // [#31425] The metadata service's object read the seed run's dependency graph asks; a spy, so a case can make one load throw.
         const metadataGetObject = vi.fn(async (name: string) => objects.get(name));
@@ -1086,6 +1099,27 @@ describe('install-local — an unmanaged copy\'s sample data, asked for with `se
         expect(res.payload.data).toMatchObject({ deleted: 3, errors: 0 });
     });
 
+    it('[#31530] a passing store fault right after the import still records the copy, tied to the row a later read answers, and the purge reaches it', async () => {
+        for (const kind of ['ordinary', 'seam'] as const) {
+            rmSync(join(dir, 'unmanaged-copies'), { recursive: true, force: true });
+            const w = world({ faultAfterImport: kind });
+            const h = await w.boot();
+            const res = await h.install({ manifest: seededCrm(), installMode: 'unmanaged', seedSampleData: true });
+            expect(res.status, `${kind}: ${JSON.stringify(res.payload)}`).toBe(200);
+            expect(res.payload.data).not.toHaveProperty('copyRecord');
+            // Nothing read the store at install: the fault is still armed. It passes.
+            expect(w.packageGet).not.toHaveBeenCalled();
+            w.storeFault(undefined);
+            // The record is tied to exactly what a later store read answers for the row.
+            const record = JSON.parse(readFileSync(COPY_RECORD(), 'utf8'));
+            const row = await w.packageGet('com.example.crm-copy');
+            expect(record.instance).toEqual({ version: row!.version, createdAt: row!.created_at });
+            const purged = await h.purge('com.example.crm-copy');
+            expect(purged.status, `${kind}: ${JSON.stringify(purged.payload)}`).toBe(200);
+            expect(purged.payload.data).toMatchObject({ deleted: 3, errors: 0 });
+        }
+    });
+
     it('with no `package` service the record holds no instance and the purge reaches the copy by id alone (the stated residual)', async () => {
         const w = world({ packageStore: false });
         const h = await w.boot();
@@ -1111,21 +1145,20 @@ describe('install-local — an unmanaged copy\'s sample data, asked for with `se
             expect((await h.purge('com.example.crm-copy')).status).toBe(404);
             rmSync(join(dir, 'unmanaged-copies'), { force: true });
         }
-        // The package store meets a fault at install — an ordinary error it
-        // answers null, or the seam refusal it throws: no record is written,
-        // and the copy stays unrecorded (re-recording is #31425).
-        for (const kind of ['ordinary', 'seam'] as const) {
-            const w = world();
+        // [#31530] The import names no stored row while a package service is
+        // mounted (a service that states no stamp): no record is written, and
+        // the copy stays unrecorded, failing closed (re-recording is #31425).
+        {
+            const w = world({ noBaseInstance: true });
             const h = await w.boot();
-            w.storeFault(kind);
             const res = await h.install({ manifest: seededCrm(), installMode: 'unmanaged', seedSampleData: true });
-            expect(res.status, `${kind}: ${JSON.stringify(res.payload)}`).toBe(200);
+            expect(res.status, JSON.stringify(res.payload)).toBe(200);
             expect(res.payload.data.copyRecord).toEqual({
-                written: false, message: expect.stringContaining('the package store did not answer with the new base\'s row'),
+                written: false, message: expect.stringContaining('the import did not answer with the new base\'s stored row'),
             });
-            expect(res.payload.data.copyRecord.message).not.toContain('SQLITE_BUSY');
             expect(existsSync(COPY_RECORD())).toBe(false);
             expect((await h.purge('com.example.crm-copy')).status).toBe(404);
+            rmSync(join(dir, 'unmanaged-copies'), { recursive: true, force: true });
         }
         // A record that is kept adds no key to the answer.
         {
