@@ -34,6 +34,7 @@ export type SpecifierType =
   | 'slider'
   | 'color'
   | 'json'
+  | 'map'
   | 'action_button';
 
 export type SpecifierScope = 'global' | 'tenant' | 'user';
@@ -62,6 +63,30 @@ export type SpecifierHandler =
   | { kind: 'http'; method?: string; url: string; body?: Record<string, unknown>; confirmText?: string }
   | { kind: 'action'; name: string; params?: Record<string, unknown>; confirmText?: string }
   | { kind: 'navigate'; url: string; target?: '_self' | '_blank' };
+
+/**
+ * The value kinds a `map` column declares (objectstack#30208). Mirrors
+ * `SpecifierMapColumnKindSchema`, which is closed: a new kind is an ADR-0007
+ * amendment.
+ */
+export type SpecifierMapColumnKind = 'duration' | 'positive_integer';
+
+/** One value column of a `map` specifier. Mirrors `SpecifierMapColumnSchema`. */
+export interface SpecifierMapColumn {
+  /** The property the cell is stored under when the map has several value columns. */
+  name: string;
+  /** An `I18nLabel`: the default-language string, or an inline locale map. */
+  label: string | Record<string, string>;
+  description?: string;
+  kind: SpecifierMapColumnKind;
+}
+
+/** The key column of a `map` specifier: its header only, never a list of keys. */
+export interface SpecifierMapKeyColumn {
+  /** An `I18nLabel`: the default-language string, or an inline locale map. */
+  label: string | Record<string, string>;
+  description?: string;
+}
 
 export interface Specifier {
   type: SpecifierType;
@@ -104,6 +129,17 @@ export interface Specifier {
   childNamespace?: string;
   bannerText?: string;
   bannerSeverity?: 'info' | 'success' | 'warning' | 'error';
+  /**
+   * `map` only (objectstack#30208): the key column's header. The keys a map
+   * admits are served at read time as this specifier's `options`, from a
+   * runtime option source; the manifest declares no list.
+   */
+  keyColumn?: SpecifierMapKeyColumn;
+  /**
+   * `map` only: the value columns, in display order. One column stores
+   * `Record<key, value>`; several store `Record<key, { [column.name]: value }>`.
+   */
+  columns?: SpecifierMapColumn[];
 }
 
 export interface SettingsManifest {

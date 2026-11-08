@@ -29,24 +29,48 @@
 import { extractFieldErrors } from '@object-ui/react';
 import { resolveLabel, type Specifier } from './types';
 import type { SettingsLabelHelpers } from './useSettingsLabel';
+import type { MapRefusalAt } from './SettingsMapField';
 
 /** The machine code of a refusal for a value that misses its declared `pattern`. */
 export const INVALID_FORMAT_CODE = 'invalid_format';
 
 type Translate = (key: string, options?: Record<string, unknown>) => string;
 
+/** The settings door's `details.fields` entries, as declared (`FieldError[]`), or none. */
+function declaredFieldErrors(apiError: unknown): Array<Record<string, unknown>> {
+  const details = (apiError as { details?: { fields?: unknown } } | null | undefined)?.details;
+  const fields = details && typeof details === 'object' ? details.fields : undefined;
+  if (!Array.isArray(fields)) return [];
+  return fields.filter((entry): entry is Record<string, unknown> => !!entry && typeof entry === 'object');
+}
+
 /** The `code` of each refused key, from the settings door's `details.fields`. */
 function refusalCodes(apiError: unknown): Map<string, string> {
   const codes = new Map<string, string>();
-  const details = (apiError as { details?: { fields?: unknown } } | null | undefined)?.details;
-  const fields = details && typeof details === 'object' ? details.fields : undefined;
-  if (!Array.isArray(fields)) return codes;
-  for (const entry of fields) {
-    if (!entry || typeof entry !== 'object') continue;
-    const { field, code } = entry as { field?: unknown; code?: unknown };
+  for (const { field, code } of declaredFieldErrors(apiError)) {
     if (typeof field === 'string' && typeof code === 'string') codes.set(field, code);
   }
   return codes;
+}
+
+/**
+ * Where each refused `map` key's refusal points (objectstack#31391): the save
+ * door's `constraint: { type: 'map', entry, column? }` (ADR-0114 discrete
+ * values), so the row can mark the entry and the cell without parsing the
+ * sentence. Only `entry` and `column` are read; `allowed` (a comma-joined
+ * list the sentence already names) and `kind` are left to the sentence. A map
+ * refusal with no `entry` (`invalid_type`: the value is not keyed rows at all)
+ * points at no row.
+ */
+function mapRefusalPointers(apiError: unknown): Map<string, MapRefusalAt> {
+  const pointers = new Map<string, MapRefusalAt>();
+  for (const { field, constraint } of declaredFieldErrors(apiError)) {
+    if (typeof field !== 'string' || !constraint || typeof constraint !== 'object') continue;
+    const { type, entry, column } = constraint as { type?: unknown; entry?: unknown; column?: unknown };
+    if (type !== 'map' || typeof entry !== 'string') continue;
+    pointers.set(field, typeof column === 'string' ? { entry, column } : { entry });
+  }
+  return pointers;
 }
 
 /** How the page names a field: its label, and the help line it draws under it. */
@@ -80,12 +104,14 @@ export function settingsFieldRefusals(
   specifiers: ReadonlyArray<Specifier>,
   wordingOf: (key: string, spec: Specifier | undefined) => FieldWording,
   t: Translate,
-): Array<{ field: string; message: string }> | null {
+): Array<{ field: string; message: string; at?: MapRefusalAt }> | null {
   const perField = extractFieldErrors(apiError);
   if (!perField?.length) return null;
   const codes = refusalCodes(apiError);
+  const pointers = mapRefusalPointers(apiError);
   return perField.map(({ field, message }) => {
-    if (codes.get(field) !== INVALID_FORMAT_CODE) return { field, message };
+    const at = pointers.get(field);
+    if (codes.get(field) !== INVALID_FORMAT_CODE) return at ? { field, message, at } : { field, message };
     const spec = specifiers.find((s) => s.key === field);
     return { field, message: invalidFormatMessage(spec, wordingOf(field, spec), t) };
   });

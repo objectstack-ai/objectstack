@@ -42,6 +42,7 @@ import {
 import { pickLocalized, useObjectTranslation } from '@object-ui/i18n';
 import { AlertTriangle, ChevronRight, Info, RotateCcw } from 'lucide-react';
 import { EnvLockBadge } from './EnvLockBadge';
+import { SettingsMapField, type MapRefusalAt } from './SettingsMapField';
 import {
   resolveLabel,
   type Specifier,
@@ -115,6 +116,12 @@ export interface SettingsFieldProps {
    * sitting under a red error reads as if the field has two states at once.
    */
   error?: string;
+  /**
+   * Where the last refusal points inside a `map` value (objectstack#31391):
+   * the save door's `constraint.entry` and `constraint.column`. The row and
+   * cell named are marked; `error` stays the sentence. Read by `map` only.
+   */
+  errorAt?: MapRefusalAt;
   /**
    * A fact the PAGE knows about this row that the manifest cannot carry
    * (objectstack#30313: the address the server judges beside Allowed IP
@@ -586,6 +593,7 @@ export function SettingsField(props: SettingsFieldProps) {
     saving,
     labels,
     error,
+    errorAt,
     note,
     writeScope,
     onClearSaved,
@@ -1061,6 +1069,21 @@ export function SettingsField(props: SettingsFieldProps) {
           disabled={disabled}
           onChange={(e) => onChange(e.target.value)}
         />,
+      );
+    case 'map':
+      // objectstack#31391 — keyed rows over the served `options`, one cell per
+      // declared column. A group named by the row's label, so no `htmlFor`.
+      return wrapper(
+        <SettingsMapField
+          spec={spec}
+          value={value}
+          onChange={onChange}
+          disabled={disabled}
+          labelId={labelId}
+          optionLabel={renderOptionLabel}
+          errorAt={error ? errorAt : undefined}
+        />,
+        undefined,
       );
     default:
       return wrapper(

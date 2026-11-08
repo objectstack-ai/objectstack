@@ -17,6 +17,7 @@ import { Button, Card, CardContent, Skeleton, Badge, getLazyIcon } from '@object
 import { ExpressionEvaluator } from '@object-ui/core';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { SettingsField } from './SettingsField';
+import type { MapRefusalAt } from './SettingsMapField';
 import { fieldWording, settingsFieldRefusals } from './settingsFieldRefusals';
 import {
   getJudgedClientAddress,
@@ -381,8 +382,12 @@ export function SettingsView() {
    * `error.code`, which `extractFieldErrors` could not read — so the whole
    * batch collapsed into one toast that named no field. It now arrives as the
    * declared `FieldError[]` under `error.details.fields`.
+   *
+   * Each carries the sentence the row shows and, for a `map` key, where the
+   * refusal points inside the value (objectstack#31391), so the row and cell
+   * it names are marked. A pre-save block points nowhere.
    */
-  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [fieldErrors, setFieldErrors] = useState<Record<string, { message: string; at?: MapRefusalAt }>>({});
   /**
    * The last save's fail-closed crypto refusal, or null (objectui#4570).
    *
@@ -586,7 +591,7 @@ export function SettingsView() {
         if (type === 'phone') return t('console.settingsView.invalidPhone');
         return t('console.settingsView.invalidColor');
       };
-      setFieldErrors(Object.fromEntries(blocked.map((b) => [b.key, messageFor(b)])));
+      setFieldErrors(Object.fromEntries(blocked.map((b) => [b.key, { message: messageFor(b) }])));
       setFocusKey({ key: blocked[0].key });
       const named = refusedSettingLabels(
         blocked.map(({ key }) => ({ field: key })),
@@ -669,7 +674,7 @@ export function SettingsView() {
         // keeps the server's sentence (`settingsFieldRefusals`).
         const perField = settingsFieldRefusals(apiError, manifest.specifiers, fieldWording(labels), t);
         if (perField?.length) {
-          setFieldErrors(Object.fromEntries(perField.map((f) => [f.field, f.message])));
+          setFieldErrors(Object.fromEntries(perField.map((f) => [f.field, { message: f.message, at: f.at }])));
           const named = refusedSettingLabels(perField, manifest.specifiers, labels);
           toast.error(
             named.length > 0
@@ -841,7 +846,8 @@ export function SettingsView() {
                 locked={resolved?.locked}
                 saving={saving}
                 labels={labels}
-                error={key ? fieldErrors[key] : undefined}
+                error={key ? fieldErrors[key]?.message : undefined}
+                errorAt={key ? fieldErrors[key]?.at : undefined}
                 note={
                   judgedAddress &&
                   clientAddressRouteOf(namespace) !== undefined &&
