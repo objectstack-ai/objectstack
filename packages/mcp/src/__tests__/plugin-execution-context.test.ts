@@ -33,7 +33,11 @@
 // `accessToken: authz.accessToken`.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
+import type { AIToolDefinition, ToolCallPart, ToolExecutionContext } from '@objectstack/spec/contracts';
+import type { McpToolCallContext } from '../types.js';
 
 /** The resolved envelope the API key stands for — the input this face converts. */
 const AUTHZ = {
@@ -77,7 +81,7 @@ interface FindCall {
   options: { context?: ExecutionContext; where?: unknown; limit?: number };
 }
 
-function createHarness() {
+function createHarness(extraServices: Record<string, unknown> = {}) {
   const finds: FindCall[] = [];
   const ql = {
     find: vi.fn(async (object: string, options: FindCall['options']) => {
@@ -99,7 +103,7 @@ function createHarness() {
     unregister: vi.fn(),
   };
   const settings = { get: vi.fn(async () => undefined) };
-  const services: Record<string, unknown> = { objectql: ql, metadata, settings };
+  const services: Record<string, unknown> = { objectql: ql, metadata, settings, ...extraServices };
   const ctx = {
     registerService: vi.fn(),
     getService: vi.fn((name: string) => {
@@ -258,5 +262,68 @@ describe('#7279 — stdio ExecutionContext, assembled by the shared assembler', 
     // The fail-closed contract is now the assembler's default entry rather than
     // a hand-written guard — same refusal, one implementation.
     await expect(getRecord('crm_account', 'r_1')).rejects.toThrow(/no longer valid/);
+  });
+});
+
+describe('[#31605] the stdio principal reaches the bridged AI tools and the tool-call interceptor', () => {
+  const originalEnv = { ...process.env };
+  const AI_TOOL: AIToolDefinition = {
+    name: 'summarize_pipeline',
+    description: 'Summarize the open pipeline.',
+    parameters: { type: 'object', properties: {} },
+  };
+
+  beforeEach(() => {
+    process.env = { ...originalEnv };
+    process.env.OS_MCP_STDIO_API_KEY = 'osk_test';
+    resolveAuthzContextMock.mockClear();
+  });
+
+  afterEach(() => {
+    process.env = { ...originalEnv };
+  });
+
+  it('a bridged tool runs as the key\'s user, and an interceptor is told that user, re-resolved per call', async () => {
+    const executed: Array<{ call: ToolCallPart; context?: ToolExecutionContext }> = [];
+    const toolRegistry = {
+      getAll: () => [AI_TOOL],
+      async execute(call: ToolCallPart, context?: ToolExecutionContext) {
+        executed.push({ call, context });
+        return { type: 'tool-result', toolCallId: call.toolCallId, toolName: call.toolName, output: { type: 'text', value: 'ok' } };
+      },
+    };
+    const { ctx } = createHarness({ ai: { toolRegistry } });
+    await startStdio(ctx);
+    const runtime = (ctx.registerService.mock.calls.find((c: unknown[]) => c[0] === 'mcp') as unknown[])[1] as InstanceType<
+      typeof MCPServerRuntime
+    >;
+    const seen: McpToolCallContext[] = [];
+    runtime.setToolInterceptor(async (call, next) => {
+      seen.push(call);
+      return next();
+    });
+
+    const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+    await runtime.server.connect(serverSide);
+    const client = new Client({ name: 'stdio-principal-pin', version: '0.0.0' });
+    await client.connect(clientSide);
+    const before = resolveAuthzContextMock.mock.calls.length;
+    try {
+      const answer = await client.callTool({ name: 'summarize_pipeline', arguments: {} });
+      expect(answer.isError).toBeFalsy();
+    } finally {
+      await client.close();
+    }
+
+    expect(executed).toHaveLength(1);
+    expect(executed[0]!.context).toEqual({
+      actor: { id: 'u_stdio', positions: ['sales_rep'], permissions: ['records:read'] },
+    });
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatchObject({ door: 'mcp', transport: 'stdio', toolName: 'summarize_pipeline' });
+    expect(seen[0]!.principal).toEqual({ userId: 'u_stdio', principalKind: 'human', organizationId: 'org_stdio' });
+    // Once for the interceptor's principal, once for the tool's context: the
+    // identity is never cached across calls (ADR-0101 D1).
+    expect(resolveAuthzContextMock.mock.calls.length - before).toBe(2);
   });
 });

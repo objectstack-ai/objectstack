@@ -1160,10 +1160,11 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
       },
       revoked_reason: {
         label: "撤銷原因",
-        help: "金鑰被撤銷的原因，僅在它決定誰能恢復金鑰時記錄。管理員強制重設密碼：只有平台管理員能恢復該金鑰。組織成員資格已結束：擁有者已離開組織，任何人都不能恢復該金鑰，由組織成員建立新的金鑰。金鑰恢復後清除。從 API 金鑰清單撤銷的金鑰此項為空。",
+        help: "金鑰被撤銷的原因，僅在它決定誰能恢復金鑰時記錄。管理員強制重設密碼：只有平台管理員能恢復該金鑰。組織成員資格已結束：擁有者已離開組織，任何人都不能恢復該金鑰，由組織成員建立新的金鑰。已被管理員暫停：平台管理員撤銷了不屬於自己的金鑰，只有平台管理員能恢復該金鑰。金鑰恢復後清除。擁有者從 API 金鑰清單撤銷的金鑰此項為空。",
         options: {
           admin_password_reset: "管理員強制重設密碼",
-          organization_membership_ended: "組織成員資格已結束"
+          organization_membership_ended: "組織成員資格已結束",
+          administrator_suspended: "已被管理員暫停"
         }
       },
       key: {
@@ -2659,14 +2660,15 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
       },
       source_kind: {
         label: "來源類型",
-        help: "推送該群組的來源：SCIM 連線。",
+        help: "傳送該群組的來源：SCIM 連線，或登入時的 SSO 提供者。",
         options: {
-          scim: "SCIM 連線"
+          scim: "SCIM 連線",
+          sso: "SSO 提供者"
         }
       },
       source_id: {
         label: "來源 ID",
-        help: "該群組經由的 SCIM 連線 ID，例如 \"okta-prod\"。"
+        help: "該群組經由的 SCIM 連線 ID 或 SSO 提供者 ID，例如 \"okta-prod\"。"
       },
       group_external_id: {
         label: "群組外部 ID",
@@ -2682,7 +2684,7 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
       },
       organization_id: {
         label: "組織",
-        help: "授權所在的組織：擁有該 SCIM 連線的組織。"
+        help: "授權所在的組織：擁有該 SCIM 連線或 SSO 提供者的組織。"
       },
       created_at: {
         label: "建立時間"

@@ -210,12 +210,14 @@ describe('ADR-0130 D1 + D3 — the gate relaxation and the object-name check are
     expect(engineOf(kernel).registry.getPackage('com.acme.crm.billing')).toBeUndefined();
   });
 
-  it('leaves NOTHING behind when it refuses — no package record, no namespace claim, the sitting definition untouched', async () => {
+  it('leaves NOTHING behind when it refuses — no package record, no namespace claim, no definition of the object', async () => {
     // D3 item 3: the check is install-time, ahead of any DDL. Its observable
     // consequence at this layer is that the refused package never reaches the
-    // registry at all — the refusal lands before every mutation `installPackage`
-    // makes, so there is no half-applied install to unwind and no second
-    // definition of `crm_account` for a driver to reconcile.
+    // registry at all, so there is no second definition of `crm_account` for a
+    // driver to reconcile. [#31564] …and neither does the member registered
+    // before it: the `manifest` service registers the whole artifact in one
+    // restore run, so the refusal puts back `com.acme.crm` too — the artifact
+    // was refused, and the running kernel holds nothing of it.
     const kernel = await freshKernel();
     const refused = await registerAndCatch(
       kernel.getService('manifest') as ManifestService,
@@ -225,13 +227,10 @@ describe('ADR-0130 D1 + D3 — the gate relaxation and the object-name check are
 
     const registry = engineOf(kernel).registry;
     expect(registry.getPackage('com.acme.crm.billing')).toBeUndefined();
-    expect(registry.getNamespaceOwners('crm')).toEqual(['com.acme.crm']);
-    // The sitting owner's definition is exactly its own — not merged with, and
-    // not replaced by, the refused package's body.
-    expect(registry.getObjectOwner('crm_account')?.packageId).toBe('com.acme.crm');
-    const account = registry.resolveObject('crm_account') as { label?: string; fields?: Record<string, unknown> } | undefined;
-    expect(account?.label).toBe('Account');
-    expect(account?.fields?.balance).toBeUndefined();
+    expect(registry.getPackage('com.acme.crm')).toBeUndefined();
+    expect(registry.getNamespaceOwners('crm')).toEqual([]);
+    expect(registry.getObjectOwner('crm_account')).toBeUndefined();
+    expect(registry.resolveObject('crm_account')).toBeUndefined();
   });
 });
 

@@ -331,6 +331,11 @@ const LEDGER: Readonly<Record<string, LedgerRow>> = {
     why: 'RUNTIME-ONLY (objectstack#28245) — object-field metadata (the spec\'s `FieldSchema.lookupAutofill`) read off the '
       + 'resolved `field` stash: which fields a pick fills is a fact about the object, not about one form.',
   },
+  homeAmountSource: {
+    readers: [CURRENCY],
+    why: 'RUNTIME-ONLY (objectstack#27196) — the producers stamp the home-amount source onto the resolved field '
+      + '(ADR-0144 D5): it is read off the object\'s field map, never authored on a form.',
+  },
   currency: {
     readers: [CURRENCY],
     why: 'RUNTIME-ONLY (objectui#11070 round 13) — the spec\'s `FieldSchema` refuses it; `currencyConfig` is the declared spelling.',

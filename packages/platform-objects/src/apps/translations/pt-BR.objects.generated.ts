@@ -1160,10 +1160,11 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
       },
       revoked_reason: {
         label: "Motivo da revogação",
-        help: "Por que a chave foi revogada, quando isso decide quem pode restaurá-la. Redefinição de senha pelo administrador: somente um administrador da plataforma pode restaurar a chave. Fim da associação à organização: o proprietário saiu da organização e ninguém pode restaurar a chave; um membro cria uma nova. Limpo quando a chave é restaurada. Vazio para uma chave revogada na lista de Chaves de API.",
+        help: "Por que a chave foi revogada, quando isso decide quem pode restaurá-la. Redefinição de senha pelo administrador: somente um administrador da plataforma pode restaurar a chave. Fim da associação à organização: o proprietário saiu da organização e ninguém pode restaurar a chave; um membro cria uma nova. Suspensa por um administrador: um administrador da plataforma revogou uma chave que não é dele, e somente um administrador da plataforma pode restaurá-la. Limpo quando a chave é restaurada. Vazio para uma chave que o proprietário revogou na lista de Chaves de API.",
         options: {
           admin_password_reset: "Redefinição de senha pelo administrador",
-          organization_membership_ended: "Fim da associação à organização"
+          organization_membership_ended: "Fim da associação à organização",
+          administrator_suspended: "Suspensa por um administrador"
         }
       },
       key: {
@@ -2659,14 +2660,15 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
       },
       source_kind: {
         label: "Tipo de origem",
-        help: "O que envia o grupo: uma conexão SCIM.",
+        help: "O que envia o grupo: uma conexão SCIM ou um provedor SSO no login.",
         options: {
-          scim: "Conexão SCIM"
+          scim: "Conexão SCIM",
+          sso: "Provedor SSO"
         }
       },
       source_id: {
         label: "ID de origem",
-        help: "O ID da conexão SCIM pela qual o grupo chega, por exemplo \"okta-prod\"."
+        help: "O ID da conexão SCIM ou do provedor SSO pelo qual o grupo chega, por exemplo \"okta-prod\"."
       },
       group_external_id: {
         label: "ID externo do grupo",
@@ -2682,7 +2684,7 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
       },
       organization_id: {
         label: "Organização",
-        help: "A organização em que a concessão é feita: a organização proprietária da conexão SCIM."
+        help: "A organização em que a concessão é feita: a organização proprietária da conexão SCIM ou do provedor SSO."
       },
       created_at: {
         label: "Criado em"

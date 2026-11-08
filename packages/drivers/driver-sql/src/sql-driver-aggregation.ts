@@ -62,10 +62,14 @@ export interface AggregationHost {
   foldEmptyAggregateAnswers: SqlDriver['foldEmptyAggregateAnswers'];
   readonly fractionalNumericFields: SqlDriver['fractionalNumericFields'];
   getBuilder: SqlDriver['getBuilder'];
+  readonly isMssql: SqlDriver['isMssql'];
+  readonly isOracle: SqlDriver['isOracle'];
   readonly knex: SqlDriver['knex'];
   mapAggregateFunc: SqlDriver['mapAggregateFunc'];
   readonly numericFields: SqlDriver['numericFields'];
   presentReadColumns: SqlDriver['presentReadColumns'];
+  primeMssqlGuidColumns: SqlDriver['primeMssqlGuidColumns'];
+  primeOracleRawUuidColumns: SqlDriver['primeOracleRawUuidColumns'];
   readPresentationKind: SqlDriver['readPresentationKind'];
   remoteColumn: SqlDriver['remoteColumn'];
 }
@@ -73,7 +77,12 @@ export interface AggregationHost {
 /** The bodies of the "Aggregation" section of `SqlDriver`: a stateless facet, called by the class's stubs. */
 export class AggregationFacet {
   /** The body of `SqlDriver#aggregate`; the method's docblock there is its contract. */
-  static async aggregate(this: Pick<AggregationHost, 'aggregandColumnClassOf' | 'aggregateBackendFault' | 'aliasIdentifierSql' | 'applyFilters' | 'applyTenantScope' | 'buildDateBucketExpr' | 'coercionKey' | 'config' | 'dateGranularityCapabilities' | 'dialectName' | 'foldEmptyAggregateAnswers' | 'getBuilder' | 'knex' | 'mapAggregateFunc' | 'presentReadColumns' | 'readPresentationKind' | 'remoteColumn'>, object: string, query: DriverQuery, options?: DriverOptions): Promise<Record<string, unknown>[]> {
+  static async aggregate(this: Pick<AggregationHost, 'aggregandColumnClassOf' | 'aggregateBackendFault' | 'aliasIdentifierSql' | 'applyFilters' | 'applyTenantScope' | 'buildDateBucketExpr' | 'coercionKey' | 'config' | 'dateGranularityCapabilities' | 'dialectName' | 'foldEmptyAggregateAnswers' | 'getBuilder' | 'isMssql' | 'isOracle' | 'knex' | 'mapAggregateFunc' | 'presentReadColumns' | 'primeMssqlGuidColumns' | 'primeOracleRawUuidColumns' | 'readPresentationKind' | 'remoteColumn'>, object: string, query: DriverQuery, options?: DriverOptions): Promise<Record<string, unknown>[]> {
+    // [#31395] SQL Server: which columns are GUIDs, before a text operator compiles.
+    if (this.isMssql) await this.primeMssqlGuidColumns(object, query.where);
+    // [#31390] On Oracle a federated object's RAW(16) uuid columns are read from
+    // the remote catalog before a comparand or a written value is bound.
+    if (this.isOracle) await this.primeOracleRawUuidColumns(object);
     const builder = this.getBuilder(object, options);
     // The column a FIELD names in this statement: its `external.columnMap`
     // remote column on a federated object, the field itself otherwise. Every

@@ -8,10 +8,14 @@ import { fileURLToPath } from 'node:url';
 import {
   changedFiles,
   changedOutsideTree,
+  BENIGN_DISK_MODULES,
   closureSummaries,
   dedupeFilters,
+  isBenignDiskModule,
+  libraryReadsDisk,
   listWorkspacePackages,
   moduleSpecifiers,
+  ownerDirName,
   PATH_WALKER,
   PATH_WALKER_FILE,
   outsideTreeReasons,
@@ -22,6 +26,8 @@ import {
   trackedFiles,
 } from '../select-affected-tests.mjs';
 import { shardTotal } from '../../../scripts/ci-shard-matrix.mjs';
+import { parse as parseYaml } from 'yaml';
+
 import { jobBlock, rootCi, triggerBlock, UI_JOBS, uiRun, withoutComments } from './helpers/root-ci';
 
 /**
@@ -97,6 +103,27 @@ function workspace() {
     'scripts/guard.mjs': 'export function guard() {}\n',
     'scripts/helper.mjs': 'export const x = 1;\n',
     'scripts/__tests__/gate.test.ts': "import '../helper.mjs';\n",
+    // Item 2c: scripts/ and eslint-rules/ own their tests (objectstack#31520).
+    'scripts/invoked-as.mjs':
+      "import { spawnSync } from 'node:child_process';\n" +
+      "import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';\n" +
+      'export const isEntrypoint = () => false;\n',
+    'scripts/__tests__/entry.test.ts': "import '../invoked-as.mjs';\n",
+    'scripts/__tests__/own-dir.test.ts': reader("readFileSync(join(HERE, '..', 'helper.mjs'), 'utf8')"),
+    'scripts/__tests__/spawns.test.ts': "import { spawnSync } from 'node:child_process';\nspawnSync('node', ['x.mjs']);\n",
+    'scripts/__tests__/walks.test.ts': "import { opendirSync } from 'node:fs';\nfor (const e of opendirSync(process.cwd())) void e;\n",
+    'eslint-rules/rule.js': 'export default { create: () => ({}) };\n',
+    'eslint-rules/rule.test.js': "import { RuleTester } from 'eslint';\nimport rule from './rule.js';\nexport { RuleTester, rule };\n",
+    'tools/helper.mjs': 'export const t = 1;\n',
+    'tools/loose.test.ts': "import './helper.mjs';\n",
+    // Item 2d: a library program reads the disk with no fs in sight.
+    'packages/c/src/program.test.ts': "import ts from 'typescript';\nts.createProgram(['x.ts'], {});\n",
+    'packages/c/src/helpers/host.ts': "import ts from 'typescript';\nexport const cwd = ts.sys.getCurrentDirectory();\n",
+    'packages/c/src/via-program.test.ts': "import { cwd } from './helpers/host';\nexport { cwd };\n",
+    'packages/c/src/eslint-api.test.ts': "import { ESLint } from 'eslint';\nexport const e = new ESLint();\n",
+    'packages/c/src/parse.test.ts':
+      "import ts from 'typescript';\nexport const f = ts.createSourceFile('x.ts', '', ts.ScriptTarget.Latest);\n",
+    'packages/c/src/comment-lib.test.ts': "/** @type {import('eslint').Rule.RuleModule} */\nexport const r = {};\n",
     'README.md': '# fixture\n',
     'content/page.md': 'docs\n',
     'packages/locales/package.json': manifest('@fx/locales'),
@@ -129,6 +156,7 @@ function workspace() {
       "readFileSync(join(HERE, 'x.json'), 'utf8');\nconst r = readFileSync;\nr('/etc/hosts')",
     ),
     'packages/c/src/escapes.test.ts': "import '../../../scripts/helper.mjs';\n",
+    'packages/c/src/escapes-root.test.ts': "import '../../../tools/helper.mjs';\n",
     'packages/heavy-user/package.json': manifest('@fx/heavy-user'),
     'packages/heavy-user/src/heavy.test.tsx': 'export {};\n',
   });
@@ -178,16 +206,16 @@ describe('select-affected-tests — the always-on set', () => {
     expect(v.filters.length).toBeGreaterThan(0);
   });
 
-  it('keeps a test outside every package', () => {
-    expect(why.get('scripts/__tests__/gate.test.ts')).toBe('outside every workspace package');
+  it('keeps a test outside every package and every owner directory', () => {
+    expect(why.get('tools/loose.test.ts')).toBe('outside every workspace package');
   });
 
   it('keeps a test whose RELATIVE closure reads the disk, not only one that imports fs itself', () => {
     expect(why.get('packages/c/src/reads.test.ts')).toBe('reads the disk or spawns a process');
   });
 
-  it('keeps a test that reaches a file outside every package', () => {
-    expect(why.get('packages/c/src/escapes.test.ts')).toMatch(/reaches the repository root outside packages\/c/);
+  it('keeps a test that reaches a file outside every package and every owner directory', () => {
+    expect(why.get('packages/c/src/escapes-root.test.ts')).toMatch(/reaches the repository root outside packages\/c/);
   });
 
   it('does not keep a test whose only edges past its package are into other packages (objectstack#31520)', () => {
@@ -288,6 +316,86 @@ describe('select-affected-tests — bounded disk readers (objectstack#31520)', (
     const standalone = new Map((v as Affected).alwaysOn.map((a) => [a.file, a.why]));
     expect(standalone.get('packages/c/src/own-read.test.ts')).toBe('reads the disk or spawns a process');
     expect(standalone.get('packages/c/src/other-read.test.ts')).toBe('reads the disk or spawns a process');
+  });
+});
+
+describe('select-affected-tests — owner directories (objectstack#31520)', () => {
+  const { root, tracked } = workspace();
+  const docsOnly = affected(root, tracked, ['content/page.md']);
+  const why = new Map(docsOnly.alwaysOn.map((a) => [a.file, a.why]));
+  const scriptsChange = affected(root, tracked, ['scripts/helper.mjs']);
+
+  it('frees a scripts/ test whose closure stays in scripts/, and a scripts/ change selects the directory', () => {
+    for (const file of ['gate', 'own-dir', 'entry']) expect(why.has(`scripts/__tests__/${file}.test.ts`), file).toBe(false);
+    expect(docsOnly.filters).not.toContain('scripts/');
+    expect(docsOnly.filters.some((f) => /gate|own-dir|entry/.test(f))).toBe(false);
+    expect(scriptsChange.changedPackages).toEqual([ownerDirName('scripts')]);
+    expect(scriptsChange.filters).toContain('scripts/');
+  });
+
+  it('frees an eslint-rules/ RuleTester test, selected by an eslint-rules/ change only', () => {
+    expect(why.has('eslint-rules/rule.test.js')).toBe(false);
+    expect(affected(root, tracked, ['eslint-rules/rule.js']).filters).toContain('eslint-rules/');
+    expect(scriptsChange.filters).not.toContain('eslint-rules/');
+  });
+
+  it('a package change does not select an owner directory', () => {
+    const v = affected(root, tracked, ['packages/a/src/index.ts']);
+    expect(v.filters).not.toContain('scripts/');
+    expect(v.filters).not.toContain('eslint-rules/');
+  });
+
+  it('keeps a scripts/ test that spawns, or walks from process.cwd()', () => {
+    for (const file of ['spawns', 'walks']) {
+      expect(why.get(`scripts/__tests__/${file}.test.ts`), file).toBe('reads the disk or spawns a process');
+    }
+  });
+
+  it('selects a package test that imports into scripts/ through the owner directory', () => {
+    expect(why.has('packages/c/src/escapes.test.ts')).toBe(false);
+    expect(scriptsChange.attributed).toContainEqual({ file: 'packages/c/src/escapes.test.ts', via: [ownerDirName('scripts')] });
+    expect(affected(root, tracked, ['eslint-rules/rule.js']).filters.some((f) => f.includes('escapes.test'))).toBe(false);
+  });
+
+  it('a script the root config imports still forces a full run', () => {
+    expect(full(root, tracked, ['scripts/guard.mjs']).join('\n')).toMatch(/root vitest config or a setup file imports it/);
+  });
+
+  it('exempts invoked-as.mjs only while its disk imports are exactly the pinned ones', () => {
+    const pinned = fs.readFileSync(path.join(root, 'scripts/invoked-as.mjs'), 'utf8');
+    expect(isBenignDiskModule('scripts/invoked-as.mjs', pinned)).toBe(true);
+    expect(isBenignDiskModule('scripts/invoked-as.mjs', `import { readFileSync } from 'node:fs';\n${pinned}`)).toBe(false);
+    expect(isBenignDiskModule('scripts/invoked-as.mjs', pinned.replace('spawnSync }', 'spawnSync, execSync }'))).toBe(false);
+    expect(isBenignDiskModule('scripts/invoked-as.mjs', `import * as fs from 'node:fs';\n${pinned}`)).toBe(false);
+    expect(isBenignDiskModule('scripts/helper.mjs', pinned)).toBe(false);
+  });
+});
+
+describe('select-affected-tests — library programs (objectstack#31520)', () => {
+  const { root, tracked } = workspace();
+  const docsOnly = affected(root, tracked, ['content/page.md']);
+  const why = new Map(docsOnly.alwaysOn.map((a) => [a.file, a.why]));
+
+  it('keeps a test that runs a TypeScript program or ESLint, itself or through a helper, with no fs import', () => {
+    for (const file of ['program', 'via-program', 'eslint-api']) {
+      expect(why.get(`packages/c/src/${file}.test.ts`), file).toBe('reads the disk or spawns a process');
+    }
+  });
+
+  it('leaves out a test that only parses, or names a library in a comment', () => {
+    for (const file of ['parse', 'comment-lib']) expect(why.has(`packages/c/src/${file}.test.ts`), file).toBe(false);
+  });
+
+  it('reads a library use fail-closed', () => {
+    expect(libraryReadsDisk("import ts from 'typescript';\nts.isIdentifier(n);\nts.SyntaxKind.Block;\n")).toBe(false);
+    expect(libraryReadsDisk("import ts from 'typescript';\nts.sys.readFile('x');\n")).toBe(true);
+    expect(libraryReadsDisk("import ts from 'typescript';\nconst t = ts;\n")).toBe(true);
+    expect(libraryReadsDisk("import { createProgram } from 'typescript';\n")).toBe(true);
+    expect(libraryReadsDisk("import type { Plugin } from 'vite';\n")).toBe(false);
+    expect(libraryReadsDisk("const v = await import('vite');\n")).toBe(true);
+    expect(libraryReadsDisk("import { compile } from 'tailwindcss';\n")).toBe(false);
+    expect(libraryReadsDisk("import postcss from 'postcss';\n")).toBe(true);
+    expect(libraryReadsDisk("import { Linter } from 'eslint';\n")).toBe(false);
   });
 });
 
@@ -510,14 +618,35 @@ describe('select-affected-tests — the live tree', () => {
     // The walker lives outside ui/, so a change there arrives as `outside`. It
     // must keep reaching this file's own tests, or an edit to it could narrow
     // the selection with nothing here running to notice.
+    // Since item 2c this is not the always-on set twice: both select the whole
+    // scripts/ owner directory, which an empty change does not.
     const self = 'scripts/__tests__/select-affected-tests.test.ts';
     const walker = selectAffectedTests({ changed: [], outside: [PATH_WALKER_FILE] });
     const selector = selectAffectedTests({ changed: ['scripts/select-affected-tests.mjs'] });
-    expect(walker.mode).toBe(selector.mode);
-    if (walker.mode === 'affected' && selector.mode === 'affected') {
-      expect(walker.filters).toEqual(selector.filters);
-      expect(walker.filters).toContain(self);
-    }
+    const empty = selectAffectedTests({ changed: [] });
+    expect(walker.mode).toBe('affected');
+    expect(selector.mode).toBe('affected');
+    expect(empty.mode).toBe('affected');
+    if (walker.mode !== 'affected' || selector.mode !== 'affected' || empty.mode !== 'affected') return;
+    expect(walker.changedPackages).toEqual([ownerDirName('scripts')]);
+    expect(walker.filters).toEqual(selector.filters);
+    expect(walker.filters).toContain('scripts/');
+    expect(walker.filters.some((f) => self.includes(f))).toBe(true);
+    expect(empty.filters).not.toContain('scripts/');
+  });
+
+  it('a file the root config reaches inside an owner directory still forces a full run (objectstack#31520)', () => {
+    // The owner directories are not workspace packages: computing the root
+    // config's reach against them would turn this guard into a scripts/ change.
+    const verdict = selectAffectedTests({ changed: ['scripts/vitest-invocation-guard.mjs'] });
+    expect(verdict.mode).toBe('full');
+    expect((verdict as { reasons: string[] }).reasons.join('\n')).toMatch(/root vitest config or a setup file imports it/);
+  });
+
+  it('the live invoked-as.mjs still imports exactly the disk bindings its exemption pins (objectstack#31520)', () => {
+    const rel = Object.keys(BENIGN_DISK_MODULES)[0];
+    expect(rel).toBe('scripts/invoked-as.mjs');
+    expect(isBenignDiskModule(rel, fs.readFileSync(path.join(repoRoot, rel), 'utf8'))).toBe(true);
   });
 
   it('reaches a verdict from the command line, and an empty change still selects the always-on set', () => {
@@ -598,5 +727,55 @@ describe("the root ci.yml's Test UI job wires the selector fail-open (objectui#1
     const run = job.slice(job.indexOf(header));
     expect(run).toContain(`${uiRun('test')} --shard=\${{ matrix.shard }}/${shards}`);
     expect(run).toContain(`pnpm --dir ui exec vitest run --shard=\${{ matrix.shard }}/${shards} --reporter=default --reporter=github-actions "\${filters[@]}"`);
+  });
+});
+
+// objectstack#22034: the four root ci.yml jobs that read git history check out
+// at depth 1 and fetch only HEAD's ancestry and the base branch, in one step
+// that is the same in all four. `fetch-depth: 0` fetched every head and every
+// tag; a checkout that grows it back passes every other gate and silently
+// undoes the measurement the fetch step's budget was sized from.
+describe("the root ci.yml's history readers check out at depth 1, then fetch (objectstack#22034)", () => {
+  type Step = { name?: string; uses?: string; with?: Record<string, unknown>; 'timeout-minutes'?: number; run?: string; env?: Record<string, string> };
+  const jobs = (parseYaml(rootCi()) as { jobs: Record<string, { 'timeout-minutes'?: number; steps: Step[] }> }).jobs;
+  const FETCH = "Fetch this commit's history and the base branch";
+  // Each job's first step that reads history: the fetch must come before it.
+  const FIRST_READER: Record<string, string> = {
+    'test-plan': "Plan this run's Test Core shards",
+    test: "Compute this shard's package set",
+    [UI_JOBS.test]: 'Select the tests this change affects',
+    [UI_JOBS.typeCheck]: 'check:lockfile-integrity — compare this pull request\'s lockfile with its merge base',
+  };
+
+  for (const [job, reader] of Object.entries(FIRST_READER)) {
+    it(`${job}: depth-1 checkout, the fetch step next, then the first reader`, () => {
+      const steps = jobs[job]?.steps ?? [];
+      expect(steps.length, `ci.yml has no job ${job}`).toBeGreaterThan(0);
+      const checkout = steps.findIndex((s) => s.uses?.startsWith('actions/checkout@'));
+      expect(checkout, `${job} has no actions/checkout step`).toBeGreaterThan(-1);
+      expect(steps[checkout].with?.['fetch-depth'], `${job}'s checkout sets fetch-depth`).toBeUndefined();
+      expect(steps[checkout + 1]?.name, `${job}: the step after the checkout is not the fetch`).toBe(FETCH);
+      const first = steps.findIndex((s) => s.name === reader);
+      expect(first, `${job} has no step named ${reader}`).toBeGreaterThan(checkout + 1);
+      // Each job sizes its own budget inside its wall (the `test` job's FETCH
+      // BUDGET comment): never under the healthy floor, never the whole wall.
+      const budget = steps[checkout + 1]['timeout-minutes'];
+      const wall = jobs[job]['timeout-minutes'];
+      expect(typeof budget, `${job}'s fetch step has no timeout-minutes`).toBe('number');
+      expect(budget).toBeGreaterThanOrEqual(8);
+      expect(typeof wall, `${job} has no job wall`).toBe('number');
+      expect(budget!).toBeLessThan(wall!);
+    });
+  }
+
+  it('the fetch step is one step, the same in all four jobs but for its budget', () => {
+    const copies = Object.keys(FIRST_READER).map((job) => {
+      const copy: Step = { ...jobs[job].steps.find((s) => s.name === FETCH) };
+      delete copy['timeout-minutes'];
+      return copy;
+    });
+    expect(copies[0]).toHaveProperty('run');
+    for (const copy of copies) expect(copy).toEqual(copies[0]);
+    expect(copies[0]?.run).toContain('git fetch --no-tags "${deepen[@]}" origin "$head" "${refspecs[@]}"');
   });
 });

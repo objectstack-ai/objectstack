@@ -10,6 +10,7 @@ Reference companion to `objectstack-data/SKILL.md`, and the catalog's anchor for
 data hooks. Covers the lifecycle events, the sandboxed `body` (and the deprecated
 inline `handler`), the `HookContext` API, registration, and the canonical patterns
 (delete guards, audit trails, cross-object writes, read masking).
+`check:skill-examples` skips the unmarked blocks: fragments, shapes, and pattern 4's bare `any`.
 
 
 ---
@@ -79,6 +80,7 @@ annotation can't catch — a non-`snake_case` `name`, a misspelled key routed
 through a spread — fail while you author instead of at deploy, and the export
 carries defaults already materialized.
 
+<!-- os:check -->
 ```typescript
 import { P } from '@objectstack/spec';
 import { defineHook } from '@objectstack/spec/data';
@@ -736,7 +738,10 @@ additionally require the `api.read` / `api.write` capabilities.
 
 ### 1. Preventing Deletion (sandboxed `body`)
 
+<!-- os:check -->
 ```typescript
+import { defineHook } from '@objectstack/spec/data';
+
 const protectStrategicAccounts = defineHook({
   name: 'crm_protect_strategic_accounts',
   object: 'account',
@@ -760,7 +765,10 @@ const protectStrategicAccounts = defineHook({
 
 ### 2. Creating Related Records (audit trail, sandboxed `body`)
 
+<!-- os:check -->
 ```typescript
+import { defineHook } from '@objectstack/spec/data';
+
 const createAuditTrail = defineHook({
   name: 'crm_audit_trail',
   object: ['account', 'contact', 'opportunity'],
@@ -784,7 +792,10 @@ const createAuditTrail = defineHook({
 
 ### 3. Multi-Object Logic (sandboxed `body`)
 
+<!-- os:check -->
 ```typescript
+import { defineHook } from '@objectstack/spec/data';
+
 const cascadeAccountUpdate = defineHook({
   name: 'crm_cascade_account_updates',
   object: 'account',

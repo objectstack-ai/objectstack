@@ -1160,10 +1160,11 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       revoked_reason: {
         label: "Revoke Reason",
-        help: "Why the key was revoked, where that decides who can restore it. Administrator password reset: only a platform administrator can restore the key. Organization membership ended: the owner left the organization, and no one can restore the key; a member creates a new one. Cleared when the key is restored. Empty for a key revoked from the API Keys list.",
+        help: "Why the key was revoked, where that decides who can restore it. Administrator password reset: only a platform administrator can restore the key. Organization membership ended: the owner left the organization, and no one can restore the key; a member creates a new one. Suspended by an administrator: a platform administrator revoked a key that is not theirs, and only a platform administrator can restore it. Cleared when the key is restored. Empty for a key its owner revoked from the API Keys list.",
         options: {
           admin_password_reset: "Administrator password reset",
-          organization_membership_ended: "Organization membership ended"
+          organization_membership_ended: "Organization membership ended",
+          administrator_suspended: "Suspended by an administrator"
         }
       },
       key: {
@@ -2659,14 +2660,15 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       source_kind: {
         label: "Source Kind",
-        help: "What pushes the group: a SCIM connection.",
+        help: "What sends the group: a SCIM connection, or an SSO provider at sign-in.",
         options: {
-          scim: "SCIM Connection"
+          scim: "SCIM Connection",
+          sso: "SSO Provider"
         }
       },
       source_id: {
         label: "Source ID",
-        help: "The SCIM connection ID the group arrives through, e.g. \"okta-prod\"."
+        help: "The SCIM connection ID or the SSO provider ID the group arrives through, e.g. \"okta-prod\"."
       },
       group_external_id: {
         label: "Group External ID",
@@ -2682,7 +2684,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       organization_id: {
         label: "Organization",
-        help: "The organization the grant is made in: the organization that owns the SCIM connection."
+        help: "The organization the grant is made in: the organization that owns the SCIM connection or the SSO provider."
       },
       created_at: {
         label: "Created At"

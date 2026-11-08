@@ -1160,10 +1160,11 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       revoked_reason: {
         label: "撤销原因",
-        help: "密钥被撤销的原因，仅在它决定谁能恢复密钥时记录。管理员强制重置密码：只有平台管理员能恢复该密钥。组织成员资格已结束：所有者已离开组织，任何人都不能恢复该密钥，由组织成员创建新的密钥。密钥恢复后清除。从 API 密钥列表撤销的密钥此项为空。",
+        help: "密钥被撤销的原因，仅在它决定谁能恢复密钥时记录。管理员强制重置密码：只有平台管理员能恢复该密钥。组织成员资格已结束：所有者已离开组织，任何人都不能恢复该密钥，由组织成员创建新的密钥。已被管理员暂停：平台管理员撤销了不属于自己的密钥，只有平台管理员能恢复该密钥。密钥恢复后清除。所有者从 API 密钥列表撤销的密钥此项为空。",
         options: {
           admin_password_reset: "管理员强制重置密码",
-          organization_membership_ended: "组织成员资格已结束"
+          organization_membership_ended: "组织成员资格已结束",
+          administrator_suspended: "已被管理员暂停"
         }
       },
       key: {
@@ -2659,14 +2660,15 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       source_kind: {
         label: "来源类型",
-        help: "推送该组的来源：SCIM 连接。",
+        help: "发送该组的来源：SCIM 连接，或登录时的 SSO 提供方。",
         options: {
-          scim: "SCIM 连接"
+          scim: "SCIM 连接",
+          sso: "SSO 提供方"
         }
       },
       source_id: {
         label: "来源 ID",
-        help: "该组经由的 SCIM 连接 ID，例如 \"okta-prod\"。"
+        help: "该组经由的 SCIM 连接 ID 或 SSO 提供方 ID，例如 \"okta-prod\"。"
       },
       group_external_id: {
         label: "组外部 ID",
@@ -2682,7 +2684,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       organization_id: {
         label: "组织",
-        help: "授权所在的组织：拥有该 SCIM 连接的组织。"
+        help: "授权所在的组织：拥有该 SCIM 连接或 SSO 提供方的组织。"
       },
       created_at: {
         label: "创建时间"

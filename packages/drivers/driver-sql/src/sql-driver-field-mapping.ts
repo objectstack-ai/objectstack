@@ -30,10 +30,12 @@
  */
 
 import type { DriverQuery } from '@objectstack/spec/contracts';
+import { isComposedReadableIds } from '@objectstack/spec/data';
 import { StorageNameMapping } from '@objectstack/spec/system';
-import { SQL_AGGREGATE_FUNCTIONS, refuseAggregateFunction } from './sql-driver-top-level.js';
+import { SQL_AGGREGATE_FUNCTIONS, TEXT_OPERATORS, refuseAggregateFunction } from './sql-driver-top-level.js';
 import type { SqlAggregateLowering } from './sql-driver-top-level.js';
 import type { SqlDriver } from './sql-driver.js';
+import { oracleRawUuidColumns } from './sql-driver-oracle-dialect.js';
 
 /**
  * The `SqlDriver` members the bodies of {@link FieldMappingFacet} read — every one of
@@ -45,18 +47,48 @@ import type { SqlDriver } from './sql-driver.js';
 export interface FieldMappingHost {
   readonly columnFieldByObject: SqlDriver['columnFieldByObject'];
   readonly fieldColumnByObject: SqlDriver['fieldColumnByObject'];
+  introspectColumns: SqlDriver['introspectColumns'];
   introspectPrimaryKeys: SqlDriver['introspectPrimaryKeys'];
+  readonly isOracle: SqlDriver['isOracle'];
+  readonly knex: SqlDriver['knex'];
   readonly logger: SqlDriver['logger'];
   readonly managedObjectFields: SqlDriver['managedObjectFields'];
+  readonly mssqlGuidColumnsByObject: SqlDriver['mssqlGuidColumnsByObject'];
   readonly mssqlPagingKeyByObject: SqlDriver['mssqlPagingKeyByObject'];
   readonly nondeterministicPagingWarned: SqlDriver['nondeterministicPagingWarned'];
+  readonly oracleRawUuidFieldsByObject: SqlDriver['oracleRawUuidFieldsByObject'];
   paginationTieBreaker: SqlDriver['paginationTieBreaker'];
   readonly physicalSchemaByObject: SqlDriver['physicalSchemaByObject'];
   readonly physicalTableByObject: SqlDriver['physicalTableByObject'];
+  readOracleRawUuidColumns: SqlDriver['readOracleRawUuidColumns'];
 }
 
 /** The bodies of the "Field mapping" section of `SqlDriver`: a stateless facet, called by the class's stubs. */
 export class FieldMappingFacet {
+  /** The body of `SqlDriver#primeOracleRawUuidColumns`; the method's docblock there is its contract. */
+  static async primeOracleRawUuidColumns(this: Pick<FieldMappingHost, 'columnFieldByObject' | 'isOracle' | 'oracleRawUuidFieldsByObject' | 'physicalSchemaByObject' | 'physicalTableByObject' | 'readOracleRawUuidColumns'>, object: string): Promise<void> {
+    if (!this.isOracle || this.oracleRawUuidFieldsByObject.has(object)) return;
+    // Only a federated object names a remote table; a platform-created table
+    // never holds a RAW(16) uuid column, so there is nothing to read.
+    const remoteTable = this.physicalTableByObject[object];
+    if (remoteTable === undefined) return;
+    let columns: string[];
+    try {
+      columns = await this.readOracleRawUuidColumns(remoteTable, this.physicalSchemaByObject[object]);
+    } catch {
+      // A catalog that cannot be read leaves nothing recorded: every value
+      // keeps today's text bind, and the next door asks again.
+      return;
+    }
+    const colToField = this.columnFieldByObject[object];
+    this.oracleRawUuidFieldsByObject.set(object, new Set(columns.map((column) => colToField?.[column] ?? column)));
+  }
+
+  /** The body of `SqlDriver#readOracleRawUuidColumns`; the method's docblock there is its contract. */
+  static readOracleRawUuidColumns(this: Pick<FieldMappingHost, 'knex'>, remoteTable: string, remoteSchema: string | undefined): Promise<string[]> {
+    return oracleRawUuidColumns(this.knex, remoteTable, remoteSchema);
+  }
+
   /** The body of `SqlDriver#mapSortField`; the method's docblock there is its contract. */
   static mapSortField(field: string): string {
     if (field === 'createdAt') return 'created_at';
@@ -99,6 +131,26 @@ export class FieldMappingFacet {
     const keyColumn = keyColumns.length === 1 ? keyColumns[0]! : null;
     const field = keyColumn === null ? null : (this.columnFieldByObject[object]?.[keyColumn] ?? keyColumn);
     this.mssqlPagingKeyByObject.set(object, field);
+  }
+
+  /** The body of `SqlDriver#primeMssqlGuidColumns`; the method's docblock there is its contract. */
+  static async primeMssqlGuidColumns(this: Pick<FieldMappingHost, 'introspectColumns' | 'mssqlGuidColumnsByObject' | 'physicalSchemaByObject' | 'physicalTableByObject'>, object: string, where: unknown): Promise<void> {
+    const objects = new Set<string>([object]);
+    if (!collectTextMatchObjects(where, objects)) return;
+    for (const target of objects) {
+      if (this.mssqlGuidColumnsByObject.has(target)) continue;
+      const remoteTable = this.physicalTableByObject[target] ?? target;
+      let columns: Array<{ name: string; type: string }>;
+      try {
+        columns = await this.introspectColumns(remoteTable, this.physicalSchemaByObject[target]);
+      } catch {
+        continue;
+      }
+      this.mssqlGuidColumnsByObject.set(
+        target,
+        new Set(columns.filter((c) => c.type === 'uniqueidentifier').map((c) => c.name)),
+      );
+    }
   }
 
   /** The body of `SqlDriver#orderKeysFor`; the method's docblock there is its contract. */
@@ -162,4 +214,33 @@ export class FieldMappingFacet {
     if (lowering !== undefined) return lowering;
     refuseAggregateFunction(func);
   }
+}
+
+/**
+ * [#31395] Walk a `where` tree for what {@link FieldMappingFacet.primeMssqlGuidColumns}
+ * needs: whether any key in it is a text operator (`TEXT_OPERATORS`), and the
+ * object of every composed `ReadableIds` leaf in it, added to `objects` (each
+ * leaf's subquery compiles its scope against that object's own table). Reads
+ * plain objects and arrays only; a `Date`, a binary comparand or any other
+ * value is a comparand, not a node. Answers whether a text operator was found.
+ */
+function collectTextMatchObjects(node: unknown, objects: Set<string>): boolean {
+  if (isComposedReadableIds(node)) {
+    objects.add(node.object);
+    return collectTextMatchObjects(node.scope, objects);
+  }
+  if (Array.isArray(node)) {
+    let found = false;
+    for (const member of node) found = collectTextMatchObjects(member, objects) || found;
+    return found;
+  }
+  if (node === null || typeof node !== 'object') return false;
+  const proto = Object.getPrototypeOf(node);
+  if (proto !== Object.prototype && proto !== null) return false;
+  let found = false;
+  for (const [key, value] of Object.entries(node)) {
+    if (TEXT_OPERATORS.has(key)) found = true;
+    found = collectTextMatchObjects(value, objects) || found;
+  }
+  return found;
 }

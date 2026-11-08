@@ -387,7 +387,12 @@ export async function selectRuns({
 }) {
   if (!repository) throw new Error('GITHUB_REPOSITORY is not set');
   const io = { token, apiUrl, fetchImpl };
-  const listing = await apiGet(`/repos/${repository}/actions/workflows/ci.yml/runs?branch=main&status=completed&per_page=50`, io);
+  // `schedule` runs only (objectstack#31519): a `push` run whose commits the
+  // merge queue already ran green borrows Test UI when the queue ran the whole
+  // suite, so a push run is no longer the full battery by its event. The
+  // 4-hourly schedule always runs every file on every shard, and it keeps its
+  // timing artifacts 7 days, so the default `--limit 6` is about a day of it.
+  const listing = await apiGet(`/repos/${repository}/actions/workflows/ci.yml/runs?branch=main&event=schedule&status=completed&per_page=50`, io);
   /** @type {Array<{ id: number, event: string, head_sha: string, created_at: string }>} */
   const chosen = [];
   // Two reads per run examined, on the repository's one shared `GITHUB_TOKEN`
@@ -395,8 +400,8 @@ export async function selectRuns({
   let examined = 0;
   for (const run of listing?.workflow_runs ?? []) {
     if (chosen.length >= limit || examined >= limit * 5) break;
-    // The full battery: a `push` that starts Test UI, and the 4-hourly `schedule`.
-    if (run.event !== 'push' && run.event !== 'schedule') continue;
+    // The full battery: the 4-hourly `schedule`, which the listing asks for.
+    if (run.event !== 'schedule') continue;
     examined += 1;
     const jobs = (await apiGet(`/repos/${repository}/actions/runs/${run.id}/jobs?per_page=100&filter=latest`, io))?.jobs ?? [];
     const artifacts = (await apiGet(`/repos/${repository}/actions/runs/${run.id}/artifacts?per_page=100`, io))?.artifacts ?? [];

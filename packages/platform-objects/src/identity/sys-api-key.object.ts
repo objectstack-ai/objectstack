@@ -387,8 +387,9 @@ export const SysApiKey = ObjectSchema.create({
     }),
 
     // Why the key was revoked, recorded only where the reason changes WHO may
-    // restore it. Two values, each the same word the platform writes on
-    // `sys_session.revoke_reason` for the same event:
+    // restore it. Three values. The first two are the same word the platform
+    // writes on `sys_session.revoke_reason` for the same event; a session has
+    // no counterpart of the third, because a session is never restored:
     //
     //  - `admin_password_reset`: an administrator's forced password reset
     //    revokes the user's keys by default because the reset may answer a
@@ -404,11 +405,19 @@ export const SysApiKey = ObjectSchema.create({
     //    revokes a departed member's keys (a control plane removing someone from
     //    the organization) writes it in the system context, beside
     //    `revoked: true`.
+    //  - `administrator_suspended`: a platform administrator revoked a key that
+    //    is not theirs (an administrator stopping an AI's or a person's key),
+    //    so the stop holds against the owner: only a platform administrator
+    //    restores it. The restore guard stamps it on that revoke; a host that
+    //    stops a key itself writes it in the system context, beside
+    //    `revoked: true`.
     //
     // One hook keeps it in step with `revoked` (plugin-auth
     // `api-key-restore-guard.ts`): it refuses the user-context restores each
-    // reason rules out, clears the reason on every restore it admits, and
-    // leaves it alone when a revoked key is revoked again.
+    // reason rules out, clears the reason on every restore it admits, stamps
+    // `administrator_suspended` on a platform administrator's revoke of a key
+    // they do not own, and otherwise leaves it alone when a revoked key is
+    // revoked again.
     // `readonly` for ADR-0092 D4's form-rendering reason: it is not on the D2
     // whitelist, so no data-API write may set or clear it.
     revoked_reason: Field.select({
@@ -418,9 +427,10 @@ export const SysApiKey = ObjectSchema.create({
       options: [
         { label: 'Administrator password reset', value: 'admin_password_reset' },
         { label: 'Organization membership ended', value: 'organization_membership_ended' },
+        { label: 'Suspended by an administrator', value: 'administrator_suspended' },
       ],
       description:
-        'Why the key was revoked, where that decides who can restore it. Administrator password reset: only a platform administrator can restore the key. Organization membership ended: the owner left the organization, and no one can restore the key; a member creates a new one. Cleared when the key is restored. Empty for a key revoked from the API Keys list.',
+        'Why the key was revoked, where that decides who can restore it. Administrator password reset: only a platform administrator can restore the key. Organization membership ended: the owner left the organization, and no one can restore the key; a member creates a new one. Suspended by an administrator: a platform administrator revoked a key that is not theirs, and only a platform administrator can restore it. Cleared when the key is restored. Empty for a key its owner revoked from the API Keys list.',
       group: 'Lifecycle',
     }),
 

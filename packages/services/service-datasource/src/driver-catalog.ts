@@ -30,10 +30,20 @@
  * `turso` is absent for the same reason since commit e2798fab7 gave it a contract: it is a
  * full builtin now, but it additionally needs an optional package installed next
  * to the server, which is not a thing a dropdown can arrange.
- * `mssql` (#31327) is absent for that reason too — its `tedious` binding is an
- * optional peer of driver-sql. It is also federation-only (`schemaMode:
- * 'external'` or `'validate-only'`), so it is declared in code with its
- * `external` block; its Tables tab and table import work once it is.
+ *
+ * ## Federation-only drivers are offered, and say so
+ *
+ * `oracle` and `mssql` are the drivers an admin points at an existing
+ * line-of-business database, the job the form exists for (ADR-0015 §4.6). Like
+ * `pg` and `mysql2` behind the entries above, their clients (`oracledb`,
+ * `tedious`) are optional installs of driver-sql, loaded only when a datasource
+ * connects. Their entries carry `federationOnly: true`,
+ * read from the spec's `FEDERATION_ONLY_DRIVER_IDS` and never restated here, so
+ * the form offers them only the federation schema modes (`external`,
+ * `validate-only`): the spec refuses a `managed` datasource naming either at
+ * parse. Like the column it projects, the key is absent on every other entry.
+ * Only the entry is built here, from the spec contract: nothing in this module
+ * loads either client.
  *
  * ## The words are served in the requester's language
  *
@@ -44,7 +54,11 @@
  * English.
  */
 
-import { getDriverConfigJsonSchemaById, type BuiltinDriverId } from '@objectstack/spec/data';
+import {
+  FEDERATION_ONLY_DRIVER_IDS,
+  getDriverConfigJsonSchemaById,
+  type BuiltinDriverId,
+} from '@objectstack/spec/data';
 import { platformLocaleTagOf } from '@objectstack/spec/system';
 
 import {
@@ -65,6 +79,13 @@ export interface DriverCatalogEntry {
   icon?: string;
   /** JSON Schema (draft-2020-12) for the driver's `config` object. */
   configSchema: Record<string, unknown>;
+  /**
+   * `true` when the driver serves federation only (ADR-0015 §4.6): a
+   * datasource naming it must declare `schemaMode: 'external'` or
+   * `'validate-only'`, never `'managed'`. The projection of the spec's
+   * `FEDERATION_ONLY_DRIVER_IDS`; absent (never `false`) on every other entry.
+   */
+  federationOnly?: true;
 }
 
 /** The curated part — everything except the shape, which comes from the spec. */
@@ -111,11 +132,28 @@ const CURATED: ReadonlyArray<{
     description: 'MongoDB connection via a connection URI.',
     icon: 'database',
   },
+  {
+    id: 'oracle',
+    label: 'Oracle Database',
+    description:
+      'Oracle Database 12c R1 or later. Federation only: its existing tables are used as they are, never created or altered.',
+    icon: 'database',
+  },
+  {
+    id: 'mssql',
+    label: 'SQL Server',
+    description:
+      'Microsoft SQL Server. Federation only: its existing tables are used as they are, never created or altered.',
+    icon: 'database',
+  },
 ];
+
+const FEDERATION_ONLY: ReadonlySet<string> = new Set(FEDERATION_ONLY_DRIVER_IDS);
 
 export const DRIVER_CATALOG: DriverCatalogEntry[] = CURATED.map((entry) => ({
   ...entry,
   configSchema: getDriverConfigJsonSchemaById(entry.id),
+  ...(FEDERATION_ONLY.has(entry.id) ? { federationOnly: true as const } : {}),
 }));
 
 /** A property's own string, read without reaching `Object.prototype`. */

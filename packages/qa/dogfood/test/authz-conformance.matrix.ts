@@ -24,7 +24,7 @@
 // hand-curated regex table reaching 1 of 17 REST registrars and 4 of 17
 // dispatcher domain files.
 //
-// The population comes from `packages/rest/src/rest-route-ledger.ts` (19
+// The population comes from `packages/rest/src/rest-route-ledger.ts` (20
 // families) and `packages/runtime/src/route-ledger.ts` (23
 // domains) because those two are enumerated from a RUNNING server and guarded
 // in both directions by their own conformance tests — so a new family or
@@ -63,7 +63,9 @@
 // 81 → 80 rows, families unmoved, when #25104 retired the `/docs` viewer
 // page, whose `openapi` family survives on the document row; 80 → 81 rows,
 // families unmoved, when #26361 added the approval record-lock read, whose
-// `approvals` family the other approval rows already carry.)
+// `approvals` family the other approval rows already carry; 19 → 20
+// families when #30237 added the four recycle-bin doors as their own
+// `recycle-bin` family.)
 // Two stale figures in
 // one docblock with two entirely different causes is the failure mode the pin
 // above ends. Widening a regex instead was refused: it rots on the next
@@ -321,6 +323,16 @@ export const AUTHZ_CONFORMANCE: AuthzPrimitive[] = [
     covers: ['rest-family:rest-route-ledger.ts:user-work'],
     // Added by #30205.
     note: 'The cited proof drives both routes anonymously (401, the REST flat envelope, nothing counted or moved) and with a signed-in member on one boot (the count served 200; the hand-over reaching its own unknown-target refusal, 404, before any write). Row admission and the update of each moved record stay with the security layer behind the engine, because both routes run as the caller.' },
+  // #30237 — the recycle bin's doors (ADR-0148): a family that arrives
+  // classified, the way the assigned-work family did.
+  { id: 'anonymous-deny-recycle-bin', summary: 'anonymous-deny on the recycle bin\'s listing, restore, purge and empty', state: 'enforced',
+    enforcement: 'rest/recycle-bin-routes.ts registerRecycleBinEndpoints — all four handlers (GET {data}/:object/recycle-bin, POST …/:entryId/restore, DELETE …/:entryId, DELETE {data}/:object/recycle-bin) open with enforceAuth (→ shouldDenyAnonymous) as their first act after resolving the caller, ahead of the query-parameter checks, the object\'s exposure gate and any engine read or write; an anonymous caller gets the REST seam\'s flat 401 UNAUTHENTICATED. A signed-in caller then meets the engine and the security layer: listing needs manageRecycleBin on the object (objectql recycle-bin/list.ts assertCallerManagesRecycleBin, fail closed), a restore needs allowRestoreOwnDeleted for the caller\'s own entry and manageRecycleBin for anyone else\'s (restore.ts assertCallerMayRestoreEntry), and purge and empty need manageRecycleBin through the purge verb',
+    proof: 'showcase-anonymous-deny-surfaces.dogfood.test.ts',
+    // The REST family at ledger granularity: the family is exactly these four
+    // routes and every handler opens with the floor.
+    covers: ['rest-family:rest-route-ledger.ts:recycle-bin'],
+    // Added by #30237.
+    note: 'The cited proof drives all four doors anonymously (401, the REST flat envelope, nothing listed, restored or removed) and with the admin on one boot (the listing served 200; the restore and purge of an entry no one holds reaching the engine\'s own 404; the empty answered 200). The grant checks behind the floor are pinned in objectql recycle-bin/list.test.ts and restore.test.ts and in rest recycle-bin-routes.test.ts.' },
   // #22432 — the `/i18n` dispatcher domain, under the ruling recorded on #22146
   // (the domain gains the domain-level anonymous refusal every other dispatcher
   // domain has, with an objectui companion for the Console's sign-in page).

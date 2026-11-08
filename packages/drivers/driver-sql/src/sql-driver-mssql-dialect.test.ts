@@ -17,10 +17,12 @@
 
 import { describe, expect, it } from 'vitest';
 import type { Knex } from 'knex';
-import type { FilterCondition } from '@objectstack/spec/data';
+import { ReadableIds, type FilterCondition } from '@objectstack/spec/data';
 import { SqlDriver, type SqlDriverConfig } from './sql-driver.js';
 import { mssqlAggregandOperandSql } from './sql-driver-aggregation.js';
 import { splitMssqlQualifiedName } from './sql-driver-mssql-introspection.js';
+import { applyLike, applyLikePattern } from './sql-driver-predicate-emitters.js';
+import type { IntrospectedColumn } from './sql-driver-top-level.js';
 
 const CONFIG = { client: 'mssql', connection: {}, schemaMode: 'external' } as unknown as SqlDriverConfig;
 
@@ -163,5 +165,180 @@ describe('[#31327] schema-qualified names — `dbo.Orders` splits at the first d
     expect(splitMssqlQualifiedName('Sales.Order.Lines')).toEqual({ schema: 'Sales', table: 'Order.Lines' });
     expect(splitMssqlQualifiedName('Orders')).toEqual({ schema: undefined, table: 'Orders' });
     expect(splitMssqlQualifiedName('.Orders')).toEqual({ schema: undefined, table: '.Orders' });
+  });
+});
+
+// ── #31395: a `uniqueidentifier` column is matched as its lower-case text ────
+//
+// SQL Server renders a GUID as UPPER-case text while this driver reads it back
+// lower-case (`lowerCaseGuids`), so a text operator over the column's own text
+// compared a spelling no read answers. Which columns are GUIDs is the remote
+// catalog's answer (`primeMssqlGuidColumns`), never the comparand's shape: the
+// probe below stands a canned catalog in for INFORMATION_SCHEMA.COLUMNS.
+
+/** The lower-case text of a GUID column, under the same case-exact wrap. */
+const guid = (operand: string) => `LOWER(CONVERT(nvarchar(36), ${operand}))`;
+
+class GuidCatalogProbeDriver extends CompilerProbeDriver {
+  catalogReads: string[] = [];
+  catalogFails = false;
+  protected override async introspectColumns(tableName: string, schema?: string): Promise<IntrospectedColumn[]> {
+    this.catalogReads.push(`${schema ?? ''}.${tableName}`);
+    if (this.catalogFails) throw new Error('catalog unreachable');
+    const column = (name: string, type: string) =>
+      ({ name, type, nullable: true, defaultValue: null, primaryKey: false, isUnique: false }) as IntrospectedColumn;
+    if (tableName === 'Parents') return [column('ParentId', 'uniqueidentifier'), column('Code', 'nvarchar')];
+    return [column('id', 'uniqueidentifier'), column('RefId', 'uniqueidentifier'), column('name', 'nvarchar')];
+  }
+  prime(where: unknown, object = 't'): Promise<void> {
+    return this.primeMssqlGuidColumns(object, where);
+  }
+}
+
+const guidProbe = (): GuidCatalogProbeDriver => {
+  const d = new GuidCatalogProbeDriver(CONFIG);
+  d.registerExternalObject({
+    name: 't',
+    fields: { ref: { type: 'text' }, name: { type: 'text' } },
+    // `ref` reads the remote `RefId` column: the catalog speaks REMOTE names.
+    external: { remoteName: 'Orders', remoteSchema: 'dbo', columnMap: { RefId: 'ref', id: 'id', name: 'name' } },
+  });
+  d.registerExternalObject({
+    name: 'p',
+    fields: { code: { type: 'text' } },
+    external: { remoteName: 'Parents', remoteSchema: 'dbo', columnMap: { ParentId: 'id', Code: 'code' } },
+  });
+  return d;
+};
+
+/** Prime from the canned catalog, then compile — the order every read door keeps. */
+const compileGuid = async (where: FilterCondition, d = guidProbe()) => {
+  await d.prime(where);
+  return d.compileWhere(where);
+};
+
+describe('[#31395] uniqueidentifier — the text operators match the lower-case form a read answers', () => {
+  const CASE_EXACT: Array<[op: string, shape: (v: string) => string]> = [
+    ['$contains', (v) => `%${v}%`],
+    ['$startsWith', (v) => `${v}%`],
+    ['$endsWith', (v) => `%${v}`],
+  ];
+
+  for (const [op, shape] of CASE_EXACT) {
+    for (const fragment of ['a0eebc99', 'A0EEBC99']) {
+      it(`${op} ${JSON.stringify(fragment)} on a GUID column: LOWER(CONVERT(nvarchar(36), col)), the fragment as written`, async () => {
+        expect(await compileGuid({ ref: { [op]: fragment } } as FilterCondition)).toEqual({
+          sql: `select * from [t] where ${exact(guid('[RefId]'))} LIKE ${exact('@p0')} ESCAPE @p1`,
+          bindings: [shape(fragment), '\\'],
+        });
+      });
+    }
+  }
+
+  for (const fragment of ['a0eebc99', 'A0EEBC99']) {
+    it(`$notContains ${JSON.stringify(fragment)}: the NULL-safe NOT LIKE over the lower-case form`, async () => {
+      expect(await compileGuid({ ref: { $notContains: fragment } })).toEqual({
+        sql: `select * from [t] where ([RefId] is null or ${exact(guid('[RefId]'))} NOT LIKE ${exact('@p0')} ESCAPE @p1)`,
+        bindings: [`%${fragment}%`, '\\'],
+      });
+    });
+
+    it(`$icontains ${JSON.stringify(fragment)}: the ASCII fold over the lower-case form`, async () => {
+      expect(await compileGuid({ ref: { $icontains: fragment } })).toEqual({
+        sql: `select * from [t] where ${fold(guid('[RefId]'))} LIKE ${fold('@p0')} ESCAPE @p1`,
+        bindings: [`%${fragment}%`, '\\'],
+      });
+    });
+
+    it(`$like / $ilike ${JSON.stringify(fragment)}: the pattern over the lower-case form`, async () => {
+      expect(await compileGuid({ ref: { $like: `${fragment}%` } })).toEqual({
+        sql: `select * from [t] where ${exact(guid('[RefId]'))} LIKE ${exact('@p0')} ESCAPE @p1`,
+        bindings: [`${fragment}%`, '\\'],
+      });
+      expect((await compileGuid({ ref: { $ilike: `${fragment}%` } })).sql).toBe(
+        `select * from [t] where ${fold(guid('[RefId]'))} LIKE ${fold('@p0')} ESCAPE @p1`,
+      );
+    });
+  }
+
+  it('the key column the catalog reports as uniqueidentifier is matched the same way', async () => {
+    expect((await compileGuid({ id: { $startsWith: '3f2504e0' } })).sql).toBe(
+      `select * from [t] where ${exact(guid('[id]'))} LIKE ${exact('@p0')} ESCAPE @p1`,
+    );
+  });
+
+  it('control: an nvarchar column of the same table compiles exactly as before', async () => {
+    const d = guidProbe();
+    for (const where of [
+      { name: { $contains: 'a0eebc99' } },
+      { name: { $startsWith: 'A0EEBC99' } },
+      { name: { $notContains: 'x' } },
+      { name: { $icontains: 'Ab' } },
+      { name: { $like: 'a[b%' } },
+    ] as FilterCondition[]) {
+      await d.prime(where);
+      const primed = d.compileWhere(where);
+      expect(primed, JSON.stringify(where)).toEqual(probe().compileWhere(where));
+      expect(primed.sql).not.toContain('nvarchar(36)');
+    }
+  });
+
+  it('control: equality on a GUID column is untouched — SQL Server compares GUIDs by value', async () => {
+    expect(await compileGuid({ ref: { $eq: 'A0EEBC99-9C0B-4EF8-BB6D-6BB9BD380A11' } })).toEqual({
+      sql: 'select * from [t] where [RefId] = @p0',
+      bindings: ['A0EEBC99-9C0B-4EF8-BB6D-6BB9BD380A11'],
+    });
+  });
+
+  it('control: no other dialect reads the GUID flag — sqlite, postgres, mysql, oracle and unknown emit identically', () => {
+    /** What the emitter hands the builder: the raw method, the SQL and its bindings. */
+    const emitted = (run: (builder: unknown) => void): unknown[][] => {
+      const calls: unknown[][] = [];
+      run({ whereRaw: (...a: unknown[]) => calls.push(['whereRaw', ...a]) });
+      return calls;
+    };
+    for (const dialectName of ['sqlite', 'postgres', 'mysql', 'oracle', 'unknown'] as const) {
+      const host = { dialectName };
+      for (const [shape, negate, fold] of [['contains', false, false], ['starts', false, false], ['ends', false, false], ['contains', true, false], ['contains', false, true]] as const) {
+        expect(emitted((b) => applyLike.call(host, b, 'where', 'ref', 'a0eebc99', shape, negate, fold, true)), `${dialectName} ${shape}`)
+          .toEqual(emitted((b) => applyLike.call(host, b, 'where', 'ref', 'a0eebc99', shape, negate, fold)));
+      }
+      for (const fold of [false, true]) {
+        expect(emitted((b) => applyLikePattern.call(host, b, 'where', 'ref', 'a0eebc99%', fold, true)), `${dialectName} like`)
+          .toEqual(emitted((b) => applyLikePattern.call(host, b, 'where', 'ref', 'a0eebc99%', fold)));
+      }
+    }
+  });
+
+  it('the catalog is asked once per object, and only by a filter holding a text operator', async () => {
+    const d = guidProbe();
+    await d.prime({ ref: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11' });
+    await d.prime({ ref: { $in: ['a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11'] }, name: { $eq: 'x' } });
+    expect(d.catalogReads).toEqual([]);
+    await d.prime({ $or: [{ name: 'x' }, { ref: { $contains: 'a0ee' } }] });
+    await d.prime({ name: { $like: 'x%' } });
+    expect(d.catalogReads).toEqual(['dbo.Orders']);
+  });
+
+  it('a composed ReadableIds leaf primes its own object, whose subquery matches its GUID key the same way', async () => {
+    const d = guidProbe();
+    const where = { ref: { $in: ReadableIds.compose(ReadableIds.of('p'), { id: { $startsWith: 'ab' } }) } } as FilterCondition;
+    await d.prime(where);
+    expect(d.catalogReads.sort()).toEqual(['dbo.Orders', 'dbo.Parents']);
+    expect(d.compileWhere(where).sql).toBe(
+      `select * from [t] where [RefId] in (select [ParentId] from [dbo].[Parents] where ${exact(guid('[ParentId]'))} LIKE ${exact('@p0')} ESCAPE @p1)`,
+    );
+  });
+
+  it('a failed catalog read records nothing: the column is matched as before, and the next read asks again', async () => {
+    const d = guidProbe();
+    d.catalogFails = true;
+    const where = { ref: { $contains: 'a0ee' } } as FilterCondition;
+    await d.prime(where);
+    expect(d.compileWhere(where).sql).toBe(`select * from [t] where ${exact('[RefId]')} LIKE ${exact('@p0')} ESCAPE @p1`);
+    d.catalogFails = false;
+    await d.prime(where);
+    expect(d.catalogReads).toEqual(['dbo.Orders', 'dbo.Orders']);
+    expect(d.compileWhere(where).sql).toContain(guid('[RefId]'));
   });
 });

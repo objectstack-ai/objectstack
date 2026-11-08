@@ -1160,10 +1160,11 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       revoked_reason: {
         label: "Motivo de la revocación",
-        help: "Por qué se revocó la clave, cuando eso decide quién puede restaurarla. Restablecimiento forzado de la contraseña por un administrador: solo un administrador de la plataforma puede restaurar la clave. Fin de la pertenencia a la organización: el propietario dejó la organización y nadie puede restaurar la clave; un miembro crea una nueva. Se borra cuando la clave se restaura. Vacío para una clave revocada desde la lista de claves de API.",
+        help: "Por qué se revocó la clave, cuando eso decide quién puede restaurarla. Restablecimiento forzado de la contraseña por un administrador: solo un administrador de la plataforma puede restaurar la clave. Fin de la pertenencia a la organización: el propietario dejó la organización y nadie puede restaurar la clave; un miembro crea una nueva. Suspendida por un administrador: un administrador de la plataforma revocó una clave que no es suya, y solo un administrador de la plataforma puede restaurarla. Se borra cuando la clave se restaura. Vacío para una clave que su propietario revocó desde la lista de claves de API.",
         options: {
           admin_password_reset: "Restablecimiento forzado de la contraseña por un administrador",
-          organization_membership_ended: "Fin de la pertenencia a la organización"
+          organization_membership_ended: "Fin de la pertenencia a la organización",
+          administrator_suspended: "Suspendida por un administrador"
         }
       },
       key: {
@@ -2659,14 +2660,15 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       source_kind: {
         label: "Tipo de origen",
-        help: "Qué envía el grupo: una conexión SCIM.",
+        help: "Qué envía el grupo: una conexión SCIM o un proveedor SSO al iniciar sesión.",
         options: {
-          scim: "Conexión SCIM"
+          scim: "Conexión SCIM",
+          sso: "Proveedor SSO"
         }
       },
       source_id: {
         label: "ID de origen",
-        help: "El ID de la conexión SCIM por la que llega el grupo, p. ej. \"okta-prod\"."
+        help: "El ID de la conexión SCIM o del proveedor SSO por el que llega el grupo, p. ej. \"okta-prod\"."
       },
       group_external_id: {
         label: "ID externo del grupo",
@@ -2682,7 +2684,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       organization_id: {
         label: "Organización",
-        help: "La organización en la que se concede: la organización propietaria de la conexión SCIM."
+        help: "La organización en la que se concede: la organización propietaria de la conexión SCIM o del proveedor SSO."
       },
       created_at: {
         label: "Creado el"

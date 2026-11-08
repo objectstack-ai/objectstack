@@ -218,14 +218,17 @@ describe('the gate is wired into the root CI (objectstack#26717)', () => {
     expect(step()).toContain("if: github.event_name == 'pull_request'");
   });
 
-  it('checks out deep enough to have a merge base', () => {
-    // A shallow clone has no merge base, and the script exits 2 rather than
-    // guess one: a reading that never measured the change.
+  it('fetches deep enough to have a merge base', () => {
+    // A shallow clone has no merge base, and the script refuses rather than
+    // guess one: a reading that never measured the change. The checkout stays
+    // at depth 1; the fetch step after it brings HEAD's ancestry and
+    // origin/<base> (objectstack#22034).
     const block = withoutComments(jobBlock(rootCi(), JOB));
     const checkout = block.indexOf('uses: actions/checkout@');
+    const fetch = block.indexOf("- name: Fetch this commit's history and the base branch");
     expect(checkout).toBeGreaterThan(-1);
-    expect(block.indexOf('fetch-depth: 0', checkout)).toBeGreaterThan(checkout);
-    expect(block.indexOf('fetch-depth: 0', checkout)).toBeLessThan(block.indexOf(`- name: ${STEP_NAME}`));
+    expect(fetch).toBeGreaterThan(checkout);
+    expect(fetch).toBeLessThan(block.indexOf(`- name: ${STEP_NAME}`));
   });
 
   it('⛔ stays an alarm in a required job: continue-on-error, before the install', () => {

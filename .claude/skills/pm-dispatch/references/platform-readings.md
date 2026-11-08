@@ -282,13 +282,13 @@
 - auto 档判定随命令形状变,不随能力变 ⇒ 被拒的复合命令拆成裸动作重试再报 blocked。
 - 读数:带链接与管道的 `git push` 被拒,裸 `git push origin <分支>` 放行,拒绝文案不点名元素。
 - 判定跨天翻面 ⇒ ⛔ 一次拒绝不是能力边界;`permissions.allow` 条目才是仓库侧确定性通道。
+- 红检查先读日志:自称一个都没测(基础设施失败)的红归席位清,⛔ 永不请维护者点重跑。
+- ① `rerun-failed.mjs` 重跑失败 job 一次(名单即 `RERUN_FAILED_WORKFLOWS`),先在 PR 或卡写明理由。
 - 中继重跑(`rerun-failed.mjs` → `run_rerun_failed`)复用原 run 的提交与合并 ref,不拿新 main 重算。
-- ⇒ 基上缺已合修复(修复合入晚于该 run 建立)时重跑无效,改 merge main。
-- 经 `rerun-failed.mjs` 重跑 PR `ci.yml` 失败 job 仅一次,先在 PR 或卡写明 flake 理由;二败即真红。
-- `run_rerun_failed` 只收 `ci.yml`;他 workflow 的 flake 走下两条,⛔ 永不空提交、永不关了重开。
+- ② 被拒(如 `lint.yml`)、基缺修复或冲突 ⇒ `pr_update_branch`(齐平即空操作)或 dev 合 main。
 - `pr-automation.yml`(`Check Changeset` 取消无后继):席位改正文记下 flake 理由,其 `edited` 即重跑。
 - ⇒ 该正文改走 `seat-post-protocol.md` 的 PR 正文行。
-- `lint.yml`(检出超时):`main` 前进后中继 `pr_update_branch` 出真新 head 整套重跑;齐平即空操作。
+- ③ 测到东西的二败才是真红;⛔ 永不空提交、永不关了重开;落地记录点名所取步骤。
 - 同一 head 上轻量兄弟 workflow `success` 加重量级载体 `cancelled` 是普通取代的预期签名。
 - 同名 `failure` 也会被带另一诊断的后一次 `failure` 取代 ⇒ 任何判定前先按名取最新一次。
 - cancel-in-progress 窗口只罩得住慢载体 ⇒ 先比对 run `head_sha` 与 PR 当前 head,不开调查。

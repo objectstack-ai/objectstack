@@ -46,6 +46,11 @@
  *   `--emit` writes `<job>-<shard>-of-<total>.json` ("I ran and I passed"),
  *   `actions/upload-artifact` publishes it as `shard-attest-<job>-<n>-of-<N>`.
  *
+ * (One guard is admitted on that pair since #31519, SEED_ONLY_CREDENTIAL_IF
+ * below: it names no status function, so the implicit success() still holds,
+ * and it withholds the pair only on a seed-only leg of a push run that
+ * borrowed the merge queue's verdict.)
+ *
  * The gate downloads every matching artifact of ITS OWN RUN and requires the
  * attested set to equal the DECLARED roster. A shard that was never scheduled
  * publishes nothing, so it cannot be counted — which is exactly the property
@@ -128,7 +133,9 @@
  *   - The gates keep `if: always()` and their `name:`. Both are contracts:
  *     branch protection requires the bare `Test Core` / `Dogfood Regression
  *     Gate` contexts, and a gate that skips publishes no context at all, which
- *     is the #3622 repo-wide merge deadlock.
+ *     is the #3622 repo-wide merge deadlock. The one admitted variant is
+ *     BORROWED_PUSH_GATE_IF (#31519), which skips only on a push run that
+ *     borrowed the queue's verdict: a push gates no merge.
  *
  * ## Why a declared negative is still a veto
  *
@@ -234,6 +241,31 @@ const ARTIFACT_PREFIX = 'shard-attest-';
 
 /** The gate jobs that carry a branch-protection-required context. */
 const REQUIRED_GATE_JOBS = ['test-gate', 'dogfood-gate'];
+
+/**
+ * A push run that BORROWED the merge queue's verdict (#31519, ci.yml's
+ * `queue-verdict` job, scripts/ci/scheduled-full-run.mjs HALF 4) runs its
+ * shards as seed-only legs: no test, so no credential. Two spellings, and only
+ * these, are admitted for it:
+ *
+ *   - a gate's job-level `if:` may be BORROWED_PUSH_GATE_IF instead of
+ *     `always()`. The probe runs on `push` alone, so on every other event the
+ *     output is empty, the conjunct is true, and the gate is `always()` as
+ *     before. On a covered push it skips, and a push run gates no merge, so no
+ *     required context goes missing (#3622 is about pull requests and the
+ *     queue).
+ *   - the attestation pair may carry SEED_ONLY_CREDENTIAL_IF, the same on both
+ *     steps. It names no status function, so GitHub still wraps it in the
+ *     implicit `success()` that makes the credential mean "every earlier step
+ *     succeeded"; it only withholds the pair on a seed-only leg.
+ *
+ * Either spelling needs `queue-verdict` in the job's `needs:`, or the output
+ * reads empty and the guard is decoration. `!= 'true'` on purpose: an empty
+ * output (a skipped or dead probe) reads as "run everything".
+ */
+export const QUEUE_VERDICT_JOB = 'queue-verdict';
+export const SEED_ONLY_CREDENTIAL_IF = `needs.${QUEUE_VERDICT_JOB}.outputs.covered != 'true'`;
+export const BORROWED_PUSH_GATE_IF = `always() && ${SEED_ONLY_CREDENTIAL_IF}`;
 
 const SCRIPT_BASENAME = 'check-shard-attestation.mjs';
 
@@ -1080,10 +1112,15 @@ export async function scanWorkflow(root) {
     const text = runTextOf(job);
     const legs = [...text.matchAll(LEG_TOKEN)].map((m) => ({ job: m[1], total: Number(m[2]) }));
     gates.set(id, legs);
-    if (job.if !== 'always()') {
-      problems.push(`job '${id}' is an aggregate gate but its job-level if: is ${JSON.stringify(job.if)}, not always() — a gate that skips publishes no required context (#3622).`);
-    }
     const needs = Array.isArray(job.needs) ? job.needs : job.needs ? [job.needs] : [];
+    if (job.if !== 'always()' && job.if !== BORROWED_PUSH_GATE_IF) {
+      problems.push(
+        `job '${id}' is an aggregate gate but its job-level if: is ${JSON.stringify(job.if)}, not always() ` +
+          `(or ${JSON.stringify(BORROWED_PUSH_GATE_IF)}, #31519) — a gate that skips publishes no required context (#3622).`,
+      );
+    } else if (job.if === BORROWED_PUSH_GATE_IF && !needs.includes(QUEUE_VERDICT_JOB)) {
+      problems.push(`gate '${id}' reads needs.${QUEUE_VERDICT_JOB} in its if: without listing '${QUEUE_VERDICT_JOB}' in needs:, so the output is always empty (#31519).`);
+    }
     if (!needs.includes('filter')) {
       problems.push(`gate '${id}' does not list 'filter' in needs:, so it cannot apply the #4928 skipped-only-when-filter-succeeded guard.`);
     }
@@ -1233,8 +1270,15 @@ export async function scanWorkflow(root) {
         );
         continue;
       }
-      if (emit.if !== undefined || upload.if !== undefined) {
-        problems.push(`job '${leg.job}' guards its attestation steps with an if: — the credential must mean "every earlier step succeeded", which only an unguarded step says (#6082).`);
+      const targetNeeds = Array.isArray(target.needs) ? target.needs : target.needs ? [target.needs] : [];
+      const seedOnlyGuard = emit.if === SEED_ONLY_CREDENTIAL_IF && upload.if === SEED_ONLY_CREDENTIAL_IF;
+      if (!seedOnlyGuard && (emit.if !== undefined || upload.if !== undefined)) {
+        problems.push(
+          `job '${leg.job}' guards its attestation steps with an if: — the credential must mean "every earlier step succeeded", which only an unguarded step says (#6082). ` +
+            `The one guard admitted is ${JSON.stringify(SEED_ONLY_CREDENTIAL_IF)} on BOTH steps (#31519).`,
+        );
+      } else if (seedOnlyGuard && !targetNeeds.includes(QUEUE_VERDICT_JOB)) {
+        problems.push(`job '${leg.job}' guards its attestation pair on needs.${QUEUE_VERDICT_JOB} without listing '${QUEUE_VERDICT_JOB}' in needs: (#31519).`);
       }
       const declaredName = String(upload?.with?.name ?? '');
       if (!declaredName.startsWith(`${ARTIFACT_PREFIX}${leg.job}-`) || !declaredName.endsWith(`-of-${leg.total}`)) {
@@ -1695,11 +1739,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#6589: a shard job is not a gate because a step says `--verify`': 23,
   '#26084 a planned roster: only the shards the plan started are counted': 16,
   '#26084 the static guard holds the planned matrix and the gate to one expression': 10,
+  '#31519 a borrowed push: the gate skip and the seed-only credential guard': 8,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 24;
+const SELF_TEST_BATTERY_FLOOR = 25;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -2710,9 +2755,45 @@ async function selfTest() {
       (await fixture('unmatchable download pattern', (s) => s.replace('          pattern: shard-attest-test-*', '          pattern: shard-attest-nothing-*'))).problems.some((p) => p.includes('none of which matches')),
       'a gate whose download pattern cannot match its legs ⇒ red',
     );
+    const EMIT_GUARD = `      - name: Attest this shard ran and passed\n        if: ${SEED_ONLY_CREDENTIAL_IF}\n        run: |\n          node scripts/check-shard-attestation.mjs --emit \\\n            --job test`;
+    const UPLOAD_GUARD = `      - name: Publish this shard's attestation\n        if: ${SEED_ONLY_CREDENTIAL_IF}\n        uses: actions/upload-artifact@`;
     assert(
-      (await fixture('if: on the credential step', (s) => s.replace('      - name: Attest this shard ran and passed\n        run: |\n          node scripts/check-shard-attestation.mjs --emit \\\n            --job test', '      - name: Attest this shard ran and passed\n        if: always()\n        run: |\n          node scripts/check-shard-attestation.mjs --emit \\\n            --job test'))).problems.some((p) => p.includes('guards its attestation steps with an if:')),
+      (await fixture('if: on the credential step', (s) => s.replace(EMIT_GUARD, EMIT_GUARD.replace(SEED_ONLY_CREDENTIAL_IF, 'always()')))).problems.some((p) => p.includes('guards its attestation steps with an if:')),
       'an `if:` on the credential step ⇒ red (the credential would stop meaning "every earlier step passed")',
+    );
+
+    // ── #31519: the borrowed push's two admitted spellings, and only those ──
+    battery('#31519 a borrowed push: the gate skip and the seed-only credential guard');
+    assert(good.includes(EMIT_GUARD) && good.includes(UPLOAD_GUARD), "#31519: ci.yml's test pair carries the seed-only guard on both steps (the anchors below)");
+    assert(
+      (await fixture('a seed-only guard on one step only', (s) => s.replace(UPLOAD_GUARD, UPLOAD_GUARD.replace(`        if: ${SEED_ONLY_CREDENTIAL_IF}\n`, '')))).problems.some((p) => p.includes('on BOTH steps')),
+      '#31519: the seed-only guard on the credential step but not its upload ⇒ red',
+    );
+    assert(
+      (await fixture('a widened credential guard', (s) => s.replace(EMIT_GUARD, EMIT_GUARD.replace(SEED_ONLY_CREDENTIAL_IF, `${SEED_ONLY_CREDENTIAL_IF} || failure()`)))).problems.some((p) => p.includes('guards its attestation steps with an if:')),
+      '#31519: a guard that adds a status function to the credential ⇒ red',
+    );
+    assert(
+      (await fixture('a credential guard on the wrong spelling', (s) => s.replace(EMIT_GUARD, EMIT_GUARD.replace("!= 'true'", "== 'false'")).replace(UPLOAD_GUARD, UPLOAD_GUARD.replace("!= 'true'", "== 'false'")))).problems.some((p) => p.includes('guards its attestation steps with an if:')),
+      "#31519: `== 'false'` (an empty output would withhold the credential) ⇒ red",
+    );
+    assert(
+      (await fixture('a seed-only guard without the probe in needs', (s) => s.replace('    needs: [filter, test-plan, queue-verdict]\n', '    needs: [filter, test-plan]\n'))).problems.some((p) => p.includes("guards its attestation pair on needs.queue-verdict without listing")),
+      '#31519: a credential guard on an output the job cannot read ⇒ red',
+    );
+    const GATE_IF = `    if: ${BORROWED_PUSH_GATE_IF}\n`;
+    assert(good.split(GATE_IF).length - 1 >= 2, "#31519: ci.yml's test-gate and dogfood-gate carry the borrowed-push if: (the anchors below)");
+    assert(
+      (await fixture('a gate skipped on any push', (s) => s.replace(GATE_IF, "    if: always() && github.event_name != 'push'\n"))).problems.some((p) => p.includes('is an aggregate gate but its job-level if:')),
+      '#31519: a gate skipped on every push, not only a covered one ⇒ red',
+    );
+    assert(
+      (await fixture('a gate under !cancelled() and the probe', (s) => s.replace(GATE_IF, `    if: \${{ !cancelled() && ${SEED_ONLY_CREDENTIAL_IF} }}\n`))).problems.some((p) => p.includes('is an aggregate gate but its job-level if:')),
+      '#31519: the borrowed conjunct does not license dropping always() ⇒ red',
+    );
+    assert(
+      (await fixture('a borrowed gate without the probe in needs', (s) => s.replace('    needs: [test, filter, test-plan, queue-verdict]\n', '    needs: [test, filter, test-plan]\n'))).problems.some((p) => p.includes("reads needs.queue-verdict in its if: without listing")),
+      '#31519: a gate reading an output it cannot see ⇒ red',
     );
 
     // ── #26084: the planned matrix and the gate read one expression ─────────
@@ -2733,11 +2814,11 @@ async function selfTest() {
       '#26084: a gate that is not handed the plan result ⇒ red',
     );
     assert(
-      await planProblem('the gate loses the plan job from needs', (s) => s.replace('    needs: [test, filter, test-plan]\n', '    needs: [test, filter]\n'), "plan job 'test-plan'", '#26084'),
+      await planProblem('the gate loses the plan job from needs', (s) => s.replace('    needs: [test, filter, test-plan, queue-verdict]\n', '    needs: [test, filter, queue-verdict]\n'), "plan job 'test-plan'", '#26084'),
       '#26084: a gate that cannot read the plan job ⇒ red',
     );
     assert(
-      await planProblem('the test job loses the plan job from needs', (s) => s.replace('    needs: [filter, test-plan]\n', '    needs: filter\n'), "does not list 'test-plan'", '#26084'),
+      await planProblem('the test job loses the plan job from needs', (s) => s.replace('    needs: [filter, test-plan, queue-verdict]\n', '    needs: [filter, queue-verdict]\n'), "does not list 'test-plan'", '#26084'),
       '#26084: a matrix built from a job it does not need ⇒ red',
     );
     assert(

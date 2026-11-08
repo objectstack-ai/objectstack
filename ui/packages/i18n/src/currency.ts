@@ -15,6 +15,8 @@ export interface FieldCurrencyConfig {
   defaultCurrency?: string;
   /** `record` mode only: the sibling field holding each record's ISO 4217 code. */
   currencyField?: string;
+  /** `record` mode only (ADR-0144 D5): where the engine stores the amount in the home currency. */
+  homeAmount?: { field?: string; rateDate?: string; rateField?: string };
 }
 
 /**
@@ -32,6 +34,68 @@ export function recordCurrencyField(
   return typeof config.currencyField === 'string' && config.currencyField !== ''
     ? config.currencyField
     : undefined;
+}
+
+/**
+ * Where a home field's stored amount came from (ADR-0144 D5): the
+ * `record`-mode amount whose `currencyConfig.homeAmount.field` names it, that
+ * amount's code field, and the document-date and rate fields the engine wrote
+ * beside it. Read off the object's field map, never stated twice: the home
+ * field itself declares nothing that says it is one.
+ */
+export interface HomeAmountSource {
+  /** The `record`-mode amount the engine converted. */
+  readonly amountField: string;
+  /** That amount's `currencyConfig.currencyField`: the code it is in. */
+  readonly codeField: string;
+  /** `homeAmount.rateDate`: the document date that picked the rate. */
+  readonly rateDateField: string;
+  /** `homeAmount.rateField`: the rate the engine used. */
+  readonly rateField: string;
+}
+
+/**
+ * The amount that names `name` as its home field, or `undefined` when none
+ * does (the common case). The first declaring amount answers, as the spec's
+ * object judge gives a home field to its first claimant only.
+ */
+export function homeAmountSourceOf(
+  fields: Readonly<Record<string, unknown>> | null | undefined,
+  name: string,
+): HomeAmountSource | undefined {
+  if (!fields || typeof fields !== 'object') return undefined;
+  for (const [amountField, def] of Object.entries(fields)) {
+    const config = (def as { currencyConfig?: FieldCurrencyConfig } | null)?.currencyConfig;
+    const codeField = recordCurrencyField(def as { currencyConfig?: FieldCurrencyConfig });
+    const home = config?.homeAmount;
+    if (codeField === undefined || !home || home.field !== name) continue;
+    if (typeof home.rateDate !== 'string' || typeof home.rateField !== 'string') continue;
+    return { amountField, codeField, rateDateField: home.rateDate, rateField: home.rateField };
+  }
+  return undefined;
+}
+
+/**
+ * The key a producer stamps {@link HomeAmountSource} under on the field
+ * metadata it hands a currency renderer, the way the form stamps a code
+ * field's `usedCurrencyCodes`: a renderer receives one field, not the object.
+ */
+export const HOME_AMOUNT_SOURCE_KEY = 'homeAmountSource';
+
+/** `def` with its {@link HomeAmountSource} stamped, or `def` itself when `name` is no home field. */
+export function withHomeAmountSource<T extends object>(
+  def: T,
+  fields: Readonly<Record<string, unknown>> | null | undefined,
+  name: string,
+): T {
+  const source = homeAmountSourceOf(fields, name);
+  return source ? { ...def, [HOME_AMOUNT_SOURCE_KEY]: source } : def;
+}
+
+/** The {@link HomeAmountSource} a producer stamped on `field`, or `undefined`. */
+export function readHomeAmountSource(field: unknown): HomeAmountSource | undefined {
+  const source = (field as Record<string, unknown> | null | undefined)?.[HOME_AMOUNT_SOURCE_KEY];
+  return source && typeof source === 'object' ? (source as HomeAmountSource) : undefined;
 }
 
 /**

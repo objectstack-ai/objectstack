@@ -52,6 +52,7 @@
     "ui/DatasetMeasure",
     "ui/DatasetMeasureDuration",
     "ui/DatasetMeasurePolarity",
+    "ui/DatasetMemberSynonyms",
     "ui/DerivedMeasureOp",
     "ui/DocNavItem",
     "ui/ElementApiDataSource",
