@@ -153,6 +153,8 @@ import { createCloudBinding } from './cloud-binding.js';
 import { CLOUD_BINDING_SERVICE, type ICloudBindingService } from '@objectstack/spec/contracts';
 import { CLOUD_CONNECTION_CAPABILITY, CLOUD_CONNECTION_UI_BUNDLE } from './cloud-connection-ui.js';
 import { readJsonRequestBody } from './request-json-body.js';
+// [#30964] The install mode's one declaration, read by reference: never a copy of its two spellings.
+import { InstallModeSchema, type InstallMode } from '@objectstack/spec/kernel';
 
 const CLOUD_CONNECTION_PREFIX = '/api/v1/cloud-connection';
 
@@ -264,6 +266,37 @@ interface ResolvedSession {
  * to an environment.
  */
 const ENVIRONMENT_NOT_FOUND_MESSAGE = 'Could not resolve an environment for this request host.';
+
+/**
+ * [#30964, cloud#3624 ruling A] The install mode a `POST /install` body asks
+ * for: `install_mode` (the control plane's own spelling) or `installMode` (the
+ * install-local door's), parsed against {@link InstallModeSchema} by reference.
+ * `mode` is `undefined` when the body names none — a managed install, as every
+ * install was before the key. A value the schema refuses, or the two spellings
+ * naming different modes, is a 400: never read as `managed`.
+ */
+function installModeOf(body: any): { ok: true; mode: InstallMode | undefined } | { ok: false; message: string } {
+    const snake = body?.install_mode;
+    const camel = body?.installMode;
+    if (snake !== undefined && camel !== undefined && snake !== camel) {
+        return {
+            ok: false,
+            message: `\`install_mode\` (${JSON.stringify(snake)}) and \`installMode\` (${JSON.stringify(camel)}) disagree. `
+                + 'Send one of them. Nothing was installed.',
+        };
+    }
+    const raw = snake !== undefined ? snake : camel;
+    if (raw === undefined) return { ok: true, mode: undefined };
+    const parsed = InstallModeSchema.safeParse(raw);
+    if (!parsed.success) {
+        return {
+            ok: false,
+            message: `\`install_mode\` must be 'managed' or 'unmanaged', received ${JSON.stringify(raw)}. `
+                + 'Omit it for a managed install. Nothing was installed.',
+        };
+    }
+    return { ok: true, mode: parsed.data };
+}
 
 export interface CloudConnectionPluginConfig {
     /**
@@ -962,6 +995,14 @@ export class CloudConnectionPlugin implements Plugin {
                 const packageId = String(body?.package_id ?? body?.packageId ?? '').trim();
                 if (!packageId) return c.json({ success: false, error: { code: 'INVALID_REQUEST', message: 'package_id is required' } }, 400);
                 const seedSampleData = body?.seed_sample_data === true || body?.seedSampleData === true;
+                // [#30964, cloud#3624 ruling A] The install mode the caller asked
+                // for, parsed against the manifest key's own enum. Absent means
+                // `managed`, as before, and the control plane is then sent no
+                // `install_mode` (its absent value is `managed` too), so a managed
+                // install's request is the one it always was.
+                const requested = installModeOf(body);
+                if (!requested.ok) return c.json({ success: false, error: { code: 'INVALID_REQUEST', message: requested.message } }, 400);
+                const installMode = requested.mode;
 
                 // Call the cloud install endpoint in service mode. We do NOT send
                 // an active org → package-install treats this as platform/CI and
@@ -973,7 +1014,26 @@ export class CloudConnectionPlugin implements Plugin {
                             'Content-Type': 'application/json',
                             ...authHeaders(),
                         },
-                        body: JSON.stringify({ recordId: packageId, params: { environment_id: environmentId, seed_sample_data: seedSampleData } }),
+                        body: JSON.stringify({
+                            recordId: packageId,
+                            params: {
+                                environment_id: environmentId,
+                                seed_sample_data: seedSampleData,
+                                // [#30964] The cloud half's param name (cloud#3624, PR cloud#3683): snake_case, absent = managed.
+                                ...(installMode !== undefined ? { install_mode: installMode } : {}),
+                                // [#30964] The person installing, so the control
+                                // plane's audit row can name a person rather than
+                                // this environment's service principal. A body
+                                // param, never a header (cloud#2245 removed
+                                // `x-actor-id` as an authorization input). It is
+                                // the id of the session this door admitted above,
+                                // never a value the caller sent; the control plane
+                                // reads it only for a member of the environment's
+                                // organization and records its service principal
+                                // otherwise (cloud#3624).
+                                installer_user_id: session.userId,
+                            },
+                        }),
                     });
                     const json = await resp.json().catch(() => ({ success: false, error: 'install failed (no body)' }));
                     return c.json(json, resp.status as any);

@@ -185,8 +185,60 @@ describe('multi-tenant mode (env-registry + per-env kernel auth)', () => {
         expect(res.payload.success).toBe(true);
         const [url, init] = fetchSpy.mock.calls[0]!;
         expect(url).toBe('http://cloud.test/api/v1/actions/sys_package/install_package');
-        expect(JSON.parse((init as any).body)).toEqual({ recordId: 'pkg_1', params: { environment_id: ENV, seed_sample_data: true } });
+        // [#30964] No mode asked: no `install_mode` sent (the control plane's absent value is `managed`); the installer always is.
+        expect(JSON.parse((init as any).body)).toEqual({
+            recordId: 'pkg_1', params: { environment_id: ENV, seed_sample_data: true, installer_user_id: 'user-1' },
+        });
         expect((init as any).headers.Authorization).toBe('Bearer svc-key');
+    });
+
+    // ── [#30964, cloud#3624 ruling A] the install mode and the installing user, forwarded ──
+
+    async function installWith(body: Record<string, unknown>, userId = 'user-1') {
+        const rawApp = makeRawApp();
+        const { ctx, fireKernelReady } = makeCtx({ rawApp, services: mtServices(userId) });
+        const fetchSpy = vi.fn(async (_url: string, _init?: RequestInit) => new Response(JSON.stringify({ success: true, data: { installed: true } }), { status: 200 }));
+        vi.stubGlobal('fetch', fetchSpy);
+        await new CloudConnectionPlugin({ controlPlaneUrl: 'http://cloud.test', controlPlaneApiKey: 'svc-key' }).start(ctx as any);
+        await fireKernelReady();
+        const res = await rawApp.routes.get('POST /api/v1/cloud-connection/install')!(
+            makeC('https://t1.example.com/api/v1/cloud-connection/install', body),
+        );
+        const sent = fetchSpy.mock.calls[0] ? JSON.parse((fetchSpy.mock.calls[0][1] as any).body) : undefined;
+        return { res, fetchSpy, sent };
+    }
+
+    it('install forwards `install_mode` as the control plane spells it, from either spelling of the body', async () => {
+        for (const body of [{ package_id: 'pkg_1', install_mode: 'unmanaged' }, { package_id: 'pkg_1', installMode: 'unmanaged' }]) {
+            const { res, sent } = await installWith(body);
+            expect(res.payload.success, JSON.stringify(body)).toBe(true);
+            expect(sent).toEqual({
+                recordId: 'pkg_1',
+                params: { environment_id: ENV, seed_sample_data: false, install_mode: 'unmanaged', installer_user_id: 'user-1' },
+            });
+        }
+        const managed = await installWith({ package_id: 'pkg_1', install_mode: 'managed' });
+        expect(managed.sent.params).toMatchObject({ install_mode: 'managed', installer_user_id: 'user-1' });
+    });
+
+    it('install forwards the admitted session\'s user as `installer_user_id`, never one the body names', async () => {
+        const { sent } = await installWith({ package_id: 'pkg_1', installer_user_id: 'usr_someone_else', installerUserId: 'usr_other' }, 'user-7');
+        expect(sent.params.installer_user_id).toBe('user-7');
+        expect(Object.keys(sent.params).sort()).toEqual(['environment_id', 'installer_user_id', 'seed_sample_data']);
+    });
+
+    it('install refuses an install mode the manifest enum does not hold, or two spellings that disagree: 400, no control-plane call', async () => {
+        for (const body of [
+            { package_id: 'pkg_1', install_mode: 'copy' },
+            { package_id: 'pkg_1', installMode: true },
+            { package_id: 'pkg_1', install_mode: 'managed', installMode: 'unmanaged' },
+        ]) {
+            const { res, fetchSpy } = await installWith(body);
+            expect(res.status, JSON.stringify(body)).toBe(400);
+            expect(res.payload.error.code).toBe('INVALID_REQUEST');
+            expect(res.payload.error.message).toContain('install_mode');
+            expect(fetchSpy).not.toHaveBeenCalled();
+        }
     });
 
     it('installed degrades to an empty disconnected list without cloud credentials', async () => {
