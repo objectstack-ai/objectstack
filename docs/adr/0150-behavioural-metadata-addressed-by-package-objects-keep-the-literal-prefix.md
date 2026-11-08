@@ -8,7 +8,8 @@
   - The direction, decision card tapped **A 「转向包寻址」** at 13:12:35Z (seat record [`6721941146`](https://github.com/objectstack-ai/objectstack/issues/30806#issuecomment-6721941146) on #30806), after his message 「你不能只考虑现状，还要考虑长远的合理性；我说的流程不是url挂到对象下，而是挂到软件包下」.
   - The scope, 13:13:39Z: 「流程等行为元数据按软件包寻址，立决策卡，现在就所有的元数据类型然后和我沟通。」
   - The per-type table, decision card tapped **A 「按修正后分档写入」** at 15:36:01Z (seat record [`6723462584`](https://github.com/objectstack-ai/objectstack/issues/31527#issuecomment-6723462584) on #31527). [D1](#d1--four-buckets-as-ruled) restates it; where the two differ in words, the ruling binds.
-- **Left to this record by the ruling**, each argued on the four axes: the bucket-3 flat spelling on the AI face ([D6](#d6--the-ai-face-spells-a-derived-flat-name-ns-name)) and how two packages' same-named positions are handled ([D7](#d7--positions-are-environment-scoped-and-a-second-holder-is-refused)).
+- **Left open by the ruling, and put to the maintainer by this record** ([Open questions](#open-questions-needs-decision)): the bucket-3 flat spelling on the AI face (D6) and how two packages' same-named positions are handled (D7). Each carries the four-axis analysis and a recommendation. ⛔ Neither is decided here, and no slice that depends on one is cut before it is ruled.
+- **Division of labour** (ruling A 「留核心，其余交车道」, record [`6723571682`](https://github.com/objectstack-ai/objectstack/issues/31527#issuecomment-6723571682)) and the red lines every child carries (the #31527 body) shape the [Execution plan](#execution-plan-after-acceptance).
 - **Builds on**: [ADR-0005](./0005-metadata-customization-overlay.md) (overlays), [ADR-0019](./0019-app-as-consumer-unit.md) (the namespace-named app), [ADR-0048](./0048-cross-package-metadata-collision.md) §3.1–§3.3 (package id is identity; prefer-local resolution), [ADR-0126](./0126-packaged-metadata-customization-model.md) §4 (the activation ledger; no re-encoded literal in a column), [ADR-0129](./0129-object-name-is-the-canonical-id.md) (the object name is the table name), [ADR-0130](./0130-release-artifact-as-co-ownership-boundary.md) and [ADR-0141](./0141-inter-app-dependency-declared-checked-before-install.md) (namespace co-ownership; the declared dependency closure), [ADR-0146](./0146-studio-designs-setup-administers-one-editor-per-item-paired-customize-package.md) (the paired `.custom` package).
 - **Inputs**: the #30806 plan ([`6719833098`](https://github.com/objectstack-ai/objectstack/issues/30806#issuecomment-6719833098)), the seat records `6721537981` and `6721596287`, and the #31527 stage-1 inventory, measured read-only on `main` at `86e37660`. Measurements below cite it.
 
@@ -19,9 +20,9 @@
 1. **Two tiers, two mechanisms.** Names that are storage identity or a shared data contract (objects, fields, object extensions, views, capabilities, docs, API paths) keep ADR-0129's literal prefix. Behavioural and presentation metadata (flows, actions, hooks, jobs, permission sets, apps, pages, …) are identified by **(package, name)**. Authors write short names, and **no behavioural name is ever rewritten**.
 2. **The storage already holds the package.** The registry keys every non-object item `PACKAGE:NAME`, and `sys_metadata` is unique on `(type, name, package_id, bundle_member)`. What this record changes is the **readers that drop the package before they ask**: runtime indexes, the activation ledger, by-name doors, the AI face and stored references.
 3. **One resolution rule** for a bare name: the caller's own package → else the unique holder in its declared dependency closure (ADR-0141) → else a refusal that lists the candidates.
-4. **Addresses carry the namespace when they must.** A by-name URL takes an optional namespace segment (`/automation/crm/send_email`). A bare one keeps resolving while the name is unique in the environment, and answers `409` with the candidates when it is not. The AI face spells a derived flat name, `NS-NAME`.
+4. **Addresses carry the namespace when they must.** A by-name URL takes an optional namespace segment (`/automation/crm/send_email`). A bare one keeps resolving while the name is unique in the environment, and answers `409` with the candidates when it is not. The AI face spells a flat name derived from namespace and name; the spelling is an open question (recommended: `NS-NAME`).
 5. **Stored references gain a package column beside the name**, backfilled from the one holder phase 1 guarantees today. The sealed ambiguity set is reported, ⛔ never rewired on a guess.
-6. **Positions stay one environment-wide slot per name**, and a second package holder is refused, as today.
+6. **Positions stay one environment-wide slot per name** (ruled). Whether a second package holder is refused, as today, or merged is an open question (recommended: refused).
 
 ---
 
@@ -137,33 +138,33 @@ Hooks bind by event and object and already carry `packageId`. Only `isArtifactSh
 - **A bare address** resolves while the name has one holder in the environment, and answers **`409`** with the candidate qualified addresses otherwise, in the D3 refusal vocabulary. The status already exists in the ledger (`RESOURCE_CONFLICT`); ⛔ no new code is minted.
 - **MCP.** `run_action` gains an optional `namespace` input beside `objectName`. `list_actions` rows carry `namespace`. Skill prompts and agents are named by the D6 face.
 - **The client SDK** methods that take a name (`automation.*`, `actions.invoke`, `meta.getItem`) take an optional namespace and build the qualified path.
-- **Studio and the Console** (carrier objectui) open an item by `(namespace, name)`. The server door already takes the package.
+- **Studio and the Console** (`ui/`, in this repository) pass the package they already hold. `ui/packages/app-shell`'s `MetadataService` `meta.getItem(type, name, opts)` accepts `{ packageId }` today, and `StudioDesignSurface`, `ObjectFormDesigner` and `StudioCustomizeControls` hold the current package id. About ten page, view, dashboard and app reads go without it; object reads need none.
 - ⛔ **No alias window.** Every existing bare address keeps working while unique, which is the common case: there is nothing to alias. A bare address that becomes ambiguous because a second package installed the name answers `409` with both qualified addresses. That is the loud answer, never a silent pick.
 
-### D6 — The AI face spells a derived flat name: `NS-NAME`
+### D6 — The AI face spells a derived flat name (spelling: open question Q1)
 
 MCP requires one unique name per tool and per prompt on a server, and the model providers that consume them admit only letters, digits, `_` and `-` in a tool name (OpenAI caps it at 64 characters; MCP itself also admits `.`, which the providers do not). A bucket-3 item's face name is therefore **derived** from its address, never authored. This is ADR-0028 D2's "derived physical name", applied to the one physical surface this tier has.
 
-**Choice: `NS-NAME`.** For example, `crm-qualify_lead`; an environment item keeps its bare `NAME`. When the result exceeds 64 characters it is cut to 55 and suffixed with `-` and 8 hex characters of a hash of the full identity: deterministic, and the same on every server.
+**Recommended, pending ruling (Q1): `NS-NAME`.** For example, `crm-qualify_lead`; an environment item keeps its bare `NAME`. When the result exceeds 64 characters it is cut to 55 and suffixed with `-` and 8 hex characters of a hash of the full identity: deterministic, and the same on every server.
 
 | Option | Business need (measured) | Long-term | Hard for AI to get wrong | Startup scope |
 |:--|:--|:--|:--|:--|
-| **`NS-NAME` (chosen)** | every MCP client and both providers accept it | reversible: a namespace and a name never contain `-`, so the face parses back to `(namespace, name)` with no lookup table | collision-free by construction; nothing to remember | no new gate, no registry of spellings |
+| **`NS-NAME` (recommended)** | every MCP client and both providers accept it | reversible: a namespace and a name never contain `-`, so the face parses back to `(namespace, name)` with no lookup table | collision-free by construction; nothing to remember | no new gate, no registry of spellings |
 | `NS.NAME` (ADR-0028 D3's proposal) | the providers refuse `.` in a tool name | — | breaks at the first provider call | — |
 | `NS_NAME` | accepted everywhere | not reversible: `crm` + `a_b` and `crm_a` + `b` both give `crm_a_b`, so a clash needs a refusal at registration | the clash reappears as a rare registration error | a new gate, which defaults to no |
 | `NS__NAME` | accepted everywhere | a name may itself contain `__` (`^[a-z_][a-z0-9_]*$`), so it is ambiguous again | as above | a new gate |
 
 The cloud's action tool (`action_` plus the bare action name, #31515) derives its name from the same function (carrier: cloud).
 
-### D7 — Positions are environment-scoped, and a second holder is refused
+### D7 — Positions are environment-scoped (conflict handling: open question Q2)
 
 Ruled: one org chart per environment; packages contribute positions; the same name is the same slot. Approval routing (`position:NAME`) and sharing recipients carry no package.
 
-**Choice: keep the one-holder refusal** (`security-catalog-namespace.ts`, ADR-0048 addendum 2026-10-08) for positions. A second package that ships a position name another package or the environment already holds is refused at registration, naming both holders.
+**Recommended, pending ruling (Q2): keep the one-holder refusal** (`security-catalog-namespace.ts`, ADR-0048 addendum 2026-10-08) for positions. A second package that ships a position name another package or the environment already holds is refused at registration, naming both holders.
 
 | Option | Business need (measured) | Long-term | Hard for AI to get wrong | Startup scope |
 |:--|:--|:--|:--|:--|
-| **Keep the refusal (chosen)** | HotCRM's 12 positions all live in one package. No first-party package contributes to another's slot. | one definition per slot: label, `permissionSets` and `delegatable` have one author | a clash is loud at install | ships today; no new mechanism |
+| **Keep the refusal (recommended)** | HotCRM's 12 positions all live in one package. No first-party package contributes to another's slot. | one definition per slot: label, `permissionSets` and `delegatable` have one author | a clash is loud at install | ships today; no new mechanism |
 | Merge contributions | no measured pull | needs a merge rule for every field: whose `label`, a union of `permissionSets` or not, `delegatable` true if either?; and what an uninstall removes | a merged slot silently gains another package's grants, the widening ADR-0090 D9 refuses for `everyone` | a new merge engine plus uninstall semantics |
 
 A package that needs its permission sets on another package's position asks the environment to bind them: an ADR-0005 overlay of the position adds the set, by an administrator's decision, exactly as an `isDefault` set is suggested and never auto-bound (ADR-0090 D9). A merge is ruled by its own card when a named package needs it.
@@ -198,47 +199,90 @@ This replaces #30806 S3's name rewrite. Nothing is renamed, so nothing is rewrit
 
 ### D9 — What retires, and what stays
 
-- **Retires per type, in the slice that makes that type's readers carry the package:** phase 1's one-holder refusal (`BARE_NAME_ONE_HOLDER_TYPES`). Until a type's slice lands the refusal stays, as the card's decision 6 requires.
-- **Retires now with this record:** #30806 phase 3 (S1 spec refusal, S5 HotCRM renames); phase 2's `naming/namespace-prefix` bare-name warning for buckets 2–4 (the intra-package duplicate warning stays); the authoring skills' and templates' instruction to prefix non-object names (#30805's text); ADR-0146 D3's prefix on a Studio-authored non-object name (the `.custom` pair's items are short names in their own package; its objects keep the prefix).
-- **Stays:** ADR-0129 and the object rule, unchanged; the one-holder rule for platform-requested bare names (D3) and for positions (D7); the capability's `NS.SHORT` spelling (bucket 1); the ADR-0048 §3.2 namespace install gate.
+- **Narrows per type, in that type's own trailing child, last:** phase 1's one-holder refusal (`BARE_NAME_ONE_HOLDER_TYPES`). It narrows from one package holder per environment to one holder per namespace (D2), only after that type's indexes, doors and stored references all carry the package. Until then it stays in force, so every intermediate `main` behaves as today plus optional package coordinates (the card's decision 6 and red line 3).
+- **Withdrawn with this record:** #30806 phase 3 (S1 spec refusal, S5 HotCRM renames). **Retired by child P:** phase 2's `naming/namespace-prefix` bare-name warning for buckets 2–4 (the intra-package duplicate warning stays), and the authoring skills' and templates' instruction to prefix non-object names (#30805's text). **Retired by child U:** ADR-0146 D3's prefix on a Studio-authored non-object name (the `.custom` pair's items are short names in their own package; its objects keep the prefix).
+- **Stays:** ADR-0129 and the object rule, unchanged; the one-holder rule for platform-requested bare names (D3) and, unless Q2 rules otherwise, for positions (D7); the capability's `NS.SHORT` spelling (bucket 1); the ADR-0048 §3.2 namespace install gate.
 - **Names already prefixed stay as they are.** The examples renamed in phase 2 (#30927) and HotCRM's already prefixed names (email templates) are just names, and ⛔ nothing un-renames them.
 
 ### D10 — Upgrade: what an already-deployed app sees
 
 - **No rename, no alias window, no author action.** Every authored name keeps working. Every bare address keeps resolving while it has one holder, which phase 1 guarantees today.
 - **The release that carries the D8 migration** adds the package columns and backfills them. It reports the ambiguous set: each stored reference left null, with its candidates, and the operator command that binds one after review.
-- **A second package installed later** that takes an existing name does not change what any stored reference, overlay, run or URL of the first one means. That is the guarantee this whole record buys. Bare doors answer `409` from then on, naming both qualified addresses.
+- **A second package installed later** that takes an existing name (once that type's backstop is narrowed; until then it is refused, as today) does not change what any stored reference, overlay, run or URL of the first one means. That is the guarantee this whole record buys. Bare doors answer `409` from then on, naming both qualified addresses.
 - **Customer-authored metadata** (bucket 4) is untouched.
 
 ---
 
 ## Execution plan (after acceptance)
 
-Each slice is its own card, cut after this record merges. **Clause-②** says whether the slice changes a published contract (spec, protocol, the SDK, a door's request or response). **Narrowing** says whether something accepted before is refused after. A runtime-index slice ships its readers, its doors and its stored columns together where they cannot be separated without a window in which a reader and a writer disagree.
+Each slice is a child card, cut after this record merges. **Who builds** follows ruling `6723571682`: the epic seat keeps D and R; E, G and S go to the `domain:server` queue, P to `domain:spec`, the Studio slice to the ui lane, #31515 to the cloud lane. **Order** (same ruling): R before E and G; S after E and G; the backstop narrowing last.
 
-| # | Slice | Scope | Clause-② | Narrowing |
-|:--|:--|:--|:--|:--|
-| 1 | **Spec: the coordinate** | the face-name derivation (D6), the address grammar helpers (D5), `namespace` on MCP / `list_actions` shapes; retire the phase-2 bare-name lint finding and the skills and templates text (D9); stop ADR-0146 D3's non-object prefix | yes | no |
-| 2 | **Resolver and closure** | one `(package, name)` resolver with ADR-0141's dependency closure (the save door's `resolveWritePackageScope` is the nearest existing closure), the D3 refusal reusing `bare-name-one-holder.ts`'s vocabulary, and the per-package overlay slot (D4) | no | yes: a reference ambiguous in its closure is refused |
-| 3 | **Namespace co-owner uniqueness** | a behavioural `(type, name)` held twice inside one namespace is refused at install and `os validate` (D2), on the ADR-0130 D3 object check | no | yes (measured first-party: 0) |
-| 4 | **Flows** | engine map, the activation consult, `/automation` qualified doors and `409`, SDK `automation.*`, R7 / R8 / R9 / R10; retire `flow`'s phase-1 refusal | yes (doors) | no |
-| 5 | **Actions** | engine key `(package, objectName, name)`, `/actions` doors, MCP `run_action` / `list_actions`, `ActionNavItem` resolution, the activation write door; retire the object-less `action` refusal | yes | no |
-| 6 | **Activation ledger** | unique `(metadata_type, package_id, name)` with backfill (R4), for flows, actions, webhooks and sharing rules | no | no |
-| 7 | **Security: permission sets** | the catalog's `(package, name)`, R1 and R3, and `position.permissionSets` resolution; positions keep D7 | no | no |
-| 8 | **Sharing, queues, assignment rules** | the indexes and R5, R6 and R13 | no | no |
-| 9 | **Flow-family services** | webhooks, connectors (R11), email templates (R20); retire their phase-1 refusals | no | no |
-| 10 | **Data family and api name** | picklist, mapping, dataset, the api matcher's name key, engine functions by referrer; retire their phase-1 refusals | no | no |
-| 11 | **Jobs** | `jobKeyFor` always on the package coordinate; R14 | no | no |
-| 12 | **Presentation** | app, page, dashboard, report, book, analytics cube: close the context-free reads; `/meta/:type/:ns/:name` | yes | no |
-| 13 | **AI face** | tool, skill, agent, rag_pipeline named `NS-NAME` on MCP; `agent_prompt` on the protocol read (#31514); retire `agent` and `skill` refusals | yes | no |
-| 14 | **Upgrade report and operator command** | the ambiguous-set report and the reviewed bind command (D10) | no | no |
-| 15 | **ADR status lines** | ADR-0048's 2026-11-06 addendum, ADR-0146 D3 and ADR-0129's cross-reference, as the slices land | no | no |
-| — | **cloud** | the action tool name on the D6 face (#31515) | carrier: cloud | |
-| — | **objectui** | Studio and Console open items by `(namespace, name)` | carrier: objectui | |
+**Every child is independently releasable** (red line 3). It is additive: nullable package columns are backfilled before any reader uses them, an index gains the package without dropping the bare path, a URL gains an optional segment, and a bare name keeps resolving to its unique holder. While phase 1's refusal stands, no two package holders of a name exist, so adding the coordinate changes no observable answer. Each child PR proves it with four readings:
 
-That is 15 objectstack PRs plus one each in cloud and objectui, 17 in all. Slices 4 and 5 are the largest and may split into an index PR and a doors PR, which gives 19. Slices 4–13 depend on 2. Slice 6 lands before 4's activation consult and 5's write door. Slice 14 ships in the release that carries 6–11.
+- **(a)** the phase-1 one-holder tests stay green;
+- **(b)** bare-name behaviour (URLs, MCP, SDK) is unchanged;
+- **(c)** any migration is re-runnable and never guesses an ambiguous reference;
+- **(d)** its `Clause-②:` declaration and, where it changes the protocol, its ADR-0087 migration entry.
 
----
+**Clause-②** says whether the slice changes a published contract (spec, protocol, SDK, a door's request or response). **Narrowing** says whether something accepted before is refused after.
+
+| # | Child | Builds | File surface | Clause-② | Narrowing |
+|:--|:--|:--|:--|:--|:--|
+| D | this ADR | epic seat | `docs/adr/` | no | no |
+| R | **resolver and closure**: one `(package, name)` resolver (D3) with the ADR-0141 closure (the save door's `resolveWritePackageScope` is the nearest existing one), the refusal in `bare-name-one-holder.ts`'s vocabulary, and the per-package overlay slot (D4). Not wired to any reader yet | epic seat | objectql (`registry.ts`, a new resolver module), metadata-protocol (closure) | no | no |
+| N | **namespace co-owner uniqueness** for the bucket 2/3 types phase 1 does not cover (sharing rule, queue, assignment rule, hook, job, app, page, dashboard, report, book, cube, tool): a `(type, name)` held twice inside one namespace is refused at install and `os validate` (D2), on the ADR-0130 D3 object check. Lands before G1, so a qualified address always names one item | server | objectql `registry.ts` (`installPackage`), cli validate | no | **yes** (measured first-party: 0 of 297) |
+| P | **spec**: `namespace` on MCP `run_action` / `list_actions` shapes; the address grammar helpers (D5); the face derivation once Q1 is ruled; retire phase 2's bare-name lint finding and the skills and templates text (D9) | `domain:spec` | spec (`ai/`, `api/`), cli `lint.ts`, `skills/`, create-objectstack templates | yes (additive) | no |
+| E1 | flow index and activation consult on `(package, name)` | server | service-automation (`engine.ts`, `flow-definitions.ts`) | no | no |
+| E2 | action engine key `(package, objectName, name)`; `ActionNavItem` resolved by D3 | server | objectql (`engine` action registry, `action-governance.ts`), runtime `action-execution.ts` | no | no |
+| E3 | security catalog: permission sets by `(package, name)`; `position.permissionSets` by D3; positions unchanged | server | core `security/security-catalog.ts`, plugin-security | no | no |
+| E4 | sharing rules, queues, assignment rules | server | plugin-sharing | no | no |
+| E5 | webhooks, connectors, email templates | server | plugin-webhooks, service-automation connectors, plugin-email | no | no |
+| E6 | picklist, mapping, dataset, the api matcher's name key, engine functions by referrer | server | objectql, rest (`endpoint-matcher.ts`), service-analytics | no | no |
+| E7 | jobs: `jobKeyFor` on the package coordinate, keeping the bare key readable | server | runtime `app-artifact-handlers.ts`, service-job | no | no |
+| E8 | presentation and AI items: app, page, dashboard, report, book, cube, tool, skill, agent, rag_pipeline; `agent_prompt` on the protocol read (#31514) | server | objectql, metadata-protocol, mcp | no | no |
+| G1 | REST doors: the optional namespace segment and the `409` with candidates (D5) on `/automation`, `/automation/hooks`, `/actions`, `/meta`, connectors | server | runtime `domains/*.ts`, `route-ledger.ts` | yes (additive) | no: a bare address that resolves today still resolves |
+| G2 | MCP: `run_action` / `list_actions` `namespace`; skill and agent face names once Q1 is ruled | server | mcp | yes (additive) | no |
+| G3 | client SDK: optional namespace on `automation.*`, `actions.invoke`, `meta.getItem` | server | client | yes (additive) | no |
+| U | Studio and Console pass the held package id through `MetadataService` reads and editors (D5); stop ADR-0146 D3's prefix on non-object names (D9) | ui lane | `ui/packages/app-shell` (`services/MetadataService.ts`, `views/studio-design/*`) | no | no |
+| C | the action tool name on the AI face (#31515), after Q1 | cloud lane | cloud `service-ai` | carrier: cloud | — |
+| S1 | activation ledger unique `(metadata_type, package_id, name)`, backfilled (R4) | server | platform-objects, core `metadata-activation-store.ts` | no | no |
+| S2 | security and sharing columns: R1, R3, R5, R6, R13 | server | plugin-security, plugin-sharing | no | no |
+| S3 | automation columns: R7, R8, R9, R10, R11, R14, R20 | server | service-automation, plugin-approvals, service-job, plugin-email | no | no |
+| S4 | the ambiguous-set upgrade report and the reviewed bind command (D10), with its ADR-0087 migration entry | server | cli (`os migrate`), metadata-protocol | no | no |
+| B1…B13 | **backstop narrowing, one child per type**, last: the one-holder refusal narrows from environment to namespace (D2), after that type's E, G and S children land | server, after each type's E/G/S | objectql `bare-name-one-holder.ts`, `security-catalog-namespace.ts` (permission sets) | no | **yes** for co-owners of one namespace (measured first-party: 0); a widening for everyone else |
+| A | ADR status lines (ADR-0048 addendum, ADR-0146 D3, ADR-0129 cross-reference) | epic seat | `docs/adr/` | no | no |
+
+**Count:** D, R, N, P, A, U, C, 8 E, 3 G and 4 S make 21 build children. The B children are one per covered type, 13 in all (phase 1's 12 types plus permission sets), and small; several types of one family can ride one PR where their E, G and S children have all landed. This is within the evaluation thread's 18–22 for the build children, plus N. The trailing B children are new, and come from red line 3.
+
+**Critical path, at fleet pace** (about 2–6 hours per medium PR, lanes in parallel):
+
+| Step | Working days |
+|:--|:--|
+| this ADR, plus the maintainer's Tier H approval and the Q1/Q2 rulings | 0.5 + his approval |
+| R | 0.5–1 |
+| E, G, P, U in parallel (C waits on Q1) | 1–2 |
+| S | 1 |
+| B, per type | 0.5 |
+| **Total** | **about 4–5** |
+
+The real bottlenecks are not calendar weeks. They are the maintainer's ADR approval and the two open questions, merge-queue and CI throughput, and the cloud lane for C.
+
+## Open questions (needs decision)
+
+Both are put to the maintainer with this record. The recommendation is the four-axis reading in D6 and D7; neither is decided here.
+
+- **Q1 — the bucket-3 face spelling** (`status: needs_decision`). Options: `NS-NAME` (recommended), `NS_NAME`, `NS__NAME`, `NS.NAME`. Axes:
+  - *business need*: measured, MCP clients and both providers accept `-` and `_`, and the providers refuse `.`;
+  - *long-term*: only `NS-NAME` parses back to `(namespace, name)` with no lookup table;
+  - *hard for AI to get wrong*: `NS-NAME` cannot collide, while `NS_NAME` and `NS__NAME` collide in rare cases and need a refusal;
+  - *startup scope*: `NS-NAME` needs no new gate.
+  - Blocks: P's face derivation, G2's face names, and C.
+- **Q2 — two packages' same-named position** (`status: needs_decision`). Options: keep the one-holder refusal (recommended), or merge the contributions. Axes:
+  - *business need*: measured, no first-party package contributes to another's slot;
+  - *long-term*: a merge needs a rule for every field and for uninstall;
+  - *hard for AI to get wrong*: a merged slot silently gains another package's grants, while the refusal is loud;
+  - *startup scope*: the refusal ships today, while a merge is a new engine.
+  - Blocks nothing, because positions keep today's behaviour until it is ruled.
 
 ## Consequences
 
