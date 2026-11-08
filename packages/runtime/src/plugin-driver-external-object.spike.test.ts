@@ -52,6 +52,8 @@ import {
   createDefaultDatasourceDriverFactory,
   type DatasourceConnectionService,
 } from '@objectstack/service-datasource';
+// Paid at collection: the source under test loads it on first use (`check:test-source-alias`).
+import '@objectstack/metadata';
 import { AppPlugin } from './app-plugin.js';
 import { DefaultDatasourcePlugin } from './default-datasource-plugin.js';
 import { createDispatcherPlugin } from './dispatcher-plugin.js';
