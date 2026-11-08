@@ -27,7 +27,8 @@
  *  - a key revoked because its owner's membership ended is restored by no
  *    session at all: the declared Restore action, sent exactly as the
  *    registered schema declares it, is refused to the owner's session and to
- *    the platform administrator's (the restore guard, 403);
+ *    the platform administrator's (the restore guard, 403), and so is the
+ *    reason-only clear that would let a later restore through;
  *  - the mint, and the `last_used_at` stamp the key-admission seam writes,
  *    are system-context writes and still land.
  */
@@ -216,6 +217,19 @@ describe('sys_api_key on the data door: changing a key requires a signed-in sess
       expect(res.status, `${who}: ${await res.clone().text()}`).toBe(403);
       const body: any = await res.json();
       expect(body.code ?? body.error?.code, who).toBe('PERMISSION_DENIED');
+    }
+
+    // The two-step road: clear the reason alone (no `revoked` key, so the
+    // restore guard never judges it), then restore. The clear is refused
+    // (readonly, off the D2 whitelist), so the restore after it still is.
+    for (const [who, token] of [['owner', memberToken], ['platform administrator', adminToken]] as const) {
+      const clear = await stack.apiAs(token, 'PATCH', `/data/sys_api_key/${key.id}`, { revoked_reason: null });
+      expect(clear.status, `${who} clear: ${await clear.clone().text()}`).toBe(403);
+      const clearBody: any = await clear.json();
+      expect(clearBody.code ?? clearBody.error?.code, `${who} clear`).toBe('PERMISSION_DENIED');
+
+      const again = await stack.apiAs(token, restore.method, restorePath(key.id), restore.bodyExtra);
+      expect(again.status, `${who} restore after clear: ${await again.clone().text()}`).toBe(403);
     }
     const row = await readKey(key.id);
     expect(row.revoked).toBe(true);
