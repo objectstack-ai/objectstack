@@ -190,7 +190,6 @@ The five retired remote templates (`todo`, `compliance`, `content`,
 | File names | `{name}.{type}.ts` | `task.object.ts`, `main.app.ts` |
 | Machine names | `snake_case` | `project_task`, `first_name` |
 | Config keys | `camelCase` | `maxLength`, `defaultValue` |
-| Barrel exports | `Object.values(imported)` | `objects: Object.values(objects)` |
 
 ---
 
@@ -284,19 +283,18 @@ CLI: `os serve` / `os dev`
      │      surface at /_console/studio/…)
      ├── RESTPlugin (auto-generated API)
      ├── DispatcherPlugin
-     └── AIServicePlugin (cloud / EE only — reverse-mounted by a cloud host; absent in the open framework per cloud ADR-0025)
+     └── AIServicePlugin (cloud / EE only — reverse-mounted by a cloud host)
   5. Runtime.start() → init + start all plugins
   6. Server listens on the resolved port
 ```
 
-**Port resolution** and conflict behaviour (dev hops to the next free port,
-production fails loudly): [Ports & networking](./references/operations.md#ports--networking).
+**Port resolution** and conflict behaviour: [Ports & networking](./references/operations.md#ports--networking).
 
 ### `requires:` — which service plugins boot
 
 Step 4's list is the fixed core. Tokens marked ° are always-on: every boot
 mounts them, listed or not, and `--preset minimal` drops exactly those. Every
-other service plugin is opt-in: `requires: [...]` on the stack root turns it on. The CLI expands each
+other service plugin is opt-in (`requires: [...]` on the stack root turns it on) but the host defaults, mounted under every preset: `mcp` unless `OS_MCP_SERVER_ENABLED=false`, and `pinyin-search` when `i18n` names a `zh-*` locale (`OS_SEARCH_PINYIN_ENABLED` overrides). The CLI expands each
 token through the `CAPABILITY_PROVIDERS` registry in
 `@objectstack/core`:
 
