@@ -203,6 +203,8 @@ const zh = {
     deniedDescription: '您没有此字段的编辑权限。',
     serverDefaultHint: '保存时自动设置。',
     requiredForAction: '执行「{{action}}」时必填。',
+    aiSuggested: 'AI 建议',
+    aiDraftNotice: 'AI 已根据聊天预填标为「AI 建议」的字段。检查并保存之前不会写入任何内容。',
     maxFileSize: '最大文件大小：{{size}}',
     masterDetail: {
       loadingColumns: '正在加载列…',
