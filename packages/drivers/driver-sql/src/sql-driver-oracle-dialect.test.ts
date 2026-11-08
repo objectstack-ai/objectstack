@@ -431,6 +431,12 @@ describe('#31390 a RAW(16) uuid comparand binds as HEXTORAW(?) over its hex digi
     expect(bindings).toEqual([UUID]);
   });
 
+  it('control: a pattern operator on the RAW(16) column compiles its text pattern as before, unjudged', async () => {
+    const { sql, bindings } = (await primed()).compileWhere('ord', { account: { $contains: 'abc' } });
+    expect(sql).toBe('select * from "ORD" where "ACCT_REF" LIKE ? ESCAPE ?');
+    expect(bindings).toEqual(['%abc%', '\\']);
+  });
+
   it('control: a uuid-shaped value in a text column binds the text — the value is never the evidence', async () => {
     const { sql, bindings } = (await primed()).compileWhere('ord', { note: UUID });
     expect(sql).toBe('select * from "ORD" where "NOTE" = ?');

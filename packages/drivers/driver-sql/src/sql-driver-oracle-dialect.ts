@@ -188,27 +188,59 @@ export function oracleUuidRawBinding(
   value: unknown,
   role: OracleUuidBindingRole,
 ): Knex.Raw {
-  if (typeof value === 'string' && UUID_TEXT.test(value)) {
+  if (isOracleUuidText(value)) {
     return knexInstance.raw('HEXTORAW(?)', [value.replace(/-/g, '').toUpperCase()]);
   }
-  const why =
-    'is not a uuid. The column is a RAW(16) uuid on an Oracle table, and only uuid text ' +
-    '(8-4-4-4-12 hexadecimal digits, the form the column reads back as, or the same 32 digits undashed) ' +
-    'can be bound to it.';
   if (role === 'comparand') {
-    throw withheldFilterError(
-      `This filter compares a uuid column with a value that ${why} The field is withheld from the message; ` +
-        'the full diagnostic is in the server log.',
-      `Field "${field}" is compared with a value that ${why}`,
-    );
+    // A by-key door's id has no filter subtree to carry a mark: withheld.
+    assertOracleUuidComparand('=', field, value);
   }
-  const err = new Error(`The value written to field "${field}" ${why}`) as Error & {
+  const err = new Error(`The value written to field "${field}" ${NOT_A_UUID}`) as Error & {
     code?: string;
     status?: number;
   };
   err.code = StandardErrorCode.enum.VALIDATION_ERROR;
   err.status = 400;
   throw err;
+}
+
+/** Whether `value` is uuid text a `RAW(16)` column can be bound to — see {@link UUID_TEXT}. */
+export function isOracleUuidText(value: unknown): value is string {
+  return typeof value === 'string' && UUID_TEXT.test(value);
+}
+
+const NOT_A_UUID =
+  'is not a uuid. The column is a RAW(16) uuid on an Oracle table, and only uuid text ' +
+  '(8-4-4-4-12 hexadecimal digits, the form the column reads back as, or the same 32 digits undashed) ' +
+  'can be bound to it.';
+
+/**
+ * Refuses a comparison comparand against a `RAW(16)` uuid column that is not
+ * uuid text (`INVALID_FILTER` / 400, through {@link withheldFilterError} with
+ * the subtree it was raised from), for the comparison operators — the ones
+ * whose comparand is bound to the column ({@link ORACLE_EMPTY_STRING_SENSITIVE_OPERATORS}).
+ * A list comparand is judged member by member; a `null` member is left to the
+ * operator's own null handling.
+ *
+ * The pattern operators (`$contains`, `$like`, …) are not judged: their
+ * comparand is a text pattern, never bound to the column as a value, and they
+ * compile exactly as before.
+ */
+export function assertOracleUuidComparand(
+  operator: string,
+  field: string,
+  value: unknown,
+  subtree?: unknown,
+): void {
+  if (!ORACLE_EMPTY_STRING_SENSITIVE_OPERATORS.has(operator)) return;
+  const members = Array.isArray(value) ? value : [value];
+  if (members.every((m) => m === null || m === undefined || isOracleUuidText(m))) return;
+  throw withheldFilterError(
+    `This filter compares a uuid column with a value that ${NOT_A_UUID} The field is withheld from the message; ` +
+      'the full diagnostic is in the server log.',
+    `Field "${field}" is compared with a value that ${NOT_A_UUID}`,
+    subtree,
+  );
 }
 
 /**
