@@ -1106,6 +1106,8 @@ describe('the ledger-sourced population and its baseline bite', () => {
       'rest-family:rest-route-ledger.ts:metadata',
       // [#22430] classified by `anonymous-deny-api-description`.
       'rest-family:rest-route-ledger.ts:openapi',
+      // [#30237] classified by `anonymous-deny-recycle-bin`: it arrived classified.
+      'rest-family:rest-route-ledger.ts:recycle-bin',
       // [#30205] classified by `anonymous-deny-user-work`: it arrived classified.
       'rest-family:rest-route-ledger.ts:user-work',
     ]);

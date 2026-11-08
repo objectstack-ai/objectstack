@@ -52,6 +52,7 @@
 // authz-row: anonymous-deny-analytics
 // authz-row: anonymous-deny-api-description
 // authz-row: anonymous-deny-user-work
+// authz-row: anonymous-deny-recycle-bin
 // authz-row: anonymous-deny-i18n
 //
 // ── Why the translation faces are here (#22432) ────────────────────────────
@@ -199,6 +200,25 @@ const USER_WORK_FACES: readonly UserWorkFace[] = [
     face: 'the assigned-work hand-over', method: 'POST', path: '/security/users/usr_nobody_30205/assigned-work/transfer',
     body: { toUserId: 'usr_nobody_either_30205' },
   },
+];
+
+// ── #30237 — the recycle bin's doors (@objectstack/rest, ADR-0148)
+//
+// All four handlers open with the floor after resolving the caller, ahead of
+// the query-parameter checks, the object's exposure gate and any engine call.
+// The entry id is one no entry holds, so the admin controls restore and purge
+// nothing: each reaches the engine and is answered its own not-found.
+interface RecycleBinFace {
+  readonly face: string;
+  readonly method: 'GET' | 'POST' | 'DELETE';
+  readonly path: string;
+}
+const RECYCLE_BIN_PATH = '/data/showcase_task/recycle-bin';
+const RECYCLE_BIN_FACES: readonly RecycleBinFace[] = [
+  { face: 'the recycle-bin listing', method: 'GET', path: RECYCLE_BIN_PATH },
+  { face: 'the recycle-bin restore', method: 'POST', path: `${RECYCLE_BIN_PATH}/rb_nobody_30237/restore` },
+  { face: 'the recycle-bin purge', method: 'DELETE', path: `${RECYCLE_BIN_PATH}/rb_nobody_30237` },
+  { face: 'the recycle-bin empty', method: 'DELETE', path: RECYCLE_BIN_PATH },
 ];
 
 // ── #22432 — the translation faces (dispatcher-mounted; runtime domains/i18n.ts)
@@ -892,6 +912,47 @@ describe('showcase: anonymous posture is uniform across surfaces (#2567)', () =>
     expect(body.error?.details?.fields?.[0], 'the refusal names the unknown target').toMatchObject({
       field: 'toUserId', code: 'reference_not_found',
     });
+  });
+
+  // ── the recycle bin's doors (@objectstack/rest) — #30237 ────────────────
+  //
+  // The refusal is each handler's first act after resolving the caller, so the
+  // anonymous body is the REST seam's shared one, whole, and nothing is listed,
+  // restored or removed. The admin controls are the teeth: with a session the
+  // listing is served 200 and the restore and purge reach the engine's own
+  // not-found (404), so the doors are mounted on this boot and the 401 is the
+  // floor's answer. The empty door shares the listing's path and handler
+  // registration; its anonymous refusal is driven, and its admin control
+  // removes nothing a test here put in the bin.
+  it.each(RECYCLE_BIN_FACES)('an anonymous caller on $face is denied (401) and served nothing', async (face) => {
+    const r = await anon(face.method, face.path);
+    expect(r.status, `${face.face}: an anonymous caller must be refused by the floor`).toBe(ANONYMOUS_DENY_STATUS);
+    const body = await r.json();
+    expect(body, `${face.face}: the refusal is the REST seam's shared body, whole`).toEqual(ANONYMOUS_DENY_BODY);
+    expect(body, `${face.face}: nothing of the bin rides on the refusal`).not.toHaveProperty('data');
+  });
+
+  it('the admin is served the recycle-bin listing (200) — the control', async () => {
+    const r = await stack.apiAs(adminToken, 'GET', RECYCLE_BIN_FACES[0].path);
+    expect(r.status, 'an authenticated manager of the bin must clear the floor and be served the page').toBe(200);
+    const body = await r.json();
+    expect(body.data?.object, 'the served page is the addressed object\'s').toBe('showcase_task');
+    expect(Array.isArray(body.data?.entries), 'the page carries its entries').toBe(true);
+  });
+
+  it.each([RECYCLE_BIN_FACES[1], RECYCLE_BIN_FACES[2]])('the admin reaches $face\'s own not-found (404), and nothing changes — the control', async (face) => {
+    const r = await stack.apiAs(adminToken, face.method, face.path);
+    expect(r.status, `${face.face}: an authenticated admin must clear the floor and meet the engine's not-found`).toBe(404);
+    const body = await r.json();
+    expect(body.error?.code, `${face.face}: the refusal names no entry`).toBe('RECORD_NOT_FOUND');
+  });
+
+  it('the admin empties the bin of an object with nothing in it (200) — the control', async () => {
+    const r = await stack.apiAs(adminToken, 'DELETE', RECYCLE_BIN_FACES[3].path);
+    expect(r.status, 'an authenticated manager of the bin must clear the floor and be answered').toBe(200);
+    const body = await r.json();
+    expect(body.data, 'the answer names the object and how many entries went').toMatchObject({ object: 'showcase_task' });
+    expect(typeof body.data?.removed).toBe('number');
   });
 
   // ── the translation faces (dispatcher-mounted; runtime domains/i18n.ts) — #22432
