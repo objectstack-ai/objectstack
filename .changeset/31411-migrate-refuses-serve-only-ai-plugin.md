@@ -7,6 +7,8 @@ feat(cli)!: `os migrate plan` / `apply` refuse a config whose AI plugin only `os
 Clause-②: no (narrowing)
 Metadata-protocol: none
 
+<!-- adr-0087: not-required (no-migration-prescription) No key of any schema or export is added, removed, renamed or re-shaped. What moves is the migrate commands' answer to a config that relies on serve's AI auto-inject: they refuse it before planning, and the remedy is one line in the config, not a rewrite of anything at rest. -->
+
 `os serve` auto-injects the AI service plugin (`@objectstack/service-ai`) when the stack's `requires` names `ai` or `ai-studio`, or the app's own `package.json` declares `@objectstack/service-ai` or `@objectstack/service-ai-studio`, unless the `ai` tier is off. That rule now lives in one exported predicate (`resolveAiServiceLoad`, with `mountsAiServicePlugin` for "the config already mounts it"). `serve` decides what it loads with it, unchanged for every input, and the composition the migrate commands share (`os migrate plan`, `os migrate apply`, the organization-ownership ceremony's `--apply`, and `os migrate unmapped-columns`) refuses with it.
 
 **BREAKING** the migrate commands refuse a config they used to plan without the AI tables.
