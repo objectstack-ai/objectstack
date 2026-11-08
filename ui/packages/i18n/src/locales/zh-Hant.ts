@@ -594,6 +594,7 @@ const zhHant = {
       noSavedTemplates: '暫無儲存的模板',
       noneOption: '— 無 —',
       saveCurrent: '儲存當前對映',
+      saveCurrentNeedsMapping: '請至少對映一列，才能儲存為模板。',
       templateName: '模板名稱',
       save: '儲存',
       deleteTemplate: '刪除模板',

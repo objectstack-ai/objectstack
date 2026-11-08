@@ -719,6 +719,7 @@ const fr = {
       noSavedTemplates: "Aucun modèle enregistré",
       noneOption: "— Aucun —",
       saveCurrent: "Enregistrer le modèle actuel",
+      saveCurrentNeedsMapping: "Faites correspondre au moins une colonne pour enregistrer un modèle.",
       templateName: "Nom du modèle",
       save: "Enregistrer",
       deleteTemplate: "Supprimer le modèle",
