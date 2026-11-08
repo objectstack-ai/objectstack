@@ -393,12 +393,14 @@ export function readRadius({ rel, source, packages, prefix, walker }) {
   const known = new Set([...BOUNDED_FS_READS, ...FS_NON_READS]);
   const importRe = /\bimport\s+([^'";]*?)\s+from\s+['"](?:node:)?fs['"]\s*;?/g;
   const bindings = [];
+  const named = [];
   for (const m of source.matchAll(importRe)) {
     const clause = m[1].trim();
-    const named = clause.match(/\{([^}]*)\}/);
-    if (named) {
-      for (const part of named[1].split(',').map((s) => s.trim()).filter(Boolean)) {
+    const braces = clause.match(/\{([^}]*)\}/);
+    if (braces) {
+      for (const part of braces[1].split(',').map((s) => s.trim()).filter(Boolean)) {
         if (/\bas\b/.test(part) || !known.has(part.replace(/^type\s+/, ''))) return null;
+        if (!part.startsWith('type ')) named.push(part);
       }
     }
     const head = clause.replace(/\{[^}]*\}/, '').replace(/,/g, ' ').trim();
@@ -411,6 +413,13 @@ export function readRadius({ rel, source, packages, prefix, walker }) {
   for (const b of bindings) {
     const uses = [...body.matchAll(new RegExp(`(?<![\\w$.])${b.replace(/\$/g, '\\$')}(?![\\w$])(\\.([\\w$]+)\\s*\\()?`, 'g'))];
     if (uses.some((u) => !u[2] || !known.has(u[2]))) return null;
+  }
+  // A named binding passed or re-bound (`[x].map(readFileSync)`,
+  // `const r = readFileSync`) reads where no call is spelled, so every use
+  // must be a direct call, as the default binding's already must.
+  for (const n of named) {
+    const uses = [...body.matchAll(new RegExp(`(?<![\\w$.])${n.replace(/\$/g, '\\$')}(?![\\w$])(\\s*\\()?`, 'g'))];
+    if (uses.some((u) => !u[1])) return null;
   }
 
   const hereDepth = path.posix.relative(owner.dir, path.posix.dirname(rel)).split('/').filter(Boolean).length;

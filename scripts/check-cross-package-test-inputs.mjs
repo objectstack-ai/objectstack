@@ -3366,6 +3366,46 @@ function selfTest() {
         reads[1].info === null,
     );
   }
+  {
+    // The UI test selector attributes a disk-reading test through `reads`
+    // (ui/scripts/select-affected-tests.mjs, `readRadius`). CI's ui filter does
+    // not list this file, so a walker-only edit would skip Test UI; this case
+    // drives the selector's own reading here instead (objectstack#31520). A
+    // child process does the import: the selector imports this module back.
+    const selector = pathToFileURL(join(REPO_ROOT, 'ui', 'scripts', 'select-affected-tests.mjs')).href;
+    const probe = spawnSync(
+      process.execPath,
+      [
+        '--input-type=module',
+        '-e',
+        `const S = await import(${JSON.stringify(selector)});\n` +
+          "const packages = [{ name: '@fx/own', dir: 'packages/own' }, { name: '@fx/other', dir: 'packages/other' }];\n" +
+          "const seed = \"import { readFileSync } from 'node:fs';\\nimport { dirname, join } from 'node:path';\\n" +
+          "import { fileURLToPath } from 'node:url';\\nconst HERE = dirname(fileURLToPath(import.meta.url));\\n\";\n" +
+          "const at = (read) => { const r = S.readRadius({ rel: 'packages/own/src/x.test.ts', source: `${seed}${read};\\n`, " +
+          "packages, prefix: '', walker: S.PATH_WALKER }); return r === null ? null : [...r]; };\n" +
+          'console.log(JSON.stringify({ walker: typeof S.PATH_WALKER, ' +
+          "own: at(\"readFileSync(join(HERE, '..', 'fixtures', 'x.json'))\"), " +
+          "other: at(\"readFileSync(join(HERE, '..', '..', 'other', 'src', 'index.ts'))\"), " +
+          "unread: at('readFileSync(someVariable)') }));",
+      ],
+      { encoding: 'utf8' },
+    );
+    let got = null;
+    try {
+      got = JSON.parse((probe.stdout || '').trim().split('\n').pop());
+    } catch {
+      got = null;
+    }
+    ok(
+      "the UI test selector's readRadius, driven through this walker, bounds an own and a cross-package read and refuses an unread one (objectstack#31520)",
+      probe.status === 0 &&
+        got?.walker === 'function' &&
+        JSON.stringify(got.own) === '["packages/own"]' &&
+        JSON.stringify(got.other) === '["packages/other"]' &&
+        got.unread === null,
+    );
+  }
   ok(
     'reconstructs an ascent-relative literal (metadata-protocol -> the durability gate)',
     named(

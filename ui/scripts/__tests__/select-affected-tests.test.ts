@@ -124,6 +124,10 @@ function workspace() {
     'packages/c/src/var-read.test.ts': reader('const files = [HERE];\nfor (const f of files) readFileSync(f)'),
     'packages/c/src/aliased-read.test.ts': "import { readFileSync as rf } from 'node:fs';\nrf(new URL('./x.json', import.meta.url));\n",
     'packages/c/src/ts-read.test.ts': reader("readFileSync(join(HERE, 'x.json'), 'utf8')", "import ts from 'typescript';\n"),
+    'packages/c/src/passed-read.test.ts': reader("readFileSync(join(HERE, 'x.json'), 'utf8');\n[HERE].map(readFileSync)"),
+    'packages/c/src/rebound-read.test.ts': reader(
+      "readFileSync(join(HERE, 'x.json'), 'utf8');\nconst r = readFileSync;\nr('/etc/hosts')",
+    ),
     'packages/c/src/escapes.test.ts': "import '../../../scripts/helper.mjs';\n",
     'packages/heavy-user/package.json': manifest('@fx/heavy-user'),
     'packages/heavy-user/src/heavy.test.tsx': 'export {};\n',
@@ -268,6 +272,12 @@ describe('select-affected-tests — bounded disk readers (objectstack#31520)', (
 
   it('keeps a test whose read goes through process.cwd(), an unnamed argument, an aliased import or a disk-reading library', () => {
     for (const file of ['cwd-read', 'var-read', 'aliased-read', 'ts-read']) {
+      expect(why.get(`packages/c/src/${file}.test.ts`), file).toBe('reads the disk or spawns a process');
+    }
+  });
+
+  it('keeps a test that passes or re-binds a named fs read, even beside a bounded read', () => {
+    for (const file of ['passed-read', 'rebound-read']) {
       expect(why.get(`packages/c/src/${file}.test.ts`), file).toBe('reads the disk or spawns a process');
     }
   });
