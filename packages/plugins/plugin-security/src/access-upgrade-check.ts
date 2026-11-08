@@ -46,7 +46,8 @@
  * happen is `stopped`, never "no finding".
  */
 
-import { createSecurityCatalogReader, type SecurityCatalogEntry, type SecurityCatalogReader } from '@objectstack/core';
+import { type SecurityCatalogEntry, type SecurityCatalogReader } from '@objectstack/core';
+import { createPackageScopedSecurityCatalogReader } from './security-catalog-package-scope.js';
 import {
   accessUpgradeDedupKey,
   collectAccessUpgradeFindings,
@@ -137,10 +138,10 @@ function projectCatalog(base: SecurityCatalogReader, body: unknown, packageId: s
       const kept = (await base.list(type)).filter((e) => e.packageId !== packageId && !names.has(e.name));
       return [...kept, ...incoming];
     },
-    async resolve(type, name) {
+    async resolve(type, name, scope) {
       const incoming = incomingEntries(body, type, packageId).find((e) => e.name === name);
       if (incoming) return incoming;
-      const held = await base.resolve(type, name);
+      const held = await base.resolve(type, name, scope);
       return held && held.packageId === packageId ? undefined : held;
     },
   };
@@ -253,7 +254,7 @@ export function createAccessUpgradeCheck(sources: AccessUpgradeCheckSources): Ac
       }
       let catalog: SecurityCatalogReader;
       try {
-        catalog = createSecurityCatalogReader({ registry: engine.registry as never, metadata: metadata as never });
+        catalog = createPackageScopedSecurityCatalogReader(engine.registry, metadata);
       } catch (e) {
         return { outcome: 'stopped', stop: 'catalog-unreadable', reading: 'the security catalog', error: (e as Error)?.message };
       }
