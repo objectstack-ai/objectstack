@@ -169,6 +169,11 @@ interface MiddlewareSeamQl {
   find?: unknown;
 }
 
+// [#30237] The recycle bin's `purge` and `restore` are writes too, and are
+// deliberately NOT listed: the bin never takes a platform object (`sys_`,
+// `cloud_`, `ai_`), so no watched grant object is ever restored, purged or
+// deleted for good (a permanent delete of one is refused `400`). A watched
+// object leaving the platform namespace would need them here.
 const WRITE_OPERATIONS = new Set(['insert', 'update', 'delete']);
 
 /**
