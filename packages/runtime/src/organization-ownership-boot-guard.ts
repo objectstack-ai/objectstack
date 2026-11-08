@@ -127,15 +127,55 @@ const ORG = 'organization_id';
  * the ceremony composes the security plugin only with it. A boot on a
  * database the ceremony would not find by its own default (#31488,
  * {@link OrganizationOwnershipBootGuardOptions.databaseUrl}) names it with
- * `--database-url`, so the commands plan the database that was refused.
+ * `--database-url`, so the commands plan the database that was refused. A
+ * driver or an auth token the boot was handed by a flag (#31547) is set in
+ * front of the command as the variable the ceremony reads it from, the token
+ * by reference only ({@link connectionAssignments}).
  */
 function ceremonyCommand(opts: OrganizationOwnershipBootGuardOptions): string {
   const database = opts.databaseUrl ? ` --database-url ${databaseWord(opts.databaseUrl)}` : '';
-  if (opts.dev) return `os migrate organization-ownership --dev${database}`;
+  const connection = connectionAssignments(opts);
+  if (opts.dev) return `${connection}os migrate organization-ownership --dev${database}`;
   if (opts.authSecretFile) {
-    return `OS_AUTH_SECRET="$(cat ${shellWord(opts.authSecretFile)})" os migrate organization-ownership${database}`;
+    return `${connection}OS_AUTH_SECRET="$(cat ${shellWord(opts.authSecretFile)})" os migrate organization-ownership${database}`;
   }
-  return `os migrate organization-ownership${database}`;
+  return `${connection}os migrate organization-ownership${database}`;
+}
+
+/**
+ * What a shell running a printed command without `OS_DATABASE_AUTH_TOKEN`
+ * says, and stops at, when the boot's libSQL auth token came from
+ * `--database-auth-token` (#31547): the commands read the token from that
+ * variable rather than print it, and an unset variable must not let the
+ * ceremony open the database with no token or another one.
+ */
+const AUTH_TOKEN_UNSET = 'export OS_DATABASE_AUTH_TOKEN as the database auth token this server was started with';
+
+/**
+ * The variable assignments in front of the ceremony command, each followed by
+ * a space: `OS_DATABASE_DRIVER=KIND` when `--database-driver` chose this
+ * boot's driver, and `OS_DATABASE_AUTH_TOKEN="${OS_DATABASE_AUTH_TOKEN:?…}"`
+ * when `--database-auth-token` supplied its token. Those two variables are
+ * where the ceremony reads both (it has no flag for either), and the
+ * operator's shell holds neither value: the flags put them in the server's
+ * environment only. The token itself never reaches the guard, so it can never
+ * be printed; the assignment re-exports the shell's own variable, and stops
+ * the shell when it is unset or empty.
+ */
+function connectionAssignments(opts: OrganizationOwnershipBootGuardOptions): string {
+  let words = '';
+  if (opts.databaseDriver) words += `OS_DATABASE_DRIVER=${shellWord(opts.databaseDriver)} `;
+  if (opts.databaseAuthTokenFromFlag) words += `OS_DATABASE_AUTH_TOKEN="\${OS_DATABASE_AUTH_TOKEN:?${AUTH_TOKEN_UNSET}}" `;
+  return words;
+}
+
+/** Why the named commands read the database auth token from `OS_DATABASE_AUTH_TOKEN` instead of naming it. */
+function authTokenNote(opts: OrganizationOwnershipBootGuardOptions): string {
+  if (!opts.databaseAuthTokenFromFlag) return '';
+  return (
+    ' The database auth token this server was started with (--database-auth-token) is not printed: export it as ' +
+    'OS_DATABASE_AUTH_TOKEN in the shell that runs both commands, which read it from there and stop if it is unset.'
+  );
 }
 
 /**
@@ -221,6 +261,23 @@ export interface OrganizationOwnershipBootGuardOptions {
    * ceremony's own default reaches this database — the commands name none.
    */
   databaseUrl?: string;
+  /**
+   * The driver `--database-driver` chose for this boot (#31547). The ceremony
+   * has no such flag and reads `OS_DATABASE_DRIVER`, which the operator's
+   * shell does not hold, so both named commands set it in front
+   * (`OS_DATABASE_DRIVER=KIND os migrate organization-ownership …`) and open
+   * the database with the driver this boot opened it with. Unset, the
+   * commands set none.
+   */
+  databaseDriver?: string;
+  /**
+   * Whether this boot's libSQL auth token came from `--database-auth-token`
+   * (#31547). The value never reaches the guard: both named commands set
+   * `OS_DATABASE_AUTH_TOKEN` from the operator's shell variable of that name
+   * and stop the shell when it is unset, so the token is never printed and a
+   * forgotten export never opens the database without it.
+   */
+  databaseAuthTokenFromFlag?: boolean;
 }
 
 export class OrganizationOwnershipBootRefusal extends Error {
@@ -366,7 +423,7 @@ export function organizationOwnershipRefusalMessage(
   const ceremony = ceremonyCommand(opts);
   const run =
     `Run '${ceremony} --out PLAN' to write and review its plan, take a backup, then run ` +
-    `'${ceremony} --apply --plan-file PLAN --backup-taken', and start again.${secretNote(opts)}${databaseNote(opts)}`;
+    `'${ceremony} --apply --plan-file PLAN --backup-taken', and start again.${secretNote(opts)}${databaseNote(opts)}${authTokenNote(opts)}`;
   const columns = tables.length > 0
     ? ` ${tables.join(', ')} still carr${tables.length === 1 ? 'ies' : 'y'} a physical organization_id column its ` +
       'object no longer declares.'
@@ -398,7 +455,7 @@ export function organizationOwnershipRefusalMessage(
     `'${ORGANIZATION_OWNERSHIP_MIGRATION_ID}') is not verified, so the post-check still found rows the ceremony has ` +
     `not carried.${columns} The server refuses to start rather than serve rows of an organization-owned object with ` +
     `no organization. Resolve what the apply report names, then run '${ceremony} --out PLAN' again, review it, run ` +
-    `'${ceremony} --apply --plan-file PLAN --backup-taken', and start again.${secretNote(opts)}${databaseNote(opts)}`
+    `'${ceremony} --apply --plan-file PLAN --backup-taken', and start again.${secretNote(opts)}${databaseNote(opts)}${authTokenNote(opts)}`
   );
 }
 
