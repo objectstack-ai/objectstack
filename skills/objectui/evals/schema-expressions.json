@@ -13,8 +13,7 @@
         ],
         "must_not_contain": [
           "top-level value works",
-          "props.value",
-          "props.label"
+          "\"props\": {"
         ]
       }
     },
@@ -31,7 +30,7 @@
           "${"
         ],
         "must_not_contain": [
-          "props.label"
+          "\"props\": {"
         ]
       }
     },

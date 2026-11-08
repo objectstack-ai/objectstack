@@ -272,6 +272,27 @@ const DOORS: readonly Door[] = [
       Object.defineProperty(driver, 'dialectName', { get: () => 'unknown', configurable: true });
     },
   },
+  // ── #31328: Oracle as a federation dialect ─────────────────────────────────
+  {
+    builder: 'jsonMembershipUnsupportedOnOracleError',
+    where: () => ({ [JSON_COL]: { $contains: SECRET } }),
+    secrets: [JSON_COL],
+    klass: 'element membership in a stored JSON array is not modelled for Oracle',
+    // The fixture is SQLite; the refusal reads the dialect the driver answers.
+    setup: (driver) => {
+      Object.defineProperty(driver, 'isOracle', { get: () => true, configurable: true });
+      Object.defineProperty(driver, 'dialectName', { get: () => 'oracle', configurable: true });
+    },
+  },
+  {
+    builder: 'assertOracleComparandNotEmptyString',
+    where: () => ({ [POLICY_COL]: '' }),
+    secrets: [POLICY_COL],
+    klass: 'with an empty-string comparand on an Oracle table',
+    setup: (driver) => {
+      Object.defineProperty(driver, 'isOracle', { get: () => true, configurable: true });
+    },
+  },
 ];
 
 // ── Half 1: the enumeration ───────────────────────────────────────────────────

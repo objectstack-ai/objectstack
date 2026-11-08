@@ -291,3 +291,95 @@ describe('a card shows its owner\'s avatar when the host names the owner field (
     expect(document.querySelector('[data-kanban-card-owner]')).toBeNull();
   });
 });
+
+/**
+ * objectstack#30431 — a lane count is a claim about the data, so no header
+ * states one before the records settle.
+ *
+ * Measured on cloud's two-plane stack (control plane + runtime): a board opened
+ * right after publish, under a list view whose own count had already answered,
+ * showed footer 「12 条记录」 over lanes reading 0 / 0 / 0 / 0 for as long as
+ * its lane queries were in flight, then 2 / 4 / 2 / 3. Here every query the
+ * board sends is held open until the test lets it go, which is the in-flight
+ * window the stack showed.
+ */
+describe('a board states no lane count while its lane queries are in flight (objectstack#30431)', () => {
+  /** The adapter above, with every `find` held until `release()`. */
+  function heldAdapter(rows: Row[]) {
+    const adapter = makeAdapter(rows);
+    const answer = adapter.find;
+    let release!: () => void;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    adapter.find = vi.fn(async (object: string, params: any) => {
+      await gate;
+      return answer(object, params);
+    });
+    return { adapter, release: () => act(async () => release()) };
+  }
+
+  const pendingMarker = (columnId: string) =>
+    document.querySelector(`#kanban-col-${columnId}`)?.parentElement?.querySelector('[data-kanban-lane-count-pending]') ?? null;
+
+  it('a lane whose query has not answered shows no count, and its lane says it is busy', async () => {
+    const { adapter, release } = heldAdapter([...deals('open', 2), ...deals('won', 4)]);
+    mount(adapter);
+
+    // RIG SELF-CHECK — every lane's query has left and none has answered, and
+    // the lanes are on screen: the board is not withheld, only the number.
+    await waitFor(() => expect(queries(adapter)).toHaveLength(4));
+    await waitFor(() => expect(lane('Open')).toBeInTheDocument());
+    expect(screen.queryAllByRole('listitem')).toHaveLength(0);
+
+    for (const [id, title] of [['open', 'Open'], ['won', 'Won'], ['lost', 'Lost']] as const) {
+      // RED before the fix: '0' on every lane.
+      expect(laneCountText(id)).toBe('');
+      expect(pendingMarker(id)).not.toBeNull();
+      expect(lane(title)).toHaveAttribute('aria-busy', 'true');
+    }
+
+    await release();
+
+    await waitFor(() => expect(laneCards('Won')).toHaveLength(4));
+    expect(laneCountText('open')).toBe('2');
+    expect(laneCountText('won')).toBe('4');
+    expect(pendingMarker('open')).toBeNull();
+    expect(lane('Open')).not.toHaveAttribute('aria-busy');
+  });
+
+  it('REVERSE: a lane that really holds nothing still reads 0 once its query answers', async () => {
+    const { adapter, release } = heldAdapter([...deals('open', 2), ...deals('won', 4)]);
+    mount(adapter);
+    await waitFor(() => expect(queries(adapter)).toHaveLength(4));
+    await release();
+
+    await waitFor(() => expect(laneCards('Open')).toHaveLength(2));
+    // Withholding the count forever would also pass the test above.
+    expect(laneCountText('lost')).toBe('0');
+    expect(pendingMarker('lost')).toBeNull();
+    expect(lane('Lost')).not.toHaveAttribute('aria-busy');
+  });
+
+  it('the swimlane layout\'s column titles wait the same way', async () => {
+    const { adapter, release } = heldAdapter([...deals('open', 2), ...deals('won', 1)]);
+    mount(adapter, {}, { swimlaneField: 'region' });
+
+    await waitFor(() => expect(queries(adapter)).toHaveLength(1));
+    const titleRow = await waitFor(() => {
+      const row = document.querySelector('[aria-label="Kanban board with swimlanes"] [data-swimlane-scroll-row]');
+      expect(row).not.toBeNull();
+      return row as HTMLElement;
+    });
+    // RED before the fix: '(0)' under every column title.
+    expect(titleRow.textContent).not.toMatch(/\(\d+\+?\)/);
+    expect(titleRow.querySelectorAll('[data-kanban-lane-count-pending]')).toHaveLength(3);
+
+    await release();
+
+    await waitFor(() => expect(titleRow.textContent).toContain('(2)'));
+    expect(titleRow.textContent).toContain('(1)');
+    expect(titleRow.textContent).toContain('(0)');
+    expect(titleRow.querySelectorAll('[data-kanban-lane-count-pending]')).toHaveLength(0);
+  });
+});

@@ -146,7 +146,7 @@ import { isConversationZh } from './conversationLanguage.js';
 import { resolveOutboundAgentText, type OutboundAgentTextKey } from './outboundAgentText.js';
 import { resolveApiBase } from './resolveApiBase.js';
 import { AiUnavailable } from './AiUnavailable.js';
-import { recordFormPrefillQuery } from './recordFormPrefill.js';
+import { recordWriteFormTarget } from '../../utils/recordFormAiDraft.js';
 
 /**
  * The app segment a record of `objectName` lives under: the object's owning
@@ -1747,9 +1747,11 @@ export function ChatPane({
   );
 
   // cloud#3565 — 打开完整表单 on a record-write card. A create opens the New
-  // form with the card's values through the query-string prefill
-  // `RecordFormPage` already reads for related-list "+ New" (one `field=value`
-  // pair per card field; the form's own defaults fill the rest). An update
+  // form with the card's values in the ROUTER STATE of this navigation, never
+  // the query string: a chat draft carries contact details, and a URL is
+  // copied, shared and logged (objectstack#28104, `recordFormAiDraft.ts`).
+  // The form marks each of those fields 「AI 建议」 until the person edits
+  // it, and opens unsaved; the form's own defaults fill the rest. An update
   // opens the record's edit form: the card has shown old → new, and the form
   // opens on the stored record. The card cancelled the pending write before
   // calling this, so a record saved here is never written a second time.
@@ -1760,14 +1762,8 @@ export function ChatPane({
       recordId?: string;
       fields: Array<{ name: string; value: unknown }>;
     }) => {
-      const app = await appOfObject(write.objectName);
-      const base = `/apps/${encodeURIComponent(app)}/${encodeURIComponent(write.objectName)}`;
-      if (write.operation === 'update' && write.recordId) {
-        navigate(`${base}/record/${encodeURIComponent(write.recordId)}/edit`);
-        return;
-      }
-      const query = recordFormPrefillQuery(write.fields);
-      navigate(`${base}/new${query ? `?${query}` : ''}`);
+      const target = recordWriteFormTarget(write, await appOfObject(write.objectName));
+      navigate(target.to, target.state ? { state: target.state } : undefined);
     },
     [navigate],
   );

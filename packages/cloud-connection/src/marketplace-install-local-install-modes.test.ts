@@ -27,7 +27,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 // The runtime binder the door's step 1d loads lazily — paid here, at module
@@ -37,6 +37,7 @@ import { MarketplaceInstallLocalPlugin } from './marketplace-install-local-plugi
 import { declareInstallerPlatformOwner, installerAuthService, withInstallerGrants } from './install-local-principal.fixtures.js';
 import { LocalManifestSource } from './local-manifest-source.js';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 
 const ROUTE = '/api/v1/marketplace/install-local';
 const INSTALLER = 'usr_installer';
@@ -624,5 +625,518 @@ describe('install-local — Q6 after a RENAMED copy: the managed install is admi
         expect(res.payload.error.details).toEqual({ namespace: 'crm', base: 'com.example.crm-copy' });
         expect(h.register).not.toHaveBeenCalled();
         expect(h.ledgerHas('com.example.crm')).toBe(false);
+    });
+});
+
+describe('install-local — an unmanaged copy\'s sample data, asked for with `seedSampleData` (#30808)', () => {
+    type Row = Record<string, unknown> & { id: string };
+    /** The audit/ownership columns every user-authored object carries. */
+    const OWNED = { owner_id: { type: 'lookup', reference: 'sys_user' }, created_by: { type: 'lookup', reference: 'sys_user' } };
+    /** Account ← contact, the contact naming its account by the account's natural key; listed child first. */
+    const seededCrm = (extra: Record<string, unknown> = {}) => crm({
+        installModes: BOTH,
+        objects: [
+            { name: 'crm_account', label: 'Account', fields: { name: { type: 'text' }, ...OWNED } },
+            { name: 'crm_contact', label: 'Contact', fields: { email: { type: 'text' }, account: { type: 'lookup', reference: 'crm_account' }, ...OWNED } },
+        ],
+        data: [
+            { object: 'crm_contact', externalId: 'email', records: [{ email: 'ada@acme.test', account: 'Acme' }] },
+            { object: 'crm_account', externalId: 'name', records: [{ name: 'Acme' }, { name: 'Globex' }] },
+        ],
+        ...extra,
+    });
+
+    /**
+     * The door over an in-memory data engine the REAL `SeedLoaderService`
+     * writes through, and a protocol double standing in for the import: it
+     * registers the copied objects, writes each dataset the door asks for as
+     * a `seed` item of the new base (the verb's own pins live in
+     * `@objectstack/metadata-protocol`'s `package-unmanaged-install.test.ts`),
+     * (a `sys_metadata` row of the base, as the store holds it), and serves
+     * each back through the by-name `getMetaItem`. `tables` outlives a mount,
+     * so a second mount is a restart over the same database. `packageRows`
+     * stands in for the `package` service's `sys_packages` rows (`get`), the
+     * import minting each new base's `created_at`; `packageStore: false`
+     * mounts a runtime with no `package` service. `storeFault(kind)` makes the
+     * next `get` meet a fault the way `service-package`'s does: an ordinary
+     * driver error (a lock timeout, a dropped connection) is caught, logged and
+     * answered `null`; only the seam-unreadable refusal escapes, as a 503.
+     */
+    function world(opts: { packageStore?: boolean } = {}) {
+        const tables: Record<string, Row[]> = {};
+        const objects = new Map<string, any>();
+        const packages = new Map<string, { manifest: Record<string, unknown> }>();
+        const packageRows = new Map<string, { version: string; created_at: string }>();
+        let stamp = 0;
+        let fault: 'ordinary' | 'seam' | undefined;
+        const seamRefusal = Object.assign(
+            new Error('The package store cannot answer: its query seam ran no SELECT.'), { code: 'SERVICE_UNAVAILABLE', status: 503 },
+        );
+        const packageGet = vi.fn(async (id: string, version = 'latest') => {
+            try {
+                if (fault !== undefined) {
+                    const kind = fault;
+                    fault = undefined;
+                    throw kind === 'seam' ? seamRefusal : new Error('SQLITE_BUSY: database is locked');
+                }
+                const row = packageRows.get(id);
+                if (!row || (version !== 'latest' && row.version !== version)) return null;
+                return { id, ...row };
+            } catch (err) {
+                if (err === seamRefusal) throw err;
+                return null;
+            }
+        });
+        const storeFault = (kind: 'ordinary' | 'seam') => { fault = kind; };
+        const writes: string[] = [];
+        let nextId = 0;
+        const known = (object: string) => {
+            if (!objects.has(object)) throw new Error(`Object '${object}' not found`);
+            return (tables[object] ??= []);
+        };
+        // The platform tables the loader probes (`sys_organization`, the landed-key
+        // ledger) hold no row here, `sys_metadata` holds the seed receipt; every
+        // other unknown object is refused.
+        const readable = (object: string) => (object.startsWith('sys_') && !objects.has(object) ? (tables[object] ?? []) : known(object));
+        const seedRows = () => (tables.sys_metadata ?? []).filter((row) => row.type === 'seed');
+        const matches = (row: Row, where: Record<string, unknown>) => Object.entries(where).every(([k, v]) => {
+            if (k.startsWith('$')) throw new Error(`engine double: combinator '${k}' is not implemented`);
+            if (v === null) return row[k] == null;
+            if (v && typeof v === 'object') {
+                const ops = Object.keys(v);
+                if (ops.length !== 1 || ops[0] !== '$in') throw new Error(`engine double: operator(s) ${ops.join(', ')} not implemented`);
+                return ((v as { $in: unknown[] }).$in).includes(row[k]);
+            }
+            return row[k] === v;
+        });
+        const engine: any = {
+            syncSchemas: vi.fn(async () => undefined),
+            manifests: new Map(),
+            getSchema: (name: string) => objects.get(name),
+            registry: {
+                getAllPackages: () => [],
+                getNamespaceOwners: () => [],
+                getPackage: (id: string) => packages.get(id),
+                getObject: (name: string) => objects.get(name),
+            },
+            async find(object: string, query?: any): Promise<unknown[]> {
+                const rows = readable(object).filter((row) => matches(row, query?.where ?? {}));
+                return (typeof query?.limit === 'number' ? rows.slice(0, query.limit) : rows).map((row) => ({ ...row }));
+            },
+            // One record, or the batch the loader inserts a dataset in.
+            async insert(object: string, record: Record<string, unknown> | Record<string, unknown>[]): Promise<Row | Row[]> {
+                const one = (r: Record<string, unknown>) => {
+                    const row = { ...r, id: `r${++nextId}` } as Row;
+                    known(object).push(row);
+                    writes.push(`insert ${object}`);
+                    return { ...row };
+                };
+                return Array.isArray(record) ? record.map(one) : one(record);
+            },
+            async update(object: string, data: Record<string, unknown>, options: any) {
+                assertEngineUpdateDispatch(data, options);
+                let n = 0;
+                for (const row of known(object)) {
+                    if (!matches(row, options?.where ?? {})) continue;
+                    Object.assign(row, data);
+                    n += 1;
+                }
+                return n;
+            },
+            async delete(object: string, options?: any): Promise<boolean> {
+                assertEngineDeleteDispatch(options);
+                const id = String(options?.where?.id ?? '');
+                const table = known(object);
+                const at = table.findIndex((r) => r.id === id);
+                if (at < 0) return false;
+                table.splice(at, 1);
+                writes.push(`delete ${object}`);
+                return true;
+            },
+        };
+        const importUnmanagedPackage = vi.fn(async (request: any) => {
+            const source = request.manifest;
+            const targetPackageId = `${source.id}-copy`;
+            if (packages.has(targetPackageId)) {
+                throw Object.assign(new Error(`Package '${targetPackageId}' already exists.`), {
+                    code: 'RESOURCE_CONFLICT', status: 409, details: { targetPackageId },
+                });
+            }
+            packages.set(targetPackageId, { manifest: { id: targetPackageId, namespace: source.namespace } });
+            packageRows.set(targetPackageId, { version: '1.0.0', created_at: `2026-11-08 07:00:${String(++stamp).padStart(2, '0')}` });
+            const copied: Array<{ type: string; name: string }> = [];
+            for (const o of source.objects ?? []) {
+                objects.set(o.name, o);
+                copied.push({ type: 'object', name: o.name });
+            }
+            if (request.seedData === true) {
+                for (const d of source.data ?? []) {
+                    const name = `${d.object}_seed`;
+                    (tables.sys_metadata ??= []).push({
+                        id: `m${++nextId}`, type: 'seed', name, package_id: targetPackageId, state: 'active', metadata: { ...d },
+                    } as Row);
+                    copied.push({ type: 'seed', name });
+                }
+            }
+            return { sourcePackageId: source.id, targetPackageId, namespace: source.namespace, copiedCount: copied.length, copied, strippedLocks: [] };
+        });
+        const cleanups = new Map<string, (args: { packageId: string }) => Promise<{ success: boolean; removed: number; error?: string }>>();
+        const getMetaItem = vi.fn(async ({ type, name, packageId }: { type: string; name: string; packageId?: string }) => {
+            const row: any = (tables.sys_metadata ?? []).find((r) => r.type === type && r.name === name && (!packageId || r.package_id === packageId));
+            if (!row) throw Object.assign(new Error(`${type} '${name}' not found`), { code: 'NOT_FOUND', status: 404 });
+            return { type, name, item: { ...row.metadata, _packageId: row.package_id }, lock: 'none', editable: true };
+        });
+
+        async function boot() {
+            const routes = new Map<string, Handler>();
+            const rawApp = {
+                get: (p: string, h: Handler) => routes.set(`GET ${p}`, h),
+                post: (p: string, h: Handler) => routes.set(`POST ${p}`, h),
+                delete: (p: string, h: Handler) => routes.set(`DELETE ${p}`, h),
+            };
+            const hooks = new Map<string, any>();
+            const register = vi.fn(async () => undefined);
+            const services: Record<string, any> = {
+                manifest: { register },
+                auth: installerAuthService(INSTALLER),
+                objectql: withInstallerGrants(engine, INSTALLER),
+                metadata: { getObject: async (name: string) => objects.get(name) },
+                protocol: {
+                    importUnmanagedPackage, getMetaItem,
+                    registerUninstallCleanup: (name: string, cleanup: any) => { cleanups.set(name, cleanup); },
+                },
+                ...(opts.packageStore === false ? {} : { package: { get: packageGet } }),
+            };
+            const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+            const ctx = {
+                hook: (e: string, h: any) => hooks.set(e, h),
+                getService: (name: string) => {
+                    if (name === 'http-server') return { getRawApp: () => rawApp };
+                    const svc = services[name];
+                    if (svc === undefined) throw new Error(`no ${name}`);
+                    return svc;
+                },
+                registerService: (name: string, svc: unknown) => { services[name] = svc; },
+                logger,
+            };
+            const plugin = new MarketplaceInstallLocalPlugin({ controlPlaneUrl: 'off', storageDir: dir });
+            await plugin.start(ctx as any);
+            await hooks.get('kernel:ready')?.();
+            register.mockClear();
+            const purgeC = (manifestId: string) => ({ ...makeC(undefined), req: { ...makeC(undefined).req, param: (k: string) => (k === 'manifestId' ? manifestId : undefined) } });
+            return {
+                install: (body: unknown) => routes.get(`POST ${ROUTE}`)!(makeC(body)),
+                purge: (manifestId: string) => routes.get(`POST ${ROUTE}/:manifestId/purge-sample-data`)!(purgeC(manifestId)),
+                register,
+                logger,
+            };
+        }
+        return { tables, writes, seedRows, packages, packageRows, packageGet, storeFault, importUnmanagedPackage, getMetaItem, cleanups, boot };
+    }
+
+    it('off by default: the import is not asked for the sample data, no row lands, and the answer says it was skipped', async () => {
+        const w = world();
+        const h = await w.boot();
+        const res = await h.install({ manifest: seededCrm(), installMode: 'unmanaged' });
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
+        expect(w.importUnmanagedPackage.mock.calls[0]![0]).not.toHaveProperty('seedData');
+        expect(res.payload.data.seeded).toEqual({
+            mode: 'skipped',
+            reason: 'an unmanaged install copies metadata, not data: the package\'s sample data was not loaded',
+        });
+        expect(w.seedRows()).toEqual([]);
+        expect(w.writes).toEqual([]);
+    });
+
+    it('asked for: the rows land from the stored seed items, owned by the installer, the lookup resolved in load order', async () => {
+        const w = world();
+        const h = await w.boot();
+        const res = await h.install({ manifest: seededCrm(), installMode: 'unmanaged', seedSampleData: true });
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
+        expect(w.importUnmanagedPackage.mock.calls[0]![0]).toMatchObject({ seedData: true, actor: INSTALLER });
+        expect(res.payload.data.seeded).toEqual({ mode: 'inline', inserted: 3, updated: 0, skipped: 0, errors: 0 });
+        const acme = w.tables.crm_account!.find((r) => r.name === 'Acme')!;
+        expect(w.tables.crm_account!.map((r) => r.name).sort()).toEqual(['Acme', 'Globex']);
+        // The contact's `account: 'Acme'` is the parent row's id: the account dataset loaded first.
+        expect(w.tables.crm_contact).toEqual([expect.objectContaining({ email: 'ada@acme.test', account: acme.id })]);
+        for (const row of [...w.tables.crm_account!, ...w.tables.crm_contact!]) {
+            expect({ owner_id: row.owner_id, created_by: row.created_by }).toEqual({ owner_id: INSTALLER, created_by: INSTALLER });
+        }
+        // Nothing is ledgered or registered under the package's id.
+        expect(h.register).not.toHaveBeenCalled();
+        expect(new LocalManifestSource(dir).read('com.example.crm').entry).toBeNull();
+    });
+
+    it('the purge of the copy\'s base deletes exactly the sample rows; a row the customer wrote in a seeded object stays', async () => {
+        const w = world();
+        const h = await w.boot();
+        await h.install({ manifest: seededCrm(), installMode: 'unmanaged', seedSampleData: true });
+        w.tables.crm_account!.push({ id: 'u1', name: 'Initech', owner_id: INSTALLER });
+        const res = await h.purge('com.example.crm-copy');
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
+        expect(res.payload).toEqual({
+            success: true,
+            data: { manifestId: 'com.example.crm-copy', deleted: 3, skipped: 0, errors: 0, withSampleData: false },
+        });
+        expect(w.tables.crm_account!.map((r) => r.id)).toEqual(['u1']);
+        expect(w.tables.crm_contact).toEqual([]);
+        // The receipt stays: a second purge finds nothing left to delete.
+        const again = await h.purge('com.example.crm-copy');
+        expect(again.payload.data).toMatchObject({ deleted: 0, skipped: 3, errors: 0 });
+    });
+
+    it('a restart after the copy, and after the purge, re-inserts nothing', async () => {
+        const w = world();
+        const first = await w.boot();
+        await first.install({ manifest: seededCrm(), installMode: 'unmanaged', seedSampleData: true });
+        const loaded = w.writes.length;
+        await w.boot();
+        expect(w.writes.length).toBe(loaded);
+        const third = await w.boot();
+        await third.purge('com.example.crm-copy');
+        const purged = w.writes.length;
+        await w.boot();
+        expect(w.writes.length).toBe(purged);
+        expect(w.tables.crm_account).toEqual([]);
+    });
+
+    it('a re-run is refused 409 by the import before anything is loaded again', async () => {
+        const w = world();
+        const h = await w.boot();
+        await h.install({ manifest: seededCrm(), installMode: 'unmanaged', seedSampleData: true });
+        const before = w.writes.length;
+        const res = await h.install({ manifest: seededCrm(), installMode: 'unmanaged', seedSampleData: true });
+        expect(res.status).toBe(409);
+        expect(res.payload.error.code).toBe('RESOURCE_CONFLICT');
+        expect(w.writes.length).toBe(before);
+    });
+
+    it('`seedSampleData` that is not a boolean, or beside a managed install: 400 INVALID_REQUEST, nothing imported or registered', async () => {
+        for (const body of [
+            { manifest: seededCrm(), installMode: 'unmanaged', seedSampleData: 'yes' },
+            { manifest: seededCrm(), seedSampleData: true },
+            { manifest: seededCrm(), installMode: 'managed', seedSampleData: false },
+        ]) {
+            const w = world();
+            const h = await w.boot();
+            const res = await h.install(body);
+            expect(res.status, JSON.stringify(body)).toBe(400);
+            expect(res.payload.error.code).toBe('INVALID_REQUEST');
+            expect(res.payload.error.message).toContain('seedSampleData');
+            expect(w.importUnmanagedPackage).not.toHaveBeenCalled();
+            expect(h.register).not.toHaveBeenCalled();
+            expect(w.writes).toEqual([]);
+        }
+    });
+
+    it('the purge of an id that is no installed base still answers 404; an unreadable receipt answers 503 and deletes nothing', async () => {
+        const w = world();
+        const h = await w.boot();
+        expect((await h.purge('com.example.nothing')).status).toBe(404);
+        await h.install({ manifest: seededCrm(), installMode: 'unmanaged', seedSampleData: true });
+        w.getMetaItem.mockRejectedValueOnce(new Error('sys_metadata is unreachable'));
+        const before = w.writes.length;
+        const res = await h.purge('com.example.crm-copy');
+        expect(res.status).toBe(503);
+        expect(res.payload.error.code).toBe('SERVICE_UNAVAILABLE');
+        expect(w.writes.length).toBe(before);
+    });
+
+    // ── [#30808] The door's record of the copies it made: the purge reaches those bases and no other ──
+
+    const COPY_RECORD = () => join(dir, 'unmanaged-copies', 'com.example.crm-copy.json');
+
+    it('a Studio-authored writable base with published seed items is refused at purge: 404, nothing deleted', async () => {
+        const w = world();
+        const h = await w.boot();
+        // The copy registers the objects; its own rows are the customer's from here on.
+        await h.install({ manifest: seededCrm(), installMode: 'unmanaged', seedSampleData: true });
+        // A base the Studio authored: writable, installed, with a published `seed`
+        // item whose records name rows that exist — everything the receipt read
+        // would match, and no record of this door's.
+        w.packages.set('com.example.studio', { manifest: { id: 'com.example.studio', namespace: 'studio' } });
+        w.tables.sys_metadata!.push({
+            id: 'studio-seed', type: 'seed', name: 'crm_account_seed', package_id: 'com.example.studio', state: 'active',
+            metadata: { object: 'crm_account', externalId: 'name', records: [{ name: 'Acme' }] },
+        } as Row);
+        const before = w.writes.length;
+        const rows = w.tables.crm_account!.length;
+        const res = await h.purge('com.example.studio');
+        expect(res.status, JSON.stringify(res.payload)).toBe(404);
+        expect(res.payload.error.code).toBe('RESOURCE_NOT_FOUND');
+        expect(w.writes.length).toBe(before);
+        expect(w.tables.crm_account!.length).toBe(rows);
+    });
+
+    it('a copy made before the record existed is not reached: no record, 404, nothing deleted', async () => {
+        const w = world();
+        const h = await w.boot();
+        await h.install({ manifest: seededCrm(), installMode: 'unmanaged', seedSampleData: true });
+        expect(existsSync(COPY_RECORD())).toBe(true);
+        rmSync(join(dir, 'unmanaged-copies'), { recursive: true, force: true });
+        const before = w.writes.length;
+        const rows = w.tables.crm_account!.length;
+        const res = await h.purge('com.example.crm-copy');
+        expect(res.status, JSON.stringify(res.payload)).toBe(404);
+        expect(w.writes.length).toBe(before);
+        expect(w.tables.crm_account!.length).toBe(rows);
+    });
+
+    it('the record sits beside the ledger, never read as an install entry; an unreadable record answers 503 and deletes nothing', async () => {
+        const w = world();
+        const h = await w.boot();
+        await h.install({ manifest: seededCrm(), installMode: 'unmanaged', seedSampleData: true });
+        expect(JSON.parse(readFileSync(COPY_RECORD(), 'utf8'))).toMatchObject({
+            baseId: 'com.example.crm-copy', sourcePackageId: 'com.example.crm', seeded: true, copiedBy: INSTALLER,
+            instance: { version: '1.0.0', createdAt: w.packageRows.get('com.example.crm-copy')!.created_at },
+        });
+        const listing = new LocalManifestSource(dir).list();
+        expect([listing.entries, listing.skipped]).toEqual([[], []]);
+        writeFileSync(COPY_RECORD(), '{ not json');
+        const before = w.writes.length;
+        const res = await h.purge('com.example.crm-copy');
+        expect(res.status, JSON.stringify(res.payload)).toBe(503);
+        expect(res.payload.error.code).toBe('SERVICE_UNAVAILABLE');
+        // The local file to repair, not a store to wait for.
+        expect(res.payload.error.message).toContain(`Repair ${COPY_RECORD()}`);
+        expect(res.payload.error.message).not.toContain('Retry');
+        expect(w.writes.length).toBe(before);
+    });
+
+    it('a removed base answers 404 before its record is read: an unreadable record of a base that is gone is not a 503', async () => {
+        const w = world();
+        const h = await w.boot();
+        await h.install({ manifest: seededCrm(), installMode: 'unmanaged', seedSampleData: true });
+        writeFileSync(COPY_RECORD(), '{ not json');
+        w.packages.delete('com.example.crm-copy');
+        const before = w.writes.length;
+        const res = await h.purge('com.example.crm-copy');
+        expect(res.status, JSON.stringify(res.payload)).toBe(404);
+        expect(res.payload.error.code).toBe('RESOURCE_NOT_FOUND');
+        expect(w.writes.length).toBe(before);
+    });
+
+    // ── [#30808] The record is tied to the base instance, not only to its id ──
+
+    it('a later base under the copy\'s id is not reached: its package-store row carries another created_at, 404, nothing deleted', async () => {
+        const w = world();
+        const h = await w.boot();
+        await h.install({ manifest: seededCrm(), installMode: 'unmanaged', seedSampleData: true });
+        // The copy's base goes without the cleanup running (no cleanup registry,
+        // another replica, a failed removal) and a Studio duplicate takes its
+        // id: same id, same version, a row of its own. The copy's seed items
+        // and rows are still there, so only the instance tie refuses.
+        expect(existsSync(COPY_RECORD())).toBe(true);
+        w.packageRows.set('com.example.crm-copy', { version: '1.0.0', created_at: '2026-11-08 08:15:00' });
+        const before = w.writes.length;
+        const rows = w.tables.crm_account!.length;
+        const res = await h.purge('com.example.crm-copy');
+        expect(res.status, JSON.stringify(res.payload)).toBe(404);
+        expect(res.payload.error.code).toBe('RESOURCE_NOT_FOUND');
+        expect(w.writes.length).toBe(before);
+        expect(w.tables.crm_account!.length).toBe(rows);
+        expect(w.packageGet).toHaveBeenLastCalledWith('com.example.crm-copy', '1.0.0');
+    });
+
+    it('at purge: a gone row, or an ordinary store error the store answers null, fails closed (404); only the seam refusal is a 503', async () => {
+        const w = world();
+        const h = await w.boot();
+        await h.install({ manifest: seededCrm(), installMode: 'unmanaged', seedSampleData: true });
+        const before = w.writes.length;
+        // An ordinary driver error: the store logs it and answers null, so the
+        // door cannot tell it from a gone row — 404, nothing deleted.
+        w.storeFault('ordinary');
+        const passing = await h.purge('com.example.crm-copy');
+        expect(passing.status, JSON.stringify(passing.payload)).toBe(404);
+        expect(passing.payload.error.code).toBe('RESOURCE_NOT_FOUND');
+        // The seam-unreadable refusal is the one fault that escapes the store: 503, no file named, no store text.
+        w.storeFault('seam');
+        const unread = await h.purge('com.example.crm-copy');
+        expect(unread.status, JSON.stringify(unread.payload)).toBe(503);
+        expect(unread.payload.error.message).not.toContain('Repair');
+        expect(unread.payload.error.message).not.toContain('query seam');
+        const row = w.packageRows.get('com.example.crm-copy')!;
+        w.packageRows.delete('com.example.crm-copy');
+        expect((await h.purge('com.example.crm-copy')).status).toBe(404);
+        expect(w.writes.length).toBe(before);
+        // The same row back: the copy is reached again.
+        w.packageRows.set('com.example.crm-copy', row);
+        const res = await h.purge('com.example.crm-copy');
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
+        expect(res.payload.data).toMatchObject({ deleted: 3, errors: 0 });
+    });
+
+    it('with no `package` service the record holds no instance and the purge reaches the copy by id alone (the stated residual)', async () => {
+        const w = world({ packageStore: false });
+        const h = await w.boot();
+        const installed = await h.install({ manifest: seededCrm(), installMode: 'unmanaged', seedSampleData: true });
+        expect(installed.payload.data).not.toHaveProperty('copyRecord');
+        expect(JSON.parse(readFileSync(COPY_RECORD(), 'utf8'))).not.toHaveProperty('instance');
+        const res = await h.purge('com.example.crm-copy');
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
+        expect(res.payload.data).toMatchObject({ deleted: 3, errors: 0 });
+    });
+
+    it('a record that is not kept is said in the install answer (`copyRecord`), and the copy is then out of the purge\'s reach', async () => {
+        // The record cannot be written: its directory's name is taken by a file.
+        {
+            const w = world();
+            const h = await w.boot();
+            writeFileSync(join(dir, 'unmanaged-copies'), 'not a directory');
+            const res = await h.install({ manifest: seededCrm(), installMode: 'unmanaged', seedSampleData: true });
+            expect(res.status, JSON.stringify(res.payload)).toBe(200);
+            expect(res.payload.data.seeded).toMatchObject({ mode: 'inline', inserted: 3 });
+            expect(res.payload.data.copyRecord).toEqual({ written: false, message: expect.stringContaining('was not kept') });
+            expect(res.payload.data.copyRecord.message).toContain(join(dir, 'unmanaged-copies'));
+            expect((await h.purge('com.example.crm-copy')).status).toBe(404);
+            rmSync(join(dir, 'unmanaged-copies'), { force: true });
+        }
+        // The package store meets a fault at install — an ordinary error it
+        // answers null, or the seam refusal it throws: no record is written,
+        // and the copy stays unrecorded (re-recording is #31425).
+        for (const kind of ['ordinary', 'seam'] as const) {
+            const w = world();
+            const h = await w.boot();
+            w.storeFault(kind);
+            const res = await h.install({ manifest: seededCrm(), installMode: 'unmanaged', seedSampleData: true });
+            expect(res.status, `${kind}: ${JSON.stringify(res.payload)}`).toBe(200);
+            expect(res.payload.data.copyRecord).toEqual({
+                written: false, message: expect.stringContaining('the package store did not answer with the new base\'s row'),
+            });
+            expect(res.payload.data.copyRecord.message).not.toContain('SQLITE_BUSY');
+            expect(existsSync(COPY_RECORD())).toBe(false);
+            expect((await h.purge('com.example.crm-copy')).status).toBe(404);
+        }
+        // A record that is kept adds no key to the answer.
+        {
+            const w = world();
+            const h = await w.boot();
+            rmSync(join(dir, 'unmanaged-copies'), { recursive: true, force: true });
+            const res = await h.install({ manifest: seededCrm(), installMode: 'unmanaged', seedSampleData: true });
+            expect(res.payload.data).not.toHaveProperty('copyRecord');
+        }
+    });
+
+    it('a copy made without the sample data answers that no sample data was copied — not "declares no seed datasets"', async () => {
+        const w = world();
+        const h = await w.boot();
+        await h.install({ manifest: seededCrm(), installMode: 'unmanaged' });
+        const res = await h.purge('com.example.crm-copy');
+        expect(res.status, JSON.stringify(res.payload)).toBe(400);
+        expect(res.payload.error.code).toBe('NOTHING_TO_PURGE');
+        expect(res.payload.error.message).toContain('No sample data was copied into \'com.example.crm-copy\'');
+        expect(res.payload.error.message).not.toContain('declares no seed datasets');
+    });
+
+    it('uninstalling the copy removes its record through the protocol\'s uninstall cleanups; the purge then answers 404', async () => {
+        const w = world();
+        const h = await w.boot();
+        await h.install({ manifest: seededCrm(), installMode: 'unmanaged', seedSampleData: true });
+        const cleanup = w.cleanups.get('install-local:unmanaged-copy-record');
+        expect(typeof cleanup).toBe('function');
+        expect(await cleanup!({ packageId: 'com.example.crm-copy' })).toEqual({ success: true, removed: 1 });
+        expect(existsSync(COPY_RECORD())).toBe(false);
+        expect(await cleanup!({ packageId: 'com.example.crm-copy' })).toEqual({ success: true, removed: 0 });
+        expect((await h.purge('com.example.crm-copy')).status).toBe(404);
     });
 });

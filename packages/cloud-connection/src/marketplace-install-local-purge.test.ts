@@ -32,7 +32,7 @@ import { tmpdir } from 'node:os';
 import { assertEngineDeleteDispatch } from '@objectstack/metadata-core';
 import { SEED_WRITE_EXECUTION_CONTEXT } from '@objectstack/spec/kernel';
 
-import { countSeedRows, matchSeedRows, purgeSeedRows, type PurgeSeedDataset, type SeedMatchProblem } from './marketplace-install-local-purge.js';
+import { countSeedRows, matchSeedRows, purgeSeedRows, seedDatasetOfReceiptItem, type PurgeSeedDataset, type SeedMatchProblem } from './marketplace-install-local-purge.js';
 import { MarketplaceInstallLocalPlugin } from './marketplace-install-local-plugin.js';
 import { LocalManifestSource } from './local-manifest-source.js';
 import { installerAuthService, installerEmail, INSTALLER_USER_ID, withInstallerGrants } from './install-local-principal.fixtures.js';
@@ -742,5 +742,21 @@ describe('GET …/sample-data — how many sample rows a purge would delete now 
         expect(res.payload.error.message).toContain('manage_metadata');
         expect(ungranted.reads.filter((r) => r.object.startsWith('pg_'))).toEqual([]);
         expect(logger.warn.mock.calls.map((c) => String(c[0])).join('\n')).toContain('refused Counting sample data');
+    });
+});
+
+describe('seedDatasetOfReceiptItem — a served seed item as the dataset it declares (#30808)', () => {
+    it('keeps every member SeedSchema declares, `files` included, and drops a key it does not declare', () => {
+        const files = { 'fixtures/hello.txt': { contentType: 'text/plain', size: 2, sha256: 'a'.repeat(64), data: 'aGk=' } };
+        const dataset = seedDatasetOfReceiptItem({
+            object: 'crm_account', externalId: 'name', records: [{ name: 'Acme' }], files, _diagnostics: { valid: true },
+        });
+        expect(dataset).toEqual({ object: 'crm_account', externalId: 'name', records: [{ name: 'Acme' }], files });
+    });
+
+    it('answers undefined for anything that is not a dataset', () => {
+        expect([null, [], 'x', { object: 'crm_account' }, { records: [] }].map(seedDatasetOfReceiptItem)).toEqual([
+            undefined, undefined, undefined, undefined, undefined,
+        ]);
     });
 });

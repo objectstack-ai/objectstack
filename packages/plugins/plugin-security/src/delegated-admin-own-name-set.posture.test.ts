@@ -105,8 +105,17 @@ afterEach(async () => {
  * Default Organization, as every real `single` install has — so a write whose
  * context names no organization is stamped with it instead of being refused for
  * having none (`default-organization.testkit.ts`).
+ *
+ * `positions` / `permissions`: catalog entries one describe adds on top of the
+ * shared catalog, so a describe that needs its own entry does not change what
+ * the others enumerate.
  */
-async function boot(posture: Posture, opts: { defaultOrganization?: boolean } = {}) {
+async function boot(
+  posture: Posture,
+  opts: { defaultOrganization?: boolean; positions?: Array<Record<string, unknown>>; permissions?: Array<Record<string, unknown>> } = {},
+) {
+  const positions: Array<Record<string, unknown>> = [...POSITIONS, ...(opts.positions ?? [])];
+  const permissions: Array<Record<string, unknown>> = [...PERMISSIONS, ...(opts.permissions ?? [])];
   const engine = new ObjectQL();
   engine.registerDriver(
     new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true }),
@@ -143,11 +152,11 @@ async function boot(posture: Posture, opts: { defaultOrganization?: boolean } = 
     objectql: engine,
     metadata: {
       get: async (type: string, name: string) =>
-        (type === 'position' ? POSITIONS.find((p) => p.name === name)
-          : type === 'permission' ? PERMISSIONS.find((p) => p.name === name)
+        (type === 'position' ? positions.find((p) => p.name === name)
+          : type === 'permission' ? permissions.find((p) => p.name === name)
           : type === 'capability' ? undefined
           : engine.getSchema(name)) ?? null,
-      list: async (type: string) => (type === 'position' ? POSITIONS : type === 'permission' ? PERMISSIONS : []),
+      list: async (type: string) => (type === 'position' ? positions : type === 'permission' ? permissions : []),
     },
     ...(posture === 'single' ? {} : { 'org-scoping': { name: 'com.objectstack.org-scoping' }, tenancy: { posture } }),
   };
@@ -561,4 +570,143 @@ describe('[ADR-0090 D12, ruling of record 6663849489] a delegated business-unit 
     expect(await assignAt('bu_east_field')).toEqual({ status: 200 });
     expect(await storedPositions(h)).toEqual(['field_rep']);
   });
+});
+
+/**
+ * [ADR-0105 D6, red line 2; ADR-0091 D3 rule 4b] A delegated business-unit walk
+ * never starts at a unit outside the caller's organization. A self-delegation's
+ * anchor must fall inside the delegator's own range for the position — the
+ * subtree of its direct holding's anchor, or of its own member units when that
+ * holding is unanchored — and every subtree of that range is the caller's
+ * organization's, its root included: a business unit of another organization is
+ * never a root of it, whether the delegator is a member of that unit or a
+ * holding names it as its anchor. So an anchor at such a unit is answered
+ * exactly as an anchor outside the range is.
+ */
+describe("[ADR-0105 D6; ADR-0091 D3] a delegated business-unit walk never starts at a unit outside the caller's organization — three postures", () => {
+  const ORG_B = 'org_b';
+  const DUTY = 'field_duty';
+  const DELEGATOR = 'u_delegator';
+  /** A unit of the other organization, with a unit below it. */
+  const FOREIGN = 'bu_b_desk';
+  const FOREIGN_CHILD = 'bu_b_desk_field';
+  const DUTY_POSITIONS = [{ name: DUTY, label: 'Field duty', permissionSets: ['field_user'], delegatable: true }];
+  /** Writes assignments and reads business units, so the data door lets it name one: no admin scope. */
+  const DUTY_PERMISSIONS = [{ name: 'duty_writer', label: 'Duty writer', objects: { ...CRUD, sys_business_unit: { allowRead: true } } }];
+  /** Active in `ORG_A`; a member of both organizations, which is what `group` unions its reads over (ADR-0105 D2). */
+  const DELEGATOR_CTX = {
+    userId: DELEGATOR, positions: [DUTY], permissions: ['duty_writer'], tenantId: ORG_A,
+    accessible_org_ids: [ORG_A, ORG_B], org_user_ids: [...ORG_USER_IDS, DELEGATOR],
+  };
+  const FUTURE = () => new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString();
+  /** A delegation of the duty to `u_target`, anchored at `unit` (none: unanchored). */
+  const delegation = (unit: string | null) => ({
+    user_id: 'u_target', position: DUTY, delegated_from: DELEGATOR, valid_until: FUTURE(), reason: 'cover',
+    ...(unit ? { business_unit_id: unit } : {}),
+  });
+
+  /**
+   * The delegator: a member of `ORG_A` and of `ORG_B`, a member of the unit
+   * `bu_east` in its own organization and of {@link FOREIGN} in the other, and
+   * a DIRECT holder of the duty in `ORG_A`, anchored at `holdingAnchor`.
+   */
+  async function bootDelegator(posture: Posture, holdingAnchor: string | null) {
+    const h = await boot(posture, { positions: DUTY_POSITIONS, permissions: DUTY_PERMISSIONS });
+    const asOrgA = { context: { isSystem: true, tenantId: ORG_A } } as any;
+    const asOrgB = { context: { isSystem: true, tenantId: ORG_B } } as any;
+    await h.engine.insert('sys_business_unit', [
+      { id: FOREIGN, name: 'b_desk', parent_business_unit_id: null, organization_id: ORG_B },
+      { id: FOREIGN_CHILD, name: 'b_desk_field', parent_business_unit_id: FOREIGN, organization_id: ORG_B },
+    ], asOrgB);
+    await h.engine.insert('sys_user', { id: DELEGATOR, email: `${DELEGATOR}@example.test`, name: DELEGATOR }, asOrgA);
+    await h.engine.insert('sys_member', { id: 'm_delegator_a', user_id: DELEGATOR, organization_id: ORG_A, role: 'member' }, asOrgA);
+    await h.engine.insert('sys_member', { id: 'm_delegator_b', user_id: DELEGATOR, organization_id: ORG_B, role: 'member' }, asOrgB);
+    await h.engine.insert('sys_business_unit_member',
+      { id: 'bum_delegator_a', user_id: DELEGATOR, business_unit_id: 'bu_east', organization_id: ORG_A }, asOrgA);
+    await h.engine.insert('sys_business_unit_member',
+      { id: 'bum_delegator_b', user_id: DELEGATOR, business_unit_id: FOREIGN, organization_id: ORG_B }, asOrgB);
+    await h.engine.insert('sys_user_position',
+      { id: 'h_delegator', user_id: DELEGATOR, position: DUTY, business_unit_id: holdingAnchor, organization_id: ORG_A }, asOrgA);
+    return h;
+  }
+
+  /** The write gate's answer to the delegation anchored at `unit`, its anchor spelled out of the message. */
+  async function gateAnswer(h: Awaited<ReturnType<typeof boot>>, unit: string | null) {
+    const r = await outcome(() => (h.plugin as any).delegatedAdminGate.assert({
+      object: 'sys_user_position', operation: 'insert', data: delegation(unit), context: DELEGATOR_CTX,
+    }));
+    return { ...r, ...(r.message !== undefined && unit ? { message: r.message.split(`'${unit}'`).join("'ANCHOR'") } : {}) };
+  }
+
+  /** The data door's answer to the same delegation, and the anchors of the delegations it stored. */
+  async function doorAnswer(h: Awaited<ReturnType<typeof boot>>, unit: string | null) {
+    let answer: { status: number; code?: string; fields?: string[] } = { status: 200 };
+    try {
+      await h.engine.insert('sys_user_position', delegation(unit), { context: DELEGATOR_CTX } as any);
+    } catch (e) {
+      const r = resolveThrownHttpError(e);
+      const fields = ((e as any)?.fields ?? []) as Array<{ field?: string; code?: string }>;
+      answer = { status: r.status, code: r.code, ...(fields.length ? { fields: fields.map((f) => `${f.field}:${f.code}`) } : {}) };
+    }
+    const rows = await h.engine.find('sys_user_position', { where: { user_id: 'u_target', position: DUTY }, context: SYS });
+    return { ...answer, stored: (Array.isArray(rows) ? rows : []).map((row: any) => row.business_unit_id ?? null) };
+  }
+
+  for (const posture of POSTURES) {
+    describe(`posture '${posture}'`, () => {
+      it("ground truth: the delegator is a member of a unit of another organization, and the store holds a unit below it", async () => {
+        const h = await bootDelegator(posture, null);
+        const memberships = await h.engine.find('sys_business_unit_member', { where: { user_id: DELEGATOR }, context: SYS });
+        expect((Array.isArray(memberships) ? memberships : []).map((m: any) => m.business_unit_id).sort()).toEqual([FOREIGN, 'bu_east'].sort());
+        const unit = await h.engine.find('sys_business_unit', { where: { id: FOREIGN_CHILD }, context: SYS });
+        expect((Array.isArray(unit) ? unit : []).map((u: any) => [u.parent_business_unit_id, u.organization_id])).toEqual([[FOREIGN, ORG_B]]);
+      });
+
+      it("an unanchored holding's range is the delegator's member units of its own organization: an anchor at a member unit of another organization is answered as an anchor outside the range", async () => {
+        const h = await bootDelegator(posture, null);
+        const outside = await gateAnswer(h, 'bu_hq');
+        expect([outside.status, outside.code], outside.message).toEqual([403, 'PERMISSION_DENIED']);
+        for (const unit of [FOREIGN, FOREIGN_CHILD, 'bu_no_such_unit']) {
+          expect(await gateAnswer(h, unit), unit).toEqual(outside);
+        }
+        // CONTROL: inside the range, and unanchored, the same delegation is admitted.
+        expect(await gateAnswer(h, 'bu_east_field')).toEqual({ status: 200 });
+        expect(await gateAnswer(h, null)).toEqual({ status: 200 });
+      });
+
+      it("a holding anchored at a unit of another organization makes no unit an admitted anchor: that unit is answered as an anchor outside the range", async () => {
+        const h = await bootDelegator(posture, FOREIGN);
+        // Ground truth: the holding is the caller's organization's, its anchor the other's unit.
+        const holding = await h.engine.find('sys_user_position', { where: { id: 'h_delegator' }, context: SYS });
+        expect((Array.isArray(holding) ? holding : []).map((r: any) => [r.organization_id, r.business_unit_id])).toEqual([[ORG_A, FOREIGN]]);
+        const outside = await gateAnswer(h, 'bu_hq');
+        expect([outside.status, outside.code], outside.message).toEqual([403, 'PERMISSION_DENIED']);
+        for (const unit of [FOREIGN, FOREIGN_CHILD, 'bu_east_field']) {
+          expect(await gateAnswer(h, unit), unit).toEqual(outside);
+        }
+        // CONTROL: unanchored, the delegation is admitted, as before.
+        expect(await gateAnswer(h, null)).toEqual({ status: 200 });
+      });
+
+      it("CONTROL: a holding anchored at a unit of the caller's organization keeps its subtree as the range", async () => {
+        const h = await bootDelegator(posture, 'bu_east');
+        for (const unit of ['bu_east', 'bu_east_field']) {
+          expect(await gateAnswer(h, unit), unit).toEqual({ status: 200 });
+        }
+        const outside = await gateAnswer(h, 'bu_hq');
+        expect([outside.status, outside.code], outside.message).toEqual([403, 'PERMISSION_DENIED']);
+        expect(await gateAnswer(h, FOREIGN)).toEqual(outside);
+        expect(await gateAnswer(h, null)).toEqual({ status: 200 });
+      });
+
+      it('the data door stores no delegation anchored at a unit of another organization, and stores one inside the range', async () => {
+        const h = await bootDelegator(posture, null);
+        const outside = await doorAnswer(h, 'bu_hq');
+        expect(outside).toEqual({ status: 403, code: 'PERMISSION_DENIED', stored: [] });
+        expect(await doorAnswer(h, FOREIGN)).toEqual(outside);
+        // CONTROL: the same door, context and position, inside the range.
+        expect(await doorAnswer(h, 'bu_east_field')).toEqual({ status: 200, stored: ['bu_east_field'] });
+      });
+    });
+  }
 });
