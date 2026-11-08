@@ -76,10 +76,7 @@ is one diagram a reviewer (or AI) can read end-to-end.
   label: 'Opportunity Discount Approval',
   type: 'record_change',
   nodes: [
-    // Record-change flows bind via the START NODE's config — there is no
-    // separate top-level `trigger`. `triggerType` is one of
-    // `record-(before|after)-(create|update|delete)`; `condition` (bare CEL)
-    // gates whether the flow launches.
+    // The trigger is the START node's config (SKILL.md § Trigger Configuration).
     {
       id: 'start',
       type: 'start',
@@ -142,7 +139,7 @@ is one diagram a reviewer (or AI) can read end-to-end.
 
 ### Send-back for revision (ADR-0044)
 
-Approval centers also model **send back for revision** (退回修改) — distinct from
+Approval centers also model **send back for revision** — distinct from
 `reject` (terminate) and from a comment thread (which keeps the request pending).
 Send-back is a **flow movement**: the request finalizes as `returned`, the run
 walks a **`revise`** out-edge to an **`approval_revise`** node (the *revise
@@ -290,7 +287,7 @@ slate — guard genuinely-optional inputs explicitly, e.g.
 // ② The previous approval node's decision outputs pick this node's approvers:
 { type: 'expression', value: cel`vars.lead_review.next_reviewers` }
 
-// ③ Dynamic co-sign (会签): expression yields department ids; resolveAs expands
+// ③ Dynamic co-sign: expression yields department ids; resolveAs expands
 //    each into its members, and with behavior: 'per_group' EACH department is
 //    its own sign-off group:
 {
@@ -363,7 +360,7 @@ Object-hook `ctx` is a different vocabulary — see **objectstack-data**
 | Field | Purpose |
 |:------|:--------|
 | `approvers` | Who may act (≥ 1 — see Approver Types above). Each approver may carry an optional **`group`** label (e.g. `{ type: 'position', value: 'crm_auditor', group: 'finance' }`) — with `behavior: 'per_group'`, approvers sharing a label form one group; unlabelled approvers each form their own |
-| `behavior` | `first_response` (first approver decides), `unanimous` (all must approve), `quorum` (`minApprovals` of N — M-of-N collective sign-off), or `per_group` (EACH approver `group` must reach `minApprovals` — one-from-each-group sign-off, 会签). In every mode a single rejection finalizes the node as `rejected`. Default `first_response` |
+| `behavior` | `first_response` (first approver decides), `unanimous` (all must approve), `quorum` (`minApprovals` of N — M-of-N collective sign-off), or `per_group` (EACH approver `group` must reach `minApprovals` — one-from-each-group sign-off). In every mode a single rejection finalizes the node as `rejected`. Default `first_response` |
 | `minApprovals` | Approvals required — total for `quorum`, per group for `per_group`. Omitted ⇒ ALL resolvable approvers under `quorum`, `1` per group; clamped at runtime so a misconfiguration can never deadlock |
 | `lockRecord` | Lock the triggering record from edits while pending. Default `true` |
 | `approvalStatusField` | Business-object field to mirror `pending`/`approved`/`rejected`/`recalled` onto (should be readonly) |
@@ -397,3 +394,12 @@ These are wired on the **graph**, not in node config:
    `reject` edges. Opening already tells each resolved approver
    (`approval.requested`); ⛔ no `notify` node for the opening: it tells
    them twice.
+4. **A flow reacting to the mirrored status runs as the person who acted.**
+   The `approvalStatusField` write is elevated but attributed — submit carries
+   the submitter, approve / reject / recall / send-back the person who decided —
+   so a `record_change` flow on that field ("when the invoice is approved, do
+   X") stays `runAs: 'user'` and runs with the decider's own grants. Only the
+   two machine-driven transitions carry no user — an SLA `escalation`
+   auto-decision and the release of a record whose run died — and a
+   `runAs: 'user'` flow fired by one has its data steps refused: a flow that
+   must react to those too declares `runAs: 'system'`.
