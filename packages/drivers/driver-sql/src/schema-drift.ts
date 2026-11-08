@@ -2226,6 +2226,12 @@ export interface LegacyUniqueReplacement {
    * one, and only one of them is the index being replaced.
    */
   legacyColumns: string[];
+  /**
+   * Set by the widening arm only ({@link widenedUniqueReplacements}): the
+   * columns the declared key gained over {@link legacyColumns}. Absent on the
+   * tenant arms, whose replacement scopes the key per organization instead.
+   */
+  widenedBy?: string[];
 }
 
 /**
@@ -2247,6 +2253,116 @@ export interface LegacyUniqueReplacement {
  * An index the current metadata declares is by definition not legacy.
  */
 export function legacyUniqueReplacements(args: {
+  table: string;
+  fields: Record<string, any>;
+  tenantField: string | null;
+  physicalColumns: Set<string>;
+  declaredIndexes?: DeclaredIndexInput[];
+  /**
+   * The table's physical indexes. Only the widening arm reads them
+   * ({@link widenedUniqueReplacements}): it names a superseded index only when
+   * one by that name exists, rather than every subsequence a declaration has.
+   * Absent, that arm claims nothing.
+   */
+  physical?: ReadonlyArray<PhysicalIndex>;
+}): LegacyUniqueReplacement[] {
+  const out = tenantScopedLegacyReplacements(args);
+  // One physical index is superseded once: the tenant arms answer first, and
+  // the widening arm never claims a name they already claimed.
+  const claimed = new Set(out.flatMap((l) => l.legacyNames));
+  for (const l of widenedUniqueReplacements(args)) {
+    const legacyNames = l.legacyNames.filter((n) => !claimed.has(n));
+    if (legacyNames.length === 0) continue;
+    for (const n of legacyNames) claimed.add(n);
+    out.push({ ...l, legacyNames });
+  }
+  return out;
+}
+
+/**
+ * The most key parts {@link widenedUniqueReplacements} enumerates subsequences
+ * of: `2^n - 2` candidate names per declared index, so the bound keeps the
+ * enumeration small on a wide composite. No declared unique in the platform
+ * catalog comes near it.
+ */
+const WIDENED_UNIQUE_MAX_KEY_PARTS = 8;
+
+/**
+ * A declared GLOBAL unique index whose key gained columns, superseding the
+ * narrower generated index an earlier declaration built (ADR-0150 D4: the
+ * activation ledger's `(metadata_type, name)` became
+ * `(metadata_type, package_id, name)`).
+ *
+ * Widening a unique key is a pure relaxation: any two rows that collide on the
+ * wider key already collided on the narrower one, so the wider index can be
+ * created over existing data without failing, and dropping the narrower one
+ * afterwards loses no row. Left to the orphan arm, the narrower index reads as
+ * an undeclared index with ObjectStack's naming — a `drop_index` categorized
+ * DESTRUCTIVE, opt-in — and an operator who applies only the safe half keeps
+ * refusing exactly the rows the new declaration admits. So it is routed through
+ * the same `replace_unique_index` op the tenant arms use: categorized `safe`,
+ * applied create-before-drop, the old index dropped only once the new one is
+ * confirmed present.
+ *
+ * Deliberately narrow — every condition is required:
+ *  - the declared index is UNNAMED (a named index keeps its name, so there is
+ *    no second name to retire) and `unique: true`/`'global'` — never
+ *    `'organization'`, whose materialized key is the tenant arms' to judge;
+ *  - every listed column is physical;
+ *  - the superseded index's columns are an in-order PROPER subsequence of the
+ *    listed ones, and its name is the one {@link buildIndexName} gives that
+ *    subsequence (`diffManagedIndexes` then also requires it to be a plain
+ *    UNIQUE on exactly those columns);
+ *  - no index metadata asks for today has that name — field-level uniques
+ *    included, so a live single-column unique is never read as superseded;
+ *  - an index by that name exists physically (`args.physical`), so the arm
+ *    names what is there rather than every subsequence of every declaration.
+ *
+ * A table with no tenant column is in scope: widening has nothing to do with
+ * tenancy.
+ */
+function widenedUniqueReplacements(args: {
+  table: string;
+  fields: Record<string, any>;
+  tenantField: string | null;
+  physicalColumns: Set<string>;
+  declaredIndexes?: DeclaredIndexInput[];
+  physical?: ReadonlyArray<PhysicalIndex>;
+}): LegacyUniqueReplacement[] {
+  const { table, physicalColumns, declaredIndexes } = args;
+  const physicalNames = new Set((args.physical ?? []).map((p) => p.name));
+  if (physicalNames.size === 0) return [];
+  const current = new Set(declaredIndexSet(args).map((i) => i.name));
+  const out: LegacyUniqueReplacement[] = [];
+  for (const idx of Array.isArray(declaredIndexes) ? declaredIndexes : []) {
+    if (idx?.unique !== true && idx?.unique !== 'global') continue;
+    if (typeof idx?.name === 'string' && idx.name.trim()) continue;
+    const listed = Array.isArray(idx?.fields)
+      ? idx.fields.filter((f): f is string => typeof f === 'string' && f.length > 0)
+      : [];
+    if (listed.length < 2 || listed.length > WIDENED_UNIQUE_MAX_KEY_PARTS) continue;
+    if (!listed.every((c) => physicalColumns.has(c))) continue;
+    const replacement = normalizeDeclaredIndex(table, idx, args.tenantField);
+    if (!replacement) continue;
+    const full = (1 << listed.length) - 1;
+    for (let mask = 1; mask < full; mask++) {
+      const narrower = listed.filter((_, i) => (mask & (1 << i)) !== 0);
+      const legacyName = buildIndexName(table, narrower, true);
+      if (current.has(legacyName) || !physicalNames.has(legacyName)) continue;
+      out.push({
+        column: listed.find((c) => !narrower.includes(c))!,
+        legacyColumns: narrower,
+        legacyNames: [legacyName],
+        replacement,
+        widenedBy: listed.filter((c) => !narrower.includes(c)),
+      });
+    }
+  }
+  return out;
+}
+
+/** The tenant arms of {@link legacyUniqueReplacements}: a unique now scoped per organization. */
+function tenantScopedLegacyReplacements(args: {
   table: string;
   fields: Record<string, any>;
   tenantField: string | null;
@@ -2545,7 +2661,13 @@ export function diffManagedIndexes(args: {
         createColumns: l.replacement.columns,
         ...(l.replacement.nullSafeColumns ? { nullSafeColumns: l.replacement.nullSafeColumns } : {}),
       },
-      message:
+      message: l.widenedBy
+        ? `${table}.${l.legacyColumns.join('+')}: a UNIQUE index (${present.join(', ')}) on ` +
+          `${indexSignature(l.legacyColumns, true)} is superseded by the declared ` +
+          `${indexSignature(l.replacement.columns, true, l.replacement.nullSafeColumns)}, which adds ` +
+          `${l.widenedBy.join(', ')} to the key and admits rows the old index refuses. Replacing it is a pure ` +
+          `relaxation: run "os migrate apply".`
+        :
         `${table}.${l.legacyColumns.join('+')}: a legacy platform-wide UNIQUE index (${present.join(', ')}) still enforces ` +
         `uniqueness across ALL tenants, but metadata scopes it per '${l.replacement.columns[0]}' — a second ` +
         `tenant reusing the value is rejected on insert. Replacing it with ${indexSignature(l.replacement.columns, true, l.replacement.nullSafeColumns)} ` +
