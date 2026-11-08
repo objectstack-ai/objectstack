@@ -128,7 +128,7 @@ export interface TextMatchRequest {
  * literals, so the literal spelling differs per dialect while a bound value has
  * one spelling everywhere (#5567).
  */
-export const TEXT_MATCH_ESCAPE_CHARACTER = '\\';
+const TEXT_MATCH_ESCAPE_CHARACTER = '\\';
 
 /**
  * The ASCII case map, written out as data. "ASCII only" is the CONTRACT
@@ -175,8 +175,8 @@ function wrapTextMatchShape(escaped: string, shape: TextMatchShape, wildcard: st
 /**
  * The shared LIKE pattern for one comparand: `%`, `_` and the escape character
  * escaped, then wrapped in the wildcards `shape` calls for — what every LIKE
- * arm but SQL Server's binds, with {@link TEXT_MATCH_ESCAPE_CHARACTER} as its
- * `ESCAPE`.
+ * arm but SQL Server's binds, with a bound backslash as its `ESCAPE`. A face
+ * building its own residue binds its own backslash beside it.
  *
  * Exported for the `'unknown'` residue a face builds itself, so that residue
  * escapes exactly as the arms do rather than through a second regex.
