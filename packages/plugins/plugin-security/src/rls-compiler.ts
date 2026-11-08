@@ -7,6 +7,7 @@ import type { ExecutionContext } from '@objectstack/spec/kernel';
 // resolver screen can never disagree about which keys are reserved.
 import { RESERVED_RLS_MEMBERSHIP_KEYS } from '@objectstack/spec/contracts';
 import { kernelQueuesOf } from './kernel-queue-membership.js';
+import { rlsOperationForVerb } from './lifecycle-verb-rls-operation.js';
 // [ADR-0056 D4 / ADR-0058 D1] `isSupportedRlsExpression` and `sqlPredicateToCel`
 // used to be DEFINED in this file. #4983 hoisted them into `@objectstack/formula`
 // — verbatim, behaviour-preserving — because `@objectstack/lint` must ask the
@@ -1336,7 +1337,10 @@ export class RLSCompiler {
   }
 
   private mapOperationToRLS(operation: string): string {
-    switch (operation) {
+    // [#30237] A destructive lifecycle verb is judged as its nearest write
+    // class (`rlsOperationForVerb`: transfer/restore → update, purge →
+    // delete), never as the `select` the default below would make of it.
+    switch (rlsOperationForVerb(operation)) {
       case 'find':
       case 'findOne':
       case 'count':
