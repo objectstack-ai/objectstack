@@ -11,6 +11,11 @@ import { describe, it, expect, vi, afterEach, beforeAll } from 'vitest';
 import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ObjectSchema } from '@objectstack/spec/data';
+// Paid during collection, not inside a case: the inspector reaches both
+// through dynamic imports (CEL authoring), and a clocked window measures
+// behaviour, never loading (check:test-source-alias).
+import '@objectstack/formula';
+import '@objectstack/lint';
 import {
   currencyCodeFieldCandidates,
   homeAmountCandidates,
