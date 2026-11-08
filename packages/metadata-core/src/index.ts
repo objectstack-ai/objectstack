@@ -163,6 +163,12 @@ export * from './flow-cycle.js';
 // preview an installer reads and the comparison a door decides on are one.
 export * from './package-upgrade-plan.js';
 
+// [epic cloud#3652 Q3] The schema upgrade verdict of a plan — which findings
+// stop a managed upgrade until confirmed, and the finding set's token — the
+// ONE rule the install-local door and a host's install door (the hosted
+// control plane) both apply, so a host forwards the platform's verdict.
+export * from './package-upgrade-verdict.js';
+
 // [ADR-0146 D3 · ruling record 6691022506] The customization pair of a package,
 // looked up through the App that carries it — `pairOf(base)` /
 // `isPairOf(pair, base)`. Sunk here because its callers live in
