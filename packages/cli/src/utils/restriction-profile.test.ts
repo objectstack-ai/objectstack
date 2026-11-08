@@ -3,7 +3,8 @@
 /**
  * The reader of a target environment's restriction profile
  * (`restriction-profile.ts`): one refusal per profile dimension, the three
- * reader rules, the version drift warning, and an invalid profile refused.
+ * reader rules, the two code dimensions judged by body shape, the version
+ * drift warning, and an invalid profile refused.
  * `test/validate-target-restriction-profile.test.ts` holds the command's door.
  */
 
@@ -11,7 +12,15 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { FLOW_BUILTIN_NODE_TYPES, LOOP_NODE_TYPE, PARALLEL_NODE_TYPE, TRY_CATCH_NODE_TYPE } from '@objectstack/spec/automation';
+import {
+  APPROVAL_NODE_TYPE,
+  APPROVAL_REVISE_NODE_TYPE,
+  FLOW_BUILTIN_NODE_TYPES,
+  LOOP_NODE_TYPE,
+  PARALLEL_NODE_TYPE,
+  TRY_CATCH_NODE_TYPE,
+} from '@objectstack/spec/automation';
+import { RestrictionProfileNodeType } from '@objectstack/spec/system';
 
 import {
   judgeRestrictionProfile,
@@ -20,11 +29,12 @@ import {
   type ParsedRestrictionProfile,
 } from './restriction-profile.js';
 
-/** Everything on: every built-in node type listed, code and schedules allowed. */
+/** Everything on: every node type of the profile vocabulary listed, code, sandboxed JS and schedules allowed. */
 const OPEN: ParsedRestrictionProfile = {
   allowCode: true,
+  allowSandboxedJs: true,
   allowScheduledAutomation: true,
-  allowedFlowNodeTypes: [...FLOW_BUILTIN_NODE_TYPES] as ParsedRestrictionProfile['allowedFlowNodeTypes'],
+  allowedFlowNodeTypes: [...RestrictionProfileNodeType.options],
   versions: { spec: '18.4.0', skills: '18.4.0' },
 };
 const profile = (patch: Partial<ParsedRestrictionProfile>): ParsedRestrictionProfile => ({ ...OPEN, ...patch });
@@ -48,7 +58,7 @@ const STACK = {
       node('fetch', 'get_record'),
       node('call', 'http'),
       node('calc', 'script', { config: { function: 'rp_calc' } }),
-      node('ok', 'approval'),
+      node('sign', 'acme_sign'),
       node('end', 'end'),
     ]),
   ],
@@ -70,7 +80,7 @@ describe('judgeRestrictionProfile — one refusal per dimension', () => {
       { rule: 'allowCode', where: "function 'rp_calc'", path: 'functions.rp_calc' },
       { rule: 'allowCode', where: "plugin '@acme/rp-plugin'", path: 'plugins[0]' },
       { rule: 'allowCode', where: "flow 'rp_route' › node 'calc' (script)", path: 'flows[1].nodes[3]' },
-      { rule: 'allowCode', where: "flow 'rp_route' › node 'ok' (approval)", path: 'flows[1].nodes[4]' },
+      { rule: 'allowCode', where: "flow 'rp_route' › node 'sign' (acme_sign)", path: 'flows[1].nodes[4]' },
     ]);
   });
 
@@ -182,15 +192,51 @@ describe('judgeRestrictionProfile — the reader rules', () => {
     ]);
   });
 
-  it('a type outside FlowNodeAction is governed by allowCode: refused naming allowCode when it is false', () => {
-    const rows = judgeRestrictionProfile(STACK, profile({ allowCode: false })).filter((r) => r.where.includes('(approval)'));
+  it('a type outside the profile vocabulary is governed by allowCode: refused naming allowCode when it is false', () => {
+    const rows = judgeRestrictionProfile(STACK, profile({ allowCode: false })).filter((r) => r.where.includes('(acme_sign)'));
     expect(rows.map((r) => r.rule)).toEqual(['allowCode']);
     expect(rows[0]!.message).toContain('allowedFlowNodeTypes` cannot name it');
   });
 
-  it('a type outside FlowNodeAction is allowed when allowCode is true, whatever allowedFlowNodeTypes lists', () => {
+  it('a type outside the profile vocabulary is allowed when allowCode is true, whatever allowedFlowNodeTypes lists', () => {
     const rows = rowsOf(profile({ allowedFlowNodeTypes: ['get_record', 'http', 'script'] }));
-    expect(rows.filter((r) => r.where.includes('(approval)'))).toEqual([]);
+    expect(rows.filter((r) => r.where.includes('(acme_sign)'))).toEqual([]);
+  });
+
+  /** A Team-shaped approval flow: the approval node, its revise window, and a built-in. */
+  const APPROVALS = {
+    manifest: STACK.manifest,
+    flows: [flow('rp_signoff', [
+      node('start', 'start'),
+      node('ask', APPROVAL_NODE_TYPE),
+      node('rework', APPROVAL_REVISE_NODE_TYPE),
+      node('stamp', 'update_record'),
+      node('end', 'end'),
+    ])],
+  };
+
+  it('the approval pair is in the profile vocabulary, not in FlowNodeAction', () => {
+    expect(FLOW_BUILTIN_NODE_TYPES).not.toContain(APPROVAL_NODE_TYPE);
+    expect(FLOW_BUILTIN_NODE_TYPES).not.toContain(APPROVAL_REVISE_NODE_TYPE);
+    expect(RestrictionProfileNodeType.options).toContain(APPROVAL_NODE_TYPE);
+    expect(RestrictionProfileNodeType.options).toContain(APPROVAL_REVISE_NODE_TYPE);
+  });
+
+  it('a profile that lists the approval pair allows an approval flow under allowCode: false', () => {
+    const team = profile({
+      allowCode: false,
+      allowedFlowNodeTypes: [APPROVAL_NODE_TYPE, APPROVAL_REVISE_NODE_TYPE, 'update_record'],
+    });
+    expect(rowsOf(team, APPROVALS)).toEqual([]);
+  });
+
+  it('a profile that omits the approval pair refuses each approval node by allowedFlowNodeTypes — never by allowCode', () => {
+    for (const allowCode of [false, true]) {
+      expect(rowsOf(profile({ allowCode, allowedFlowNodeTypes: ['update_record'] }), APPROVALS)).toEqual([
+        { rule: 'allowedFlowNodeTypes', where: "flow 'rp_signoff' › node 'ask' (approval)", path: 'flows[0].nodes[1]' },
+        { rule: 'allowedFlowNodeTypes', where: "flow 'rp_signoff' › node 'rework' (approval_revise)", path: 'flows[0].nodes[2]' },
+      ]);
+    }
   });
 
   it('a script node under allowCode: false is refused naming ONE rule, also when allowedFlowNodeTypes omits it', () => {
@@ -204,6 +250,76 @@ describe('judgeRestrictionProfile — the reader rules', () => {
     const rows = rowsOf(profile({ allowedFlowNodeTypes: ['get_record', 'http'] }));
     expect(rows).toEqual([
       { rule: 'allowedFlowNodeTypes', where: "flow 'rp_route' › node 'calc' (script)", path: 'flows[1].nodes[3]' },
+    ]);
+  });
+});
+
+describe('judgeRestrictionProfile — allowCode and allowSandboxedJs, judged by the body an item runs', () => {
+  const JS = { language: 'js', source: 'return { ok: true };' };
+  const EXPR = { language: 'expression', source: 'record.amount > 0' };
+  const schedule = { type: 'interval', intervalMs: 60_000 };
+  /** Every carrier of a body, in each of its forms. */
+  const BODIES = {
+    manifest: STACK.manifest,
+    hooks: [
+      { name: 'rp_js', object: 'rp_doc', events: ['beforeInsert'], body: JS },
+      { name: 'rp_expr', object: 'rp_doc', events: ['beforeInsert'], body: EXPR },
+      { name: 'rp_fn', object: 'rp_doc', events: ['beforeInsert'], handler: 'rp_fn' },
+      { name: 'rp_both', object: 'rp_doc', events: ['beforeInsert'], handler: 'rp_fn', body: JS },
+    ],
+    actions: [
+      { name: 'rp_act_js', label: 'Js', type: 'script', body: JS },
+      { name: 'rp_act_expr', label: 'Expr', type: 'script', body: EXPR },
+      { name: 'rp_act_url', label: 'Url', type: 'url', target: 'https://example.com' },
+    ],
+    objects: [{ name: 'rp_doc', actions: [{ name: 'rp_obj_js', label: 'Obj', type: 'script', body: JS }] }],
+    jobs: [
+      { name: 'rp_job_js', schedule, body: JS },
+      { name: 'rp_job_fn', schedule, handler: 'rp_fn' },
+      { name: 'rp_job_pull', schedule, pull: { mapping: 'rp_map' } },
+    ],
+  };
+
+  it('CONTROL: a profile that allows everything refuses nothing', () => {
+    expect(rowsOf(OPEN, BODIES)).toEqual([]);
+  });
+
+  it('a hosted profile (allowCode: false, allowSandboxedJs: true) refuses only the handler-form hook and job', () => {
+    expect(rowsOf(profile({ allowCode: false }), BODIES)).toEqual([
+      { rule: 'allowCode', where: "hook 'rp_fn'", path: 'hooks[2]' },
+      { rule: 'allowCode', where: "job 'rp_job_fn'", path: 'jobs[1]' },
+    ]);
+  });
+
+  it('allowSandboxedJs: false refuses every js body — hook (body over handler), action, embedded action, job — naming that rule', () => {
+    expect(rowsOf(profile({ allowSandboxedJs: false }), BODIES)).toEqual([
+      { rule: 'allowSandboxedJs', where: "hook 'rp_js'", path: 'hooks[0]' },
+      { rule: 'allowSandboxedJs', where: "hook 'rp_both'", path: 'hooks[3]' },
+      { rule: 'allowSandboxedJs', where: "action 'rp_act_js'", path: 'actions[0]' },
+      { rule: 'allowSandboxedJs', where: "action 'rp_obj_js'", path: 'objects[0].actions[0]' },
+      { rule: 'allowSandboxedJs', where: "job 'rp_job_js'", path: 'jobs[0]' },
+    ]);
+  });
+
+  it('an expression body is governed by neither code key, and a pull job by neither', () => {
+    const rows = rowsOf(profile({ allowCode: false, allowSandboxedJs: false }), BODIES);
+    expect(rows.map((r) => r.where)).toEqual([
+      "hook 'rp_js'",
+      "hook 'rp_fn'",
+      "hook 'rp_both'",
+      "action 'rp_act_js'",
+      "action 'rp_obj_js'",
+      "job 'rp_job_js'",
+      "job 'rp_job_fn'",
+    ]);
+  });
+
+  it('allowScheduledAutomation: false refuses every job by that rule alone, whatever its body', () => {
+    const rows = rowsOf(profile({ allowCode: false, allowSandboxedJs: false, allowScheduledAutomation: false }), BODIES);
+    expect(rows.filter((r) => r.where.startsWith('job '))).toEqual([
+      { rule: 'allowScheduledAutomation', where: "job 'rp_job_js'", path: 'jobs[0]' },
+      { rule: 'allowScheduledAutomation', where: "job 'rp_job_fn'", path: 'jobs[1]' },
+      { rule: 'allowScheduledAutomation', where: "job 'rp_job_pull'", path: 'jobs[2]' },
     ]);
   });
 });
@@ -223,7 +339,7 @@ describe('loadRestrictionProfile', () => {
   });
 
   it('refuses an invalid profile, naming the schema issue', () => {
-    writeFileSync(join(dir, 'bad.json'), JSON.stringify({ ...OPEN, allowedFlowNodeTypes: ['approval'] }));
+    writeFileSync(join(dir, 'bad.json'), JSON.stringify({ ...OPEN, allowedFlowNodeTypes: ['acme_sign'] }));
     expect(() => loadRestrictionProfile('bad.json', dir)).toThrow(/not a valid restriction profile.*allowedFlowNodeTypes\.0/);
   });
 

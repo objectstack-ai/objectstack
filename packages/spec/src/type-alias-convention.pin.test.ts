@@ -299,7 +299,7 @@ import type * as M202 from './marketplace/taxonomy.zod.js';
 import type * as M203 from './system/restriction-profile.zod.js';
 
 // ---------------------------------------------------------------------------
-// 842 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 843 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -1470,6 +1470,7 @@ export type Iso_system_pushDevice__UserDeviceSchema = Assert<Eq< z.input< typeof
 export type Iso_system_registryConfig__RegistrySyncPolicySchema = Assert<Eq< z.input< typeof M143.RegistrySyncPolicySchema >, z.infer< typeof M143.RegistrySyncPolicySchema > >>;
 
 // system/restriction-profile.zod.ts
+export type Iso_system_restrictionProfile__RestrictionProfileNodeType = Assert<Eq< z.input< typeof M203.RestrictionProfileNodeType >, z.infer< typeof M203.RestrictionProfileNodeType > >>;
 export type Iso_system_restrictionProfile__RestrictionProfileSchema = Assert<Eq< z.input< typeof M203.RestrictionProfileSchema >, z.infer< typeof M203.RestrictionProfileSchema > >>;
 
 // system/search-engine.zod.ts
@@ -1806,7 +1807,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 842 isomorphic pins', () => {
+  it('still declares all 843 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2844,7 +2845,11 @@ describe('ADR-0122 type-alias convention', () => {
     // an array of the built-in node type enum and a strict object of two
     // regex strings, no default and no transform
     // (Iso_system_restrictionProfile__RestrictionProfileSchema). +1 added.
-    expect(pins).toHaveLength(842);
+    // 842 -> 843 is that profile's own node vocabulary
+    // (`RestrictionProfileNodeType`): an enum of the built-in node type ids
+    // plus the spec-declared approval pair, no default and no transform
+    // (Iso_system_restrictionProfile__RestrictionProfileNodeType). +1 added.
+    expect(pins).toHaveLength(843);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until commit c6b05c76a nothing read either
