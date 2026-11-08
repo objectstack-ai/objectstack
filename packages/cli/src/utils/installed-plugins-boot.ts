@@ -7,6 +7,7 @@ import {
   loadInstalledPlugins,
   pluginInstallationsFile,
   type InstalledPluginRefusal,
+  type InstalledPluginsLoad,
 } from '@objectstack/runtime';
 import { isExitSignal } from './format.js';
 import { pluginEnvironmentId } from './plugin-install.js';
@@ -75,17 +76,23 @@ function withDeclaredServices(declaredServices: string[] | undefined, refusal: I
   return declaredServices === undefined ? refusal : { ...refusal, declaredServices };
 }
 
-export async function registerInstalledPlugins(input: {
-  kernel: BootKernel;
-  track(name: string): void;
-}): Promise<InstalledPluginsBoot | null> {
+/**
+ * The installed plugins of this project and environment, verified and imported
+ * by the runtime's loader with this host's parts (module header), and nothing
+ * registered: `null` when there is no installations file. A loader that throws
+ * outright is one `loader_failed` refusal. `os serve` registers what this
+ * answers ({@link registerInstalledPlugins}); a one-shot command reads it
+ * without registering, with `leaveUninstallsPending`, so it removes nothing.
+ */
+export async function loadHostInstalledPlugins(
+  opts: { leaveUninstallsPending?: boolean } = {},
+): Promise<InstalledPluginsLoad | null> {
   const environmentId = pluginEnvironmentId();
   if (!existsSync(pluginInstallationsFile(environmentId))) return null;
-
-  let result: Awaited<ReturnType<typeof loadInstalledPlugins>>;
   try {
-    result = await loadInstalledPlugins({
+    return await loadInstalledPlugins({
       environmentId,
+      leaveUninstallsPending: opts.leaveUninstallsPending,
       resolveKeys: async (keyIds) => {
         const read = await readTrustedKeys(keyIds, { databaseUrl: process.env.OS_DATABASE_URL, json: false });
         if (!read.ok) throw new Error(read.message);
@@ -99,13 +106,21 @@ export async function registerInstalledPlugins(input: {
     });
   } catch (error) {
     if (isExitSignal(error)) throw error;
-    result = {
+    return {
       loaded: [],
       removed: [],
       disabled: [],
       refused: [{ id: '*', version: '*', error: 'loader_failed', message: `the installed-plugin loader failed (${thrownMessage(error)}); no installed plugin was loaded.` }],
     };
   }
+}
+
+export async function registerInstalledPlugins(input: {
+  kernel: BootKernel;
+  track(name: string): void;
+}): Promise<InstalledPluginsBoot | null> {
+  const result = await loadHostInstalledPlugins();
+  if (result === null) return null;
 
   const out: InstalledPluginsBoot = { loaded: [], refused: [...result.refused] };
   for (const { record, kept } of result.removed) {
