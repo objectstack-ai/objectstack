@@ -2319,7 +2319,7 @@
       "title": "Editing the permission matrix and publishing flips an affected persona's live API access; revoke flips it back; assign/unassign moves access",
       "since": "v16",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -2337,7 +2337,7 @@
       "steps": [
         "boot showcase with the console; admin session; provision member M granted a writable set S that WITHHOLDS a verb on an object (e.g. delete:false on showcase_task); as M create the showcase_task rows the DELETE probes below use — M's OWN rows, never seeded ids: a set silent on writeScope is owner-only (packages/plugins/plugin-security/src/permission-evaluator.ts getEffectiveScope), so a seeded task owned by someone else stays refused after the verb flips ON and confounds the verb with ownership",
         "baseline: as M, DELETE /api/v1/data/showcase_task/<one of M's own ids> — must be refused 403 (the withheld verb)",
-        "in the console Permission Matrix editor for S (Setup's metadata-admin door, which mounts the editor with no packageId), flip delete ON for showcase_task and Save. That Save is a plain PUT that lands state:'active' at once, not a draft: only a package-scoped editor (Studio's Access pillar, packageId set) saves with mode 'draft' (ui/packages/app-shell/src/views/metadata-admin/PermissionMatrixEditor.tsx, the saveVersioned call; QA run #27441). Capture PUT /api/v1/meta/permission/S, then POST /api/v1/meta/permission/S/publish, which answers 404 code NO_DRAFT after that active save, per acceptance[1]; a run that edits through the package door instead publishes the pending draft and captures a 2xx",
+        "in the console Permission Matrix editor for S (Setup's metadata-admin door: /apps/setup/metadata/permission/S redirects to /_console/studio/~all/metadata/permission/S, which mounts the editor with no packageId and saves on an explicit Save), flip delete ON for showcase_task and Save. That Save is a plain PUT that lands state:'active' at once, not a draft: only a package-scoped editor (Studio's Access pillar, packageId set) saves with mode 'draft' (ui/packages/app-shell/src/views/metadata-admin/PermissionMatrixEditor.tsx, the saveVersioned call; QA run #27441). Capture PUT /api/v1/meta/permission/S, then POST /api/v1/meta/permission/S/publish, which answers 404 code NO_DRAFT after that active save, per acceptance[1]; a run that edits through the package door instead publishes the pending draft and captures a 2xx",
         "as M: DELETE /api/v1/data/showcase_task/<another of M's own ids> — must now be 2xx (access flipped)",
         "flip delete back OFF in the matrix and Save (active at once, as in steps[2]; publish only a package-door draft); as M: DELETE again — must be refused 403",
         "field-level half: flip an FLS bit (a showcase_project field editable:false→true) in the lower matrix and Save (as in steps[2]); as M PATCH that field — the write flips accordingly",
@@ -2431,6 +2431,12 @@
           "date": "2026-11-01",
           "change": "negative[2] moved to source[6]: it was a scope note naming the items that own the neighbouring surfaces, which no run can decide, so it could only score skipped. Its text is unchanged. Ruling 6545938831 item ① on #28345 (scope notes leave negative[], which keeps only decidable entries; the #27651 precedent). No clause changed. Wave anchor #27377",
           "ref": "#28345"
+        },
+        {
+          "revision": 7,
+          "date": "2026-11-08",
+          "change": "steps[2]: /apps/setup/metadata/permission/NAME redirects to /_console/studio/~all/metadata/permission/NAME, where the editor uses an explicit Save. Checklist-accuracy finding of QA run #31486 (owed:weekly, at 0647dabb). Read at base 4894cfe1",
+          "ref": "#31499"
         }
       ]
     },
