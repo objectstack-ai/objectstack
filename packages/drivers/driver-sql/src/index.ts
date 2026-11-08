@@ -33,6 +33,8 @@ export {
   DIALECT_EMISSION_UNSUPPORTED_STATUS,
   UnsupportedDialectEmissionError,
   renderDialectEmissionRefusal,
+  renderFederationOnlyEmissionRefusal,
+  type DialectEmissionScope,
 } from './dialect-emission-refusal.js';
 // [ADR-0131 D9] The autonumber counter's refusal of an organization-less row on
 // a tenant table — exported for the same reason: a caller recognises it by `code`.

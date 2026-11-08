@@ -46,6 +46,7 @@ export interface FieldMappingHost {
   readonly fieldColumnByObject: SqlDriver['fieldColumnByObject'];
   readonly logger: SqlDriver['logger'];
   readonly managedObjectFields: SqlDriver['managedObjectFields'];
+  readonly mssqlPagingKeyByObject: SqlDriver['mssqlPagingKeyByObject'];
   readonly nondeterministicPagingWarned: SqlDriver['nondeterministicPagingWarned'];
   paginationTieBreaker: SqlDriver['paginationTieBreaker'];
 }
@@ -60,11 +61,15 @@ export class FieldMappingFacet {
   }
 
   /** The body of `SqlDriver#paginationTieBreaker`; the method's docblock there is its contract. */
-  static paginationTieBreaker(this: Pick<FieldMappingHost, 'managedObjectFields'>, object: string): string | null {
+  static paginationTieBreaker(this: Pick<FieldMappingHost, 'managedObjectFields' | 'mssqlPagingKeyByObject'>, object: string): string | null {
     const tableName = StorageNameMapping.resolveTableName({ name: object } as any);
     const managed =
       this.managedObjectFields.has(tableName) || this.managedObjectFields.has(object);
-    return managed ? 'id' : null;
+    if (managed) return 'id';
+    // [#31327] A federated SQL Server table's own single-column key, read from
+    // its catalog by `primeMssqlPagingKey` — never a guess: an entry exists
+    // only when the remote catalog named the key.
+    return this.mssqlPagingKeyByObject.get(object) ?? null;
   }
 
   /** The body of `SqlDriver#orderKeysFor`; the method's docblock there is its contract. */

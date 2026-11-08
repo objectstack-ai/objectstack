@@ -103,10 +103,47 @@ export class UnsupportedDialectEmissionError extends Error {
     readonly operation: string,
     /** Every client spelling this driver DOES emit DDL for, sorted. */
     readonly supportedClients: readonly string[],
+    /**
+     * Why the client gets no emission: `'wire-only'` — recognised on the
+     * PostgreSQL wire, refused DDL by the #11756 ruling — or
+     * `'federation-only'` — SQL Server, which the driver serves for an
+     * ADR-0015 external datasource and never builds a schema on.
+     */
+    readonly scope: DialectEmissionScope = 'wire-only',
   ) {
-    super(renderDialectEmissionRefusal(client, operation, supportedClients));
+    super(
+      scope === 'federation-only'
+        ? renderFederationOnlyEmissionRefusal(client, operation, supportedClients)
+        : renderDialectEmissionRefusal(client, operation, supportedClients),
+    );
     this.name = 'UnsupportedDialectEmissionError';
   }
+}
+
+/** The two reasons a recognised client gets no DDL emission. */
+export type DialectEmissionScope = 'wire-only' | 'federation-only';
+
+/**
+ * The refusal's prose for a FEDERATION-ONLY client (SQL Server).
+ *
+ * Same three parts, same order, as {@link renderDialectEmissionRefusal}: what
+ * was refused and why, what IS supported, and what to do instead. The remedy
+ * differs because the boundary does: there is no out-of-band-schema posture to
+ * keep here, the datasource is simply external by definition.
+ */
+export function renderFederationOnlyEmissionRefusal(
+  client: string,
+  operation: string,
+  supportedClients: readonly string[],
+): string {
+  return (
+    `DDL operation '${operation}' was refused: knex client '${client}' (Microsoft SQL Server) is served ` +
+    `for federation only, so ObjectStack reads and writes tables that already exist there but never ` +
+    `creates or alters one. No table was created or altered. ` +
+    `Supported clients for schema emission: ${supportedClients.join(', ')}. ` +
+    `To use this database, declare its datasource with \`schemaMode: 'external'\` (or ` +
+    `'validate-only') and bind objects to its existing tables through \`external.remoteName\`.`
+  );
 }
 
 /**

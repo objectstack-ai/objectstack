@@ -64,6 +64,7 @@ export interface CrudHost {
   getBuilder: SqlDriver['getBuilder'];
   injectTenantOnInsert: SqlDriver['injectTenantOnInsert'];
   readonly insertReturnsStoredRows: SqlDriver['insertReturnsStoredRows'];
+  readonly isMssql: SqlDriver['isMssql'];
   readonly isSqlite: SqlDriver['isSqlite'];
   readonly knex: SqlDriver['knex'];
   mapSortField: SqlDriver['mapSortField'];
@@ -114,7 +115,7 @@ export class CrudFacet {
    * cited that as agreement, which it was not; objectstack#4419.) The
    * obligation the contract states is on `find`, and this keeps it there.
    */
-  static async findRows(this: Pick<CrudHost, 'applyFilters' | 'applyTenantScope' | 'backendStatementFault' | 'formatOutput' | 'getBuilder' | 'mapSortField' | 'orderKeysFor' | 'remoteColumn' | 'unresolvableFilterColumnRefusal'>, object: string, query: DriverQuery, options?: DriverOptions, singleRowLookup = false): Promise<any[]> {
+  static async findRows(this: Pick<CrudHost, 'applyFilters' | 'applyTenantScope' | 'backendStatementFault' | 'formatOutput' | 'getBuilder' | 'isMssql' | 'mapSortField' | 'orderKeysFor' | 'remoteColumn' | 'unresolvableFilterColumnRefusal'>, object: string, query: DriverQuery, options?: DriverOptions, singleRowLookup = false): Promise<any[]> {
     // The whole ORDER BY, decided once: the caller's keys plus whatever this
     // driver has to add to make a paged read deterministic. Derived out here
     // rather than inside `buildBase` so the recovery ladder below can ask
@@ -139,6 +140,14 @@ export class CrudFacet {
         for (const key of orderKeys) {
           b.orderBy(this.remoteColumn(object, key.field, this.mapSortField(key.field)), key.direction);
         }
+      }
+      // [#31327] SQL Server rejects `OFFSET n ROWS` without an ORDER BY (a
+      // syntax error, not a reshuffle). When nothing above ordered the read —
+      // a keyless federated table, or the #3821 rung that dropped the sort —
+      // `(SELECT NULL)` is the order that changes nothing but the statement's
+      // validity; the nondeterministic-paging warning has already been given.
+      if (this.isMssql && query.offset && !(withOrderBy && orderKeys.length > 0)) {
+        b.orderByRaw('(SELECT NULL)');
       }
 
       // PAGINATION

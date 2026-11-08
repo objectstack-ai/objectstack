@@ -135,6 +135,80 @@ function escapeGlobComparand(value: unknown): string {
   return String(value).replace(/[*?[]/g, '[$&]');
 }
 
+/**
+ * Escape a comparand for SQL Server's `LIKE`, whose pattern language has ONE
+ * metacharacter more than the shared one: `[` opens a character class
+ * (`[a-c]`, `[^0-9]`). Left unescaped, `$contains: '[1]'` would match every
+ * value holding a `1` — the #5567 bypass in a fourth spelling. So `[` joins
+ * `%`, `_` and the escape character itself, behind the same bound `ESCAPE`
+ * character as every other dialect. `]` and `^` are literal outside a class,
+ * and with every `[` escaped no class can open, so they need nothing.
+ */
+function escapeMssqlLikeComparand(value: unknown): string {
+  return String(value).replace(/[\\%_[]/g, '\\$&');
+}
+
+/**
+ * Carry a caller's `$like` PATTERN into SQL Server's pattern language.
+ *
+ * The shared language has two wildcards (`%`, `_`) and the backslash escape;
+ * SQL Server's adds the `[…]` character class. Every UNESCAPED `[` is therefore
+ * escaped, so it means the literal character it means everywhere else, and an
+ * already-escaped pair (`\%`, `\[`) is copied through untouched — the escape is
+ * the shared one, bound as `ESCAPE` exactly as on the other dialects.
+ */
+function mssqlLikePattern(pattern: string): string {
+  let out = '';
+  for (let i = 0; i < pattern.length; i++) {
+    const ch = pattern[i]!;
+    if (ch === '\\') {
+      out += ch + (pattern[i + 1] ?? '');
+      i++;
+      continue;
+    }
+    out += ch === '[' ? '\\[' : ch;
+  }
+  return out;
+}
+
+/**
+ * SQL Server's case-EXACT rendering of a text expression: the value as
+ * `nvarchar(max)`, under a binary (`_BIN2`, code-point) collation.
+ *
+ * Both halves are load-bearing:
+ *
+ * - **`COLLATE … _BIN2`.** A SQL Server database's default collation is
+ *   case-insensitive (`SQL_Latin1_General_CP1_CI_AS`, `Chinese_PRC_CI_AS`, …),
+ *   so a bare `LIKE` folds case — `$contains: 'Caf'` matched `café`, measured on
+ *   SQL Server 2022 before this arm existed. An explicit collation on an
+ *   operand outranks the column's own, so the comparison is code-point exact
+ *   whatever the database or column was created with.
+ * - **`CAST(… AS nvarchar(max))` first.** A `COLLATE` on a `varchar` operand
+ *   re-encodes it into the target collation's code page, and a Latin1 code
+ *   page has no Chinese (or Cyrillic, or …) characters: they would become `?`.
+ *   Widening to `nvarchar` first converts through the column's OWN code page
+ *   into Unicode, so the collation only changes how characters compare, never
+ *   which characters there are. An `nvarchar` column passes through unchanged.
+ *
+ * Applied to the comparand too, so the pattern is compared in the same terms.
+ */
+function mssqlCaseExact(expr: string): string {
+  return `CAST(${expr} AS nvarchar(max)) COLLATE Latin1_General_100_BIN2`;
+}
+
+/**
+ * The #6518 ASCII-only fold on SQL Server: `TRANSLATE` over the 26 letters,
+ * applied to the {@link mssqlCaseExact} rendering. `LOWER()` is not used for
+ * the reason `translate()` replaced it on Postgres: it folds `É` to `é`, the
+ * over-fold the Q1 = A contract excludes. Under the binary collation
+ * `TRANSLATE` matches code points, so exactly the 26 ASCII capitals move.
+ * `TRANSLATE` is SQL Server 2017 (14.x) and later — the dialect floor this arm
+ * declares.
+ */
+function mssqlAsciiLower(expr: string): string {
+  return `TRANSLATE(${mssqlCaseExact(expr)}, '${ASCII_UPPER_LETTERS}', '${ASCII_LOWER_LETTERS}')`;
+}
+
 /** Wrap an already-escaped comparand in the wildcards `shape` calls for. */
 function wrapTextMatchShape(escaped: string, shape: TextMatchShape, wildcard: string): string {
   if (shape === 'starts') return `${escaped}${wildcard}`;
@@ -331,8 +405,14 @@ function mysqlAsciiLowerBinary(expr: string): string {
  *   provisionable in the container that wrote this, so the mysql cell is a
  *   declared skip in the live matrix rather than a claimed pass, and the
  *   reasoning is written out on that helper instead.
+ * - **SQL Server → `LIKE` over {@link mssqlCaseExact}** (`nvarchar(max)` under
+ *   a `_BIN2` collation, so the database's case-insensitive default collation
+ *   cannot fold the match), with {@link escapeMssqlLikeComparand}'s wider
+ *   character class — `[` is a metacharacter there — and
+ *   {@link mssqlAsciiLower}'s `TRANSLATE` for the fold. Executed on SQL Server
+ *   2022 by the live mssql cell.
  * - **`'unknown'` → the pre-#6518 `LIKE`/`LOWER()` shape.** `dialectName` is
- *   `'unknown'` for a knex client this driver does not model (mssql, oracle),
+ *   `'unknown'` for a knex client this driver does not model (oracle, …),
  *   where `GLOB` is a syntax error and `CAST(… AS BINARY)` means something
  *   else. Emitting the old shape is not an endorsement of it — it is the only
  *   answer that still RUNS, and it is the residue the conformance ledger names.
@@ -370,6 +450,15 @@ export function textMatchPredicate(
     return {
       sql: `${column} ${negate ? 'NOT GLOB' : 'GLOB'} ${comparand}`,
       bindings: [field, pattern],
+    };
+  }
+
+  if (dialect === 'mssql') {
+    // `[` is a fourth metacharacter here, so the comparand takes its own escape.
+    const caseExact = fold ? mssqlAsciiLower : mssqlCaseExact;
+    return {
+      sql: `${caseExact('??')} ${negate ? 'NOT LIKE' : 'LIKE'} ${caseExact('?')} ESCAPE ?`,
+      bindings: [field, wrapTextMatchShape(escapeMssqlLikeComparand(value), shape, '%'), LIKE_ESCAPE_CHARACTER],
     };
   }
 
@@ -560,6 +649,10 @@ function sqliteLikePatternMatch(field: string, pattern: string, fold: boolean): 
  *   {@link mysqlAsciiLowerBinary} on both sides. Not executed here for the same
  *   reason its sibling records: no MySQL server is provisionable in this
  *   container, so the cell is a declared skip rather than a claimed pass.
+ * - **SQL Server → `LIKE` over {@link mssqlCaseExact}**, the pattern carried
+ *   through {@link mssqlLikePattern} so an unescaped `[` stays the literal it is
+ *   in the shared pattern language; `$ilike` folds through
+ *   {@link mssqlAsciiLower}.
  * - **`'unknown'` → plain `LIKE` / `LOWER()`**, the only shape that still RUNS
  *   on a client this driver does not model. Same residue the conformance ledger
  *   names for the `$contains` family.
@@ -575,6 +668,14 @@ export function likePatternPredicate(
     // {@link sqliteLikePatternMatch} keeps GLOB wherever that cut cannot change
     // the answer and reads the whole value everywhere else.
     return sqliteLikePatternMatch(field, pattern, fold);
+  }
+
+  if (dialect === 'mssql') {
+    const caseExact = fold ? mssqlAsciiLower : mssqlCaseExact;
+    return {
+      sql: `${caseExact('??')} LIKE ${caseExact('?')} ESCAPE ?`,
+      bindings: [field, mssqlLikePattern(pattern), LIKE_ESCAPE_CHARACTER],
+    };
   }
 
   const bindings = [field, pattern, LIKE_ESCAPE_CHARACTER];
@@ -628,7 +729,9 @@ export function undeclaredEmptyOperatorFieldError(field: string, subtree?: unkno
 
 /**
  * [#20444] `$empty` on a multi-value field, over a knex client whose dialect
- * this driver does not model (`dialectName === 'unknown'`). The empty list is
+ * has no JSON-list construct here (`dialectName === 'unknown'`, or `'mssql'` —
+ * SQL Server's federation serves scalar columns; see
+ * {@link jsonMembershipUnsupportedDialectError}). The empty list is
  * tested with a JSON function that differs per dialect and none of the three
  * this driver speaks parses everywhere, so the multi-value row has no construct
  * there. The text and null-only rows need no dialect and compile everywhere.
@@ -636,12 +739,40 @@ export function undeclaredEmptyOperatorFieldError(field: string, subtree?: unkno
 export function emptyListUnsupportedDialectError(field: string, subtree?: unknown): Error {
   const why =
     'a multi-value field, whose empty list is tested with a JSON function that differs per SQL ' +
-    'dialect, and this connection\'s dialect is not one this driver models (SQLite, PostgreSQL, ' +
-    'MySQL). It is refused rather than guessed; "$null" answers "has no value" on every dialect.';
+    'dialect, and this driver has that construct only for SQLite, PostgreSQL and MySQL — not for ' +
+    'this connection\'s dialect. It is refused rather than guessed; "$null" answers "has no value" ' +
+    'on every dialect.';
   return withheldFilterError(
     `Operator "$empty" in this filter targets ${why} The field is withheld from the message; the ` +
       'full diagnostic is in the server log.',
     `Operator "$empty" on field "${field}" targets ${why}`,
+    subtree,
+  );
+}
+
+/**
+ * `$contains` / `$notContains` on a multi-value (JSON-array) field over SQL
+ * Server.
+ *
+ * On a JSON column those operators ask whether the comparand is an ELEMENT of
+ * the stored array (commit e04a0aff2), and the construct that answers it lives
+ * in `@objectstack/core`'s `jsonMembershipPredicate`, which has arms for SQLite,
+ * PostgreSQL and MySQL only. The fallback a dialect-less client gets — a
+ * substring `LIKE` over the serialized array — answers a different question
+ * (`['redwood']` would "contain" `'red'`), so on SQL Server the filter is
+ * refused rather than answered wrongly. Scalar columns, which is what a
+ * federated SQL Server table holds, are unaffected.
+ */
+export function jsonMembershipUnsupportedDialectError(field: string, subtree?: unknown): Error {
+  const why =
+    'a multi-value (JSON-array) field, where it asks whether the value is an ELEMENT of the stored ' +
+    'list; this driver has that construct only for SQLite, PostgreSQL and MySQL, not for SQL Server, ' +
+    'and a substring match over the serialized list would answer a different question. It is ' +
+    'refused rather than guessed.';
+  return withheldFilterError(
+    `Operator "$contains" / "$notContains" in this filter targets ${why} The field is withheld from ` +
+      'the message; the full diagnostic is in the server log.',
+    `Operator "$contains" / "$notContains" on field "${field}" targets ${why}`,
     subtree,
   );
 }
@@ -802,12 +933,14 @@ export function applyEmptyOperator(this: Pick<PredicateEmitterHost, 'declaredVal
 /** The body of `SqlDriver#applyJsonMembership`; the method's docblock there is its contract. */
 export function applyJsonMembership(this: Pick<PredicateEmitterHost, 'applyNullSafeNegative' | 'dialectName' | 'isJsonColumn'>, builder: any, method: string, table: string | null | undefined, localField: string, field: string, value: unknown, negate: boolean): boolean {
   if (!this.isJsonColumn(table, localField)) return false;
+  const dialect = this.dialectName;
+  if (dialect === 'mssql') throw jsonMembershipUnsupportedDialectError(field);
   // [#20987] The construct lives in `@objectstack/core`, placeholder-agnostic;
   // this driver's plumbing is knex's: `??` binds the column as an identifier
   // and `?` a value, each pushed in the order the placeholders appear.
   const bindings: unknown[] = [];
   const sql = jsonMembershipPredicate(
-    this.dialectName,
+    dialect,
     {
       column: () => { bindings.push(field); return '??'; },
       value: (v) => { bindings.push(v); return '?'; },

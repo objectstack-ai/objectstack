@@ -31,7 +31,7 @@
 import { emptyGroupValueFor } from '@objectstack/spec/data';
 import type { DriverOptions } from '@objectstack/spec/data';
 import type { DriverQuery } from '@objectstack/spec/contracts';
-import { AGGREGATE_ANSWER_KIND, aggregandOperandSql } from '@objectstack/core';
+import { AGGREGATE_ACCUMULATION, AGGREGATE_ANSWER_KIND, aggregandOperandSql } from '@objectstack/core';
 import type { AggregandColumnClass } from '@objectstack/core';
 import {
   refuseDateBucketedGroupBy, refuseDistinctAggregateWithoutField, unsupportedAggregationFilterError,
@@ -222,7 +222,10 @@ export class AggregationFacet {
         // face applies too. Still one `??` binding: the cast and the wrap are
         // SQL text around it, so the column stays a knex identifier binding.
         const aggregandClass = fieldExpr === '*' ? undefined : this.aggregandColumnClassOf(table, fieldExpr);
-        const argExpr = aggregandOperandSql(funcName, aggregandClass, this.dialectName, '??');
+        const dialect = this.dialectName;
+        const argExpr = dialect === 'mssql'
+          ? mssqlAggregandOperandSql(funcName, aggregandClass, '??')
+          : aggregandOperandSql(funcName, aggregandClass, dialect, '??');
         const rawFunc = lowering.distinct
           ? `${lowering.sql}(distinct ${argExpr})`
           : `${lowering.sql}(${argExpr})`;
@@ -363,4 +366,40 @@ export class AggregationFacet {
     }
     return rows;
   }
+}
+
+/**
+ * The aggregate operand on SQL Server — the two `@objectstack/core` operand
+ * policies (`aggregandOperandSql`), restated for the one dialect that policy
+ * table does not name, because SQL Server needs BOTH of them for reasons of
+ * its own:
+ *
+ * - **The boolean cast.** `bit` is SQL Server's boolean, and `SUM` / `AVG` /
+ *   `MIN` / `MAX` over a `bit` operand are errors there ("Operand data type
+ *   bit is invalid for sum operator"), the same position PostgreSQL's
+ *   `boolean` is in. So the four functions read `CAST(x AS int)`, answering the
+ *   ruled 1 / 0 arithmetic; `count` / `count_distinct` stay uncast.
+ * - **Double accumulation.** `AVG` over an integer column is INTEGER division
+ *   on SQL Server (`AVG` of 1 and 2 is 1), so the policy's `'double'` functions
+ *   read `CAST(x AS float)`. A direct cast is the value the rows path adds:
+ *   tedious hands a `decimal` / `numeric` / `money` value to JS as the same
+ *   double, so there is no text detour to reproduce (PostgreSQL and MySQL take
+ *   one because their clients hand those types over as decimal TEXT).
+ *
+ * Kept beside its one caller rather than added to the core policy table: the
+ * table's dialect vocabulary is shared with the analytics compilers, which do
+ * not emit for SQL Server.
+ */
+export function mssqlAggregandOperandSql(
+  func: keyof typeof AGGREGATE_ACCUMULATION,
+  columnClass: AggregandColumnClass | undefined,
+  operand: string,
+): string {
+  const castsBoolean = columnClass === 'boolean' && func !== 'count' && func !== 'count_distinct';
+  const cast = castsBoolean ? `cast(${operand} as int)` : operand;
+  const accumulation = AGGREGATE_ACCUMULATION[func];
+  const inDouble = accumulation === 'double'
+    ? columnClass !== undefined
+    : accumulation === 'double-over-fractional' && columnClass === 'fractional';
+  return inDouble ? `cast(${cast} as float)` : cast;
 }

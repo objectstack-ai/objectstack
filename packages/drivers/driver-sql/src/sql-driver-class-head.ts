@@ -62,6 +62,7 @@ export interface ClassHeadHost {
   buildDateBucketExpr: SqlDriverClass['buildDateBucketExpr'];
   readonly config: SqlDriverClass['config'];
   readonly isMysql: SqlDriverClass['isMysql'];
+  readonly isMssql: SqlDriverClass['isMssql'];
   readonly isPostgres: SqlDriverClass['isPostgres'];
   readonly isSqlite: SqlDriverClass['isSqlite'];
   readonly knex: SqlDriverClass['knex'];
@@ -109,8 +110,8 @@ export class ClassHeadFacet {
   }
 
   /** The body of `SqlDriver#insertReturnsStoredRows`; the method's docblock there is its contract. */
-  static insertReturnsStoredRows(this: Pick<ClassHeadHost, 'isPostgres' | 'isSqlite'>): boolean {
-    return this.isSqlite || this.isPostgres;
+  static insertReturnsStoredRows(this: Pick<ClassHeadHost, 'isMssql' | 'isPostgres' | 'isSqlite'>): boolean {
+    return this.isSqlite || this.isPostgres || this.isMssql;
   }
 
   /** The body of `SqlDriver#aliasIdentifierSql`; the method's docblock there is its contract. */
@@ -516,6 +517,9 @@ export class ClassHeadFacet {
   /** The body of `SqlDriver#assertDialectEmits`; the method's docblock there is its contract. */
   static assertDialectEmits(this: Pick<ClassHeadHost, 'config'>, operation: string): void {
     const client = SqlDriver.clientSpelling(this.config);
+    if (SqlDriver.MSSQL_FEDERATION_CLIENTS.has(client)) {
+      throw new UnsupportedDialectEmissionError(client, operation, SqlDriver.emissionClients(), 'federation-only');
+    }
     if (!SqlDriver.POSTGRES_WIRE_ONLY_CLIENTS.has(client)) return;
     throw new UnsupportedDialectEmissionError(client, operation, SqlDriver.emissionClients());
   }
