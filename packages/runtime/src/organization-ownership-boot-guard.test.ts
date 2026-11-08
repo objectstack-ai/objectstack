@@ -25,6 +25,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { ORGANIZATION_OWNERSHIP_SHAPE_GENERATION } from '@objectstack/spec/system';
+// AppPlugin reaches `@objectstack/metadata` through a dynamic import: pay its load at collection.
+import '@objectstack/metadata';
 import { AppPlugin } from './app-plugin.js';
 import {
   assertOrganizationOwnershipMigrated,
