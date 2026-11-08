@@ -12,6 +12,7 @@ import {
   SysAccount,
   SysApiKey,
   SysDeviceCode,
+  SysIdpGroupMapping,
   SysInvitation,
   SysMember,
   SysJwks,
@@ -89,6 +90,9 @@ export const authIdentityObjects: any[] = [
   SysScimProjectionGrant,
   SysScimSubject,
   SysScimUser,
+  // The group → permission-set mapping the SCIM projection reads
+  // (`scim-group-projection.ts`); written only by the platform-admin door.
+  SysIdpGroupMapping,
 ];
 
 /**

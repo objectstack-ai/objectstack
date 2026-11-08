@@ -42,6 +42,11 @@ import { claudeMcpAddLine, MCP_ENDPOINT_PATH } from './mcp/connect.js';
 // #12620 and #12662 protected against.
 import { describePortSource, parseRequestedPort, formatInvalidPortNotice, portFlagEnv } from '../utils/port-contract.js';
 import { applyCryptoKeyFileChannel } from '../utils/internal-crypto-key-file-channel.js';
+import {
+  ceremonyDatabaseUrl,
+  writeCeremonyConnectionChannel,
+  writeCeremonyDatabaseChannel,
+} from '../utils/internal-ceremony-database-channel.js';
 import { startDevDeployKey, type DeployKeyHandle } from '../utils/dev-deploy-key.js';
 // The ONE dev-TLS contract, shared with the `serve` child this command spawns
 // (#16804). ⛔ Nothing about certificates is declared in this file, and ⛔ no
@@ -841,6 +846,17 @@ export default class Dev extends Command {
         ...(flags['auth-secret'] ? { OS_AUTH_SECRET: flags['auth-secret'] } : {}),
       };
       applyFreshHomeChannel(localEnv, freshHome);
+      // [#31547] The database `-d` (or `--fresh`) chose is one the ceremony the
+      // ownership refusal names does not find on its own, and the driver and
+      // token the two flags above put here are not in the developer's shell:
+      // the child names them in both `--dev` commands, read from the
+      // resolution above (the one this boot serves), never re-resolved. Same
+      // channel as `os start` (#31488). `os dev` has no `--home`.
+      writeCeremonyDatabaseChannel(localEnv, ceremonyDatabaseUrl(resolvedDb, { homeFlag: undefined }));
+      writeCeremonyConnectionChannel(localEnv, {
+        databaseDriver: flags['database-driver'],
+        databaseAuthToken: flags['database-auth-token'],
+      });
       // The data key's file: the ONE answer `os start` takes too (#29934), so a
       // secret saved here reads back under `os start` over the same project —
       // and the file an earlier `os start` kept in the project is still read.

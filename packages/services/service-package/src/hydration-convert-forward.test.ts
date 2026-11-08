@@ -152,7 +152,7 @@ async function restartWith(bodies: Bag[]) {
   dirs.push(dir);
   const first = await boot(dir);
   for (const [i, manifest] of bodies.entries()) {
-    expect(await first.packages.publish({ manifest: manifest as never, metadata: {} as never })).toEqual({ success: true });
+    expect(await first.packages.publish({ manifest: manifest as never, metadata: {} as never })).toEqual({ success: true, version: expect.any(String), createdAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/) });
     await first.ql.execute({
       sql: 'UPDATE sys_packages SET created_at = ? WHERE id = ?',
       args: [`2026-01-01 00:00:${String(59 - i).padStart(2, '0')}`, manifest.id],

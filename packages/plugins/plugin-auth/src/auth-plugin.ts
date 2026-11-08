@@ -103,6 +103,7 @@ import { runSetInitialPassword } from './set-initial-password.js';
 import { runRegisterSsoProviderFromForm, runRegisterSamlProviderFromForm, runRequestDomainVerification, runVerifyDomain, type AuthRequestHandler } from './register-sso-provider.js';
 import { runResendVerificationEmail } from './send-verification-email.js';
 import { runSysSessionRevoke, sysSessionRevokeDepsFor } from './sys-session-revoke.js';
+import { oneAccountReadFaultAtMount, oneAccountRefusalAtMount } from './one-account-per-request.js';
 import { answerOneTimeTokenHandoff } from './one-time-token-handoff.js';
 import { readJsonRequestBody } from './request-json-body.js';
 import {
@@ -817,6 +818,21 @@ export class AuthPlugin implements Plugin {
             'invitation-placement',
           )) ?? ctx.getService?.('invitation-placement');
         return svc as never;
+      } catch {
+        return undefined;
+      }
+    };
+
+    // [ADR-0090 D12] Lazy handle to the `security` service's organization
+    // boundary predicate, for the identity-provider group mapping (its save
+    // door and the SCIM group projection). Feature-detected: a security
+    // service without the member, or none at all, answers `undefined`, and
+    // both callers then fail closed.
+    authConfig.organizationBoundary = async () => {
+      try {
+        const svc = ctx.getService<{ organizationBoundaryFailure?: (setName: string) => Promise<string | null> }>('security');
+        const judge = svc?.organizationBoundaryFailure;
+        return typeof judge === 'function' ? { organizationBoundaryFailure: (setName: string) => judge.call(svc, setName) } : undefined;
       } catch {
         return undefined;
       }
@@ -3663,6 +3679,38 @@ export class AuthPlugin implements Plugin {
       });
     }
 
+    // ── An auth request is judged and executed as one account ─────────────
+    // A request whose session cookie and bearer token name two different
+    // signed-in accounts is refused HERE, ahead of every route below — the
+    // raw ObjectStack mounts, which read their caller in process, and the
+    // vendor catch-all alike — with `401 CREDENTIALS_NAME_DIFFERENT_ACCOUNTS`
+    // in the ADR-0112 envelope. The judgment is the before-hook's own
+    // (`one-account-per-request.ts`); asked here, a raw mount answers it with
+    // its code instead of meeting it as a throw from its session read. A
+    // request that carries one credential, or two that name one account, is
+    // handed on with nothing read. Fail-closed, as the before-hook is: a
+    // request carrying both credentials whose judgment could not be reached
+    // (no auth context to read with, or any other fault on the way) is
+    // answered `503 SERVICE_UNAVAILABLE` and goes no further.
+    if (typeof rawApp.use === 'function') {
+      rawApp.use(`${basePath}/*`, async (c: any, next: () => Promise<void>) => {
+        const mgr = this.authManager;
+        const headers: Headers | undefined = c.req.raw?.headers;
+        if (!mgr || typeof mgr.getAuthContext !== 'function' || !headers?.get?.('authorization') || !headers?.get?.('cookie')) {
+          return next();
+        }
+        let refusal: Awaited<ReturnType<typeof oneAccountRefusalAtMount>>;
+        try {
+          refusal = await oneAccountRefusalAtMount(headers, await mgr.getAuthContext());
+        } catch {
+          const fault = oneAccountReadFaultAtMount();
+          return c.json(fault.body, fault.status);
+        }
+        if (refusal) return c.json(refusal.body, refusal.status);
+        return next();
+      });
+    }
+
     // Register /config before the wildcard so it takes precedence.
     // better-auth has no /config endpoint, so without this explicit route
     // the wildcard below forwards the request and better-auth returns 404.
@@ -4201,6 +4249,39 @@ export class AuthPlugin implements Plugin {
           return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
         }
       });
+
+      // [ADR-0134 D4, filled for permission sets] The identity-provider group
+      // mapping door: which ordinary permission set a SCIM connection's group
+      // grants. The same gate as the credential door above, then the save
+      // refuses any set outside the organization boundary (judged by the
+      // `security` service), so an IdP group never confers administrator
+      // standing. See `idp-group-mapping-admin.ts`.
+      const groupMappingDeps = (actor: PlatformAdminActor): import('./idp-group-mapping-admin.js').IdpGroupMappingAdminDeps => ({
+        getDataEngine: () => this.authManager!.getDataEngine(),
+        isScimEnabled: () => this.authManager!.isScimWired(),
+        boundary: () => this.authManager!.organizationBoundaryJudge(),
+        reconcile: (domain) => this.authManager!.reconcileScimProjectionDomain(domain),
+        attributed: (fn) => runAttributedToUser(actor, fn),
+        logger: { warn: (m) => ctx.logger.warn(m), error: (m) => ctx.logger.error(m) },
+      });
+      const groupMappingHandler = (
+        label: string,
+        runner: 'runSetIdpGroupMapping' | 'runDeleteIdpGroupMapping',
+      ) => async (c: any) => {
+        try {
+          const actor = await gateAdmin(c);
+          if (actor instanceof Response) return actor;
+          const door = await import('./idp-group-mapping-admin.js');
+          const { status, body } = await door[runner](groupMappingDeps(actor), actor, c.req.raw);
+          return c.json(body, status as any);
+        } catch (error) {
+          const err = error instanceof Error ? error : new Error(String(error));
+          ctx.logger.error(`[AuthPlugin] ${label} failed`, err);
+          return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+        }
+      };
+      rawApp.post(`${basePath}/admin/scim/set-group-mapping`, groupMappingHandler('admin/scim/set-group-mapping', 'runSetIdpGroupMapping'));
+      rawApp.post(`${basePath}/admin/scim/delete-group-mapping`, groupMappingHandler('admin/scim/delete-group-mapping', 'runDeleteIdpGroupMapping'));
     }
 
     // ────────────────────────────────────────────────────────────────────
