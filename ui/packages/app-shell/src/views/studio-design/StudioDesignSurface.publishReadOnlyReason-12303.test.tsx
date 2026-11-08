@@ -35,6 +35,9 @@ import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { I18nProvider } from '@object-ui/i18n';
+// The surface loads the linter lazily; pay that load at collection, not inside
+// a case's clocked window.
+import '@objectstack/lint';
 
 const PACKAGE_ID = 'com.acme.app';
 
