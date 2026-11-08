@@ -24,18 +24,30 @@
  * ## What each dimension reads — the spec's vocabulary, never a list of ours
  *
  *  - `allowCode` — what `RestrictionProfileSchema` itself says it covers:
- *    object lifecycle `hooks`, named handler `functions` and code plugins. The
- *    non-collection keys are read from the spec's one classification of what
- *    is code, `UNMANAGED_INSTALL_KEY_DISPOSITIONS` (`@objectstack/spec/kernel`,
- *    disposition `code`), the table `defineStack`'s unmanaged-install refusal
- *    and the install door's planner already share; `hooks` is a collection,
- *    so it is named here, as the profile's own docblock names it. A key that
- *    carries nothing (`functions: {}`, `plugins: []`) refuses nothing — the
+ *    in-process code — a `hooks` or `jobs` entry with no `body` that names a
+ *    `handler` (the handler runs), named handler `functions` and code
+ *    plugins. The non-collection keys are read from the spec's one
+ *    classification of what is code, `UNMANAGED_INSTALL_KEY_DISPOSITIONS`
+ *    (`@objectstack/spec/kernel`, disposition `code`), the table
+ *    `defineStack`'s unmanaged-install refusal and the install door's planner
+ *    already share; `hooks` and `jobs` are collections, so they are named
+ *    here, as the profile's own docblock names them. A key that carries
+ *    nothing (`functions: {}`, `plugins: []`) refuses nothing — the
  *    same `unmanagedInstallValueCarries` test that table's readers apply.
  *    `devPlugins` is not read: `os build` leaves it out of the artifact, so it
  *    never reaches a target (`NEVER_REACHES_TARGET` below).
+ *  - `allowSandboxedJs` — every sandboxed JavaScript body (`language: 'js'`):
+ *    a `hooks[].body`, an `actions[].body` on a `type: 'script'` action (the
+ *    only type the runtime runs a body for; top-level and embedded on
+ *    `objects[].actions`) and a `jobs[].body`. A body wins over `handler`, as
+ *    at bind, so a hook or job is judged by its body when it has one. An
+ *    expression body (`language: 'expression'`) is a pure formula: neither
+ *    code dimension reads it.
  *  - `allowScheduledAutomation` — a flow of `type: 'schedule'` and every
  *    `jobs` entry (a job always carries a cron, interval or once `schedule`).
+ *    It is judged first: under `allowScheduledAutomation: false` a job is
+ *    refused by that rule alone, so its body or handler is judged only when
+ *    scheduled automation is allowed.
  *  - `allowedFlowNodeTypes` — every node of every flow, at every region depth
  *    (`collectFlowGraphs`, the walk the flow schema's own id rule uses).
  *
@@ -50,9 +62,12 @@
  *     container only holds regions; every node inside it is still judged.
  *     (`loop`, the third container, IS a `FlowNodeAction` id, so
  *     `allowedFlowNodeTypes` judges it like any built-in.)
- *  2. A node type outside the spec's built-in registry (`FlowNodeAction` /
- *     `FLOW_BUILTIN_NODE_TYPES`) cannot be named by `allowedFlowNodeTypes`, so
- *     it is governed by `allowCode`, and its refusal names that rule.
+ *  2. A node type outside the profile's vocabulary
+ *     (`RestrictionProfileNodeType`: the `FlowNodeAction` built-ins plus the
+ *     plugin node types whose contracts the spec declares, `approval` and
+ *     `approval_revise`) cannot be named by `allowedFlowNodeTypes`, so it is
+ *     governed by `allowCode`, and its refusal names that rule. The approval
+ *     pair IS in the vocabulary, so the list judges it.
  *  3. A `script` node calls a registered function, so under `allowCode: false`
  *     it is refused by `allowCode` alone — never by both rules.
  *
@@ -63,7 +78,6 @@ import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { isAbsolute, join, resolve } from 'node:path';
 import {
-  FLOW_BUILTIN_NODE_TYPES,
   FLOW_STRUCTURAL_NODE_TYPES,
   PARALLEL_NODE_TYPE,
   TRY_CATCH_NODE_TYPE,
@@ -71,7 +85,7 @@ import {
   type FlowNodeParsed,
 } from '@objectstack/spec/automation';
 import { UNMANAGED_INSTALL_KEY_DISPOSITIONS, unmanagedInstallValueCarries } from '@objectstack/spec/kernel';
-import { RestrictionProfileSchema } from '@objectstack/spec/system';
+import { RestrictionProfileNodeType, RestrictionProfileSchema } from '@objectstack/spec/system';
 import type { z } from 'zod';
 
 import { artifactPackages } from './artifact-packages.js';
@@ -80,7 +94,7 @@ import { artifactPackages } from './artifact-packages.js';
 export type ParsedRestrictionProfile = z.infer<typeof RestrictionProfileSchema>;
 
 /** The profile dimension that refuses an item. */
-export type RestrictionRule = 'allowCode' | 'allowScheduledAutomation' | 'allowedFlowNodeTypes';
+export type RestrictionRule = 'allowCode' | 'allowSandboxedJs' | 'allowScheduledAutomation' | 'allowedFlowNodeTypes';
 
 /** One item of the stack the target's restriction profile refuses. */
 export interface RestrictionRefusal {
@@ -166,6 +180,9 @@ export function loadRestrictionProfile(
  */
 const FLOW_CONTAINER_NODE_TYPES: readonly string[] = [PARALLEL_NODE_TYPE, TRY_CATCH_NODE_TYPE];
 
+/** Reader rule 2: the node types `allowedFlowNodeTypes` can name — the spec's derived profile vocabulary. */
+const PROFILE_NODE_TYPES: ReadonlySet<string> = new Set(RestrictionProfileNodeType.options);
+
 /**
  * The keys the spec classifies as code that never reach a target, so
  * `allowCode` does not read them. `devPlugins` is loaded only by a local
@@ -200,6 +217,10 @@ const nameOf = (item: unknown, fallback: string): string => {
 
 const CODE_OFF = 'the target\'s restriction profile sets `allowCode: false`';
 const SCHEDULE_OFF = 'the target\'s restriction profile sets `allowScheduledAutomation: false`';
+const SANDBOX_OFF = 'the target\'s restriction profile sets `allowSandboxedJs: false`';
+
+/** The `language` of an item's `body`, or `undefined` when it carries none. */
+const bodyLanguage = (item: unknown): unknown => (isBag(item) && isBag(item.body) ? item.body.language : undefined);
 
 /** The items one code-carrying key holds, each named. */
 function codeItems(key: string, value: unknown): Array<{ label: string; at: string }> {
@@ -234,17 +255,74 @@ export function judgeRestrictionProfile(
   const rows: RestrictionRefusal[] = [];
 
   for (const { bag, at, manifest } of subjects) {
-    // ── allowCode: hooks, and the keys the spec classifies as code ──
-    if (!profile.allowCode) {
-      const hooks = bag.hooks;
-      if (Array.isArray(hooks)) {
-        hooks.forEach((hook, i) => rows.push({
-          rule: 'allowCode',
-          where: `hook '${nameOf(hook, `hooks[${i}]`)}'`,
-          path: `${at}hooks[${i}]`,
-          message: `An object lifecycle hook runs code, and ${CODE_OFF}.`,
-        }));
+    // ── hooks: judged by the body they run — sandboxed JS, an expression, or (no body) the handler ──
+    if (Array.isArray(bag.hooks)) {
+      bag.hooks.forEach((hook, i) => {
+        const where = `hook '${nameOf(hook, `hooks[${i}]`)}'`;
+        const path = `${at}hooks[${i}]`;
+        const language = bodyLanguage(hook);
+        if (language === 'js') {
+          if (!profile.allowSandboxedJs) {
+            rows.push({
+              rule: 'allowSandboxedJs',
+              where,
+              path,
+              message: `An object lifecycle hook's \`body\` is sandboxed JavaScript, and ${SANDBOX_OFF}.`,
+            });
+          }
+        } else if (language === undefined && isBag(hook) && hook.handler !== undefined && hook.handler !== '' && !profile.allowCode) {
+          // A handler may still be an inline function before `os build`, so presence is the test.
+          rows.push({
+            rule: 'allowCode',
+            where,
+            path,
+            message: `An object lifecycle hook with no \`body\` runs its \`handler\`, which is code, and ${CODE_OFF}.`,
+          });
+        }
+      });
+    }
+
+    // ── actions: a sandboxed JavaScript body, top-level or embedded on an object ──
+    if (!profile.allowSandboxedJs) {
+      // `defineStack` copies each top-level action bound by `objectName` into that
+      // object's `actions` and keeps it at the top level too, so a built stack
+      // carries it twice. It is judged once, at its top-level path; the stack
+      // schema already refuses an action key authored in both positions.
+      const bound = new Set<string>();
+      if (Array.isArray(bag.actions)) {
+        for (const action of bag.actions) {
+          if (isBag(action) && typeof action.objectName === 'string') bound.add(`${action.objectName}:${nameOf(action, '')}`);
+        }
       }
+      const actionLists: Array<{ list: unknown; prefix: string; owner?: string }> = [
+        { list: bag.actions, prefix: `${at}actions` },
+      ];
+      if (Array.isArray(bag.objects)) {
+        bag.objects.forEach((object, o) => {
+          if (isBag(object)) {
+            actionLists.push({ list: object.actions, prefix: `${at}objects[${o}].actions`, owner: nameOf(object, '') });
+          }
+        });
+      }
+      for (const { list, prefix, owner } of actionLists) {
+        if (!Array.isArray(list)) continue;
+        list.forEach((action, i) => {
+          if (bodyLanguage(action) !== 'js') return;
+          // The runtime binds an action body only for `type: 'script'` (the schema's default type).
+          if (isBag(action) && action.type !== undefined && action.type !== 'script') return;
+          if (owner !== undefined && bound.has(`${owner}:${nameOf(action, '')}`)) return;
+          rows.push({
+            rule: 'allowSandboxedJs',
+            where: `action '${nameOf(action, `actions[${i}]`)}'`,
+            path: `${prefix}[${i}]`,
+            message: `An action's \`body\` is sandboxed JavaScript, and ${SANDBOX_OFF}.`,
+          });
+        });
+      }
+    }
+
+    // ── allowCode: the keys the spec classifies as code ──
+    if (!profile.allowCode) {
       const scopes: Array<{ keys: Bag; prefix: string }> = [{ keys: bag, prefix: at }];
       if (manifest) scopes.push({ keys: manifest, prefix: `${at}manifest.` });
       for (const { keys, prefix } of scopes) {
@@ -263,14 +341,41 @@ export function judgeRestrictionProfile(
       }
     }
 
-    // ── allowScheduledAutomation: background jobs ──
-    if (!profile.allowScheduledAutomation && Array.isArray(bag.jobs)) {
-      bag.jobs.forEach((job, i) => rows.push({
-        rule: 'allowScheduledAutomation',
-        where: `job '${nameOf(job, `jobs[${i}]`)}'`,
-        path: `${at}jobs[${i}]`,
-        message: `A background job runs on a schedule, and ${SCHEDULE_OFF}.`,
-      }));
+    // ── jobs: scheduled automation first; then the body (sandboxed JS) or, with none, the handler (code) ──
+    if (Array.isArray(bag.jobs)) {
+      bag.jobs.forEach((job, i) => {
+        const where = `job '${nameOf(job, `jobs[${i}]`)}'`;
+        const path = `${at}jobs[${i}]`;
+        if (!profile.allowScheduledAutomation) {
+          rows.push({
+            rule: 'allowScheduledAutomation',
+            where,
+            path,
+            message: `A background job runs on a schedule, and ${SCHEDULE_OFF}.`,
+          });
+          return;
+        }
+        if (bodyLanguage(job) === 'js') {
+          if (!profile.allowSandboxedJs) {
+            rows.push({
+              rule: 'allowSandboxedJs',
+              where,
+              path,
+              message: `A background job's \`body\` is sandboxed JavaScript, and ${SANDBOX_OFF}.`,
+            });
+          }
+          return;
+        }
+        const handler = isBag(job) ? job.handler : undefined;
+        if (typeof handler === 'string' && handler !== '' && !profile.allowCode) {
+          rows.push({
+            rule: 'allowCode',
+            where,
+            path,
+            message: `A background job with no \`body\` runs its \`handler\`, which is code, and ${CODE_OFF}.`,
+          });
+        }
+      });
     }
 
     // ── flows: the schedule dimension, then every node ──
@@ -325,13 +430,14 @@ function judgeNodeType(
       message: `A \`script\` node calls a registered function, which is code, and ${CODE_OFF}.`,
     };
   }
-  // Reader rule 2: a type outside the built-in registry is governed by `allowCode`.
-  if (!FLOW_BUILTIN_NODE_TYPES.includes(type)) {
+  // Reader rule 2: a type outside the profile vocabulary is governed by `allowCode`.
+  if (!PROFILE_NODE_TYPES.has(type)) {
     if (allowCode) return undefined;
     return {
       rule: 'allowCode',
       message:
-        `Node type '${type}' is not in the spec's built-in flow node registry (FlowNodeAction), so `
+        `Node type '${type}' is not in the restriction profile's node vocabulary (the built-in FlowNodeAction `
+        + 'ids and the plugin node types the spec declares), so a code plugin registers it, '
         + '`allowedFlowNodeTypes` cannot name it and it is governed by `allowCode`; '
         + `${CODE_OFF}.`,
     };
