@@ -1479,12 +1479,14 @@ export class DelegatedAdminGate {
             : "the grant's permission set is not in the scope's allowlist");
         }
         if (!targetUserId) return 'the grant names no target user';
-        if (userBUs.size === 0) {
-          return `${userNamed ? `target user '${targetUserId}'` : "the grant's target user"} has no business-unit membership — only a tenant admin may grant outside the tree`;
-        }
-        let inSubtree = false;
-        for (const bu of userBUs) if (s.subtree.has(bu)) { inSubtree = true; break; }
-        if (!inSubtree) {
+        // [ADR-0090 D12; ruling on #26059, Q3] A target user is inside the
+        // subtree only through a business unit of the subtree. A user holding
+        // no business-unit membership has none, and neither has an id naming
+        // no user: both are outside the subtree, exactly as a user whose units
+        // all lie elsewhere is. So the refusal is one reason, one class, one
+        // sentence and one set of details for all three, whether or not the
+        // target exists or holds a membership.
+        if (![...userBUs].some((bu) => s.subtree.has(bu))) {
           return outsideScope(userNamed
             ? `target user '${targetUserId}' is outside the delegated subtree`
             : "the grant's target user is outside the delegated subtree");

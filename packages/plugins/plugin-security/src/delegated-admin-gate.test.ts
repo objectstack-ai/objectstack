@@ -1818,15 +1818,16 @@ describe('[#26189] DelegatedAdminGate — a scope violation answers DELEGATION_S
       expectOpaqueDenial(await refusalOf(() => grant({ user_id: 'u_east_1', permission_set: 'sub_admin' })), 'sys_user_permission_set');
     });
 
-    it('a stored grant whose set the catalog does not hold, a grant naming no target user, or one whose target has no business unit', async () => {
+    it('a stored grant whose set the catalog does not hold, or a grant naming no target user', async () => {
       // An INSERT naming an unknown set is judged by the allowlist (a scope
-      // violation, above); the catalog miss is the PRE-IMAGE's reason.
+      // violation, above); the catalog miss is the PRE-IMAGE's reason. A target
+      // user with no business unit is outside the subtree: the describe at the
+      // foot of this file.
       h.tables.sys_user_permission_set = [{ id: 'g_retired', user_id: 'u_east_1', permission_set: 'sales_user_retired' }];
       expectOpaqueDenial(await refusalOf(() => h.gate.assert({
         object: 'sys_user_permission_set', operation: 'delete', options: { where: { id: 'g_retired' } }, context: h.ctxOf('delegate'),
       })), 'sys_user_permission_set');
       expectOpaqueDenial(await refusalOf(() => grant({ permission_set: 'sales_user' })), 'sys_user_permission_set');
-      expectOpaqueDenial(await refusalOf(() => grant({ user_id: 'u_delegate', permission_set: 'sales_user' })), 'sys_user_permission_set');
     });
 
     it('a self-service delegation of duty (ADR-0091 D3)', async () => {
@@ -1834,5 +1835,90 @@ describe('[#26189] DelegatedAdminGate — a scope violation answers DELEGATION_S
         user_id: 'u_east_1', position: 'sales_rep', business_unit_id: 'bu_es', delegated_from: 'u_delegate', reason: 'cover',
       })), 'sys_user_position');
     });
+  });
+});
+
+// ── [ADR-0090 D12; ruling on #26059, Q3] A target user is inside the delegated
+//    subtree only through a business unit of the subtree, so a direct grant to a
+//    target outside it is refused with ONE reason, whether or not the user
+//    exists or holds a business-unit membership: the same class, code, status,
+//    sentence and details, on the thrown value and on the REST door's
+//    classification (`mapDataError`). One target id, three stored states, and
+//    every write shape that names a target user.
+
+describe('[ADR-0090 D12] a delegated refusal names one reason for a target user outside the subtree, whether or not the user exists or holds a business-unit membership', () => {
+  const TARGET = 'u_target';
+  const STATES = [
+    'an id naming no user',
+    'a user with no business-unit membership',
+    'a user whose business unit is outside the subtree',
+  ] as const;
+  type TargetState = (typeof STATES)[number];
+
+  /** A fresh harness with `TARGET` in `state`. */
+  function harnessWith(state: TargetState | 'a user whose business unit is inside the subtree'): ReturnType<typeof makeHarness> {
+    const harness = makeHarness();
+    if (state === 'an id naming no user') return harness;
+    harness.tables.sys_user.push({ id: TARGET });
+    if (state === 'a user whose business unit is outside the subtree') {
+      harness.tables.sys_business_unit_member.push({ id: 'm_target', business_unit_id: 'bu_west', user_id: TARGET });
+    }
+    if (state === 'a user whose business unit is inside the subtree') {
+      harness.tables.sys_business_unit_member.push({ id: 'm_target', business_unit_id: 'bu_es', user_id: TARGET });
+    }
+    return harness;
+  }
+
+  /** Every write shape that names a target user: a new grant, a grant pointed at it, a stored grant of it removed. */
+  const WRITES: Record<string, (harness: ReturnType<typeof makeHarness>) => Promise<void>> = {
+    insert: (harness) => harness.gate.assert({
+      object: 'sys_user_permission_set', operation: 'insert',
+      data: { user_id: TARGET, permission_set: 'sales_user' }, context: harness.ctxOf('delegate'),
+    }),
+    update: (harness) => {
+      harness.tables.sys_user_permission_set = [{ id: 'g_east', user_id: 'u_east_1', permission_set: 'sales_user' }];
+      return harness.gate.assert({
+        object: 'sys_user_permission_set', operation: 'update',
+        data: { id: 'g_east', user_id: TARGET }, context: harness.ctxOf('delegate'),
+      });
+    },
+    delete: (harness) => {
+      harness.tables.sys_user_permission_set = [{ id: 'g_target', user_id: TARGET, permission_set: 'sales_user' }];
+      return harness.gate.assert({
+        object: 'sys_user_permission_set', operation: 'delete',
+        options: { where: { id: 'g_target' } }, context: harness.ctxOf('delegate'),
+      });
+    },
+  };
+
+  /** Everything a caller is told by a refusal: the thrown value and the REST door's envelope. */
+  const answerOf = (err: any) => ({
+    class: err?.constructor?.name,
+    name: err?.name,
+    code: err?.code,
+    status: err?.status,
+    statusCode: err?.statusCode,
+    message: err?.message,
+    details: err?.details,
+    wire: mapDataError(err, 'sys_user_permission_set'),
+  });
+
+  for (const [shape, write] of Object.entries(WRITES)) {
+    it(`${shape}: the three target states answer the same scope-violation refusal`, async () => {
+      const answers: Array<ReturnType<typeof answerOf>> = [];
+      for (const state of STATES) answers.push(answerOf(await refusalOf(() => write(harnessWith(state)))));
+      for (const [i, answer] of answers.entries()) expect(answer, STATES[i]).toEqual(answers[0]);
+      // The one answer is the caller's own scope: the target outside the subtree.
+      const err = await refusalOf(() => write(harnessWith('an id naming no user')));
+      expectScopeViolation(err, 'sys_user_permission_set',
+        /^\[Security\] Outside your delegated scope: delegated '\w+' on sys_user_permission_set rejected — target user 'u_target' is outside the delegated subtree \(scope from 'sub_admin'\)\.$/);
+      expect(err.details).toEqual({ operation: shape, object: 'sys_user_permission_set', permissionSet: 'sales_user' });
+    });
+  }
+
+  it('CONTROL: the same target with a business unit inside the subtree is admitted, on every write shape', async () => {
+    for (const [shape, write] of Object.entries(WRITES)) {
+      await expect(write(harnessWith('a user whose business unit is inside the subtree')), shape).resolves.toBeUndefined();
+    }
   });
 });
