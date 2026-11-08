@@ -40,7 +40,14 @@
  *     answered before (#25366; its full matrix lives in
  *     `marketplace-install-local-catalog-name-collision.test.ts`);
  *   - CONTROL, the same package declaring a flow name nobody holds: `200`,
- *     `hotLoaded: true`, registered and ledgered.
+ *     `hotLoaded: true`, registered and ledgered;
+ *   - #31392, the namespace sibling: a fresh install and an upgrade declaring
+ *     the namespace the holder owns, with no dependency on it, answer the same
+ *     `422` with the registry's namespace sentence, nothing registered or
+ *     ledgered. Measured before the fix: `200`, `hotLoaded: false`, ledgered.
+ *     The `objectql` service hands the door the engine's `manifests`, so the
+ *     holder this door installed reads as a code package (step 1f's writable
+ *     base refusal is not this one).
  *
  * A register failure that is NOT a registry refusal keeps #22695's lenient
  * answer; `marketplace-install-local-hot-loaded.test.ts` pins that.
@@ -154,6 +161,10 @@ async function bootPlugin() {
         objectql: withInstallerGrants({
             convertPackageBodyForward: (body: unknown) => ql.convertPackageBodyForward(body),
             registry: ql.registry,
+            // [#31392] The engine's registered code packages, read live, so a
+            // package this door installed reads as code and not as a writable
+            // base (`isWritablePackage`), as on the real `objectql` service.
+            get manifests() { return (ql as unknown as { manifests: Map<string, unknown> }).manifests; },
             syncSchemas: async () => undefined,
         }),
     };
@@ -295,6 +306,60 @@ describe('install-local cloud branch refuses a package declaring a bare name ano
         expect(ql.registry.getPackage(INCOMING_ID)?.manifest?.version).toBe('1.0.0');
         expect(ledger().incoming?.version).toBe('1.0.0');
         expect(ql.registry.getItem<Bag>('flow', FREE_FLOW)?.label).toBe('routing flow');
+        expectHolderFlowKept(ql);
+    });
+});
+
+describe('install-local cloud branch refuses a package whose namespace another package owns, before any write (#31392)', () => {
+    const versions = {
+        // The holder's namespace (`dispatch`), under another id, with no dependency on it.
+        'v1-ns-held': packageVersion(INCOMING_ID, '1.0.0', [FREE_FLOW], { namespace: 'dispatch' }),
+        'v1-free': packageVersion(INCOMING_ID, '1.0.0', [FREE_FLOW]),
+        'v2-ns-held': packageVersion(INCOMING_ID, '2.0.0', [FREE_FLOW], { namespace: 'dispatch' }),
+    };
+
+    function expectNamespaceRefusal(res: any) {
+        expect(res.status, JSON.stringify(res.payload)).toBe(422);
+        expect(BaseResponseSchema.safeParse(res.payload).success).toBe(true);
+        expect(envelopeViolations(res.payload)).toEqual([]);
+        expect(ApiErrorSchema.safeParse(res.payload.error).success).toBe(true);
+        expect(res.payload.success).toBe(false);
+        expect(res.payload.error.code).toBe('PLUGIN_REGISTER_FAILED');
+        // The registry's own sentence: the namespace, its owner, and the package it stopped.
+        expect(res.payload.error.message).toContain(`namespace "dispatch" is already owned by package "${HOLDER_ID}"`);
+        expect(res.payload.error.message).toContain(`package "${INCOMING_ID}" cannot be installed alongside it`);
+    }
+
+    it('a fresh install is refused: 422 naming the namespace and its owner, nothing registered or ledgered', async () => {
+        serveVersions(versions);
+        const { ql, installFromCloud, installHolder } = await bootPlugin();
+        await installHolder();
+        const before = ledger();
+
+        const res = await installFromCloud('v1-ns-held');
+
+        expectNamespaceRefusal(res);
+        expect(res.payload.data).toBeUndefined();
+        expect(ql.registry.getPackage(INCOMING_ID)).toBeUndefined();
+        expect(ledger()).toEqual(before);
+        expect(ledger().incoming).toBeNull();
+        expectHolderFlowKept(ql);
+    });
+
+    it('an upgrade into the held namespace is refused: 422, the installed version still registered and ledgered', async () => {
+        serveVersions(versions);
+        const { ql, installFromCloud, installHolder } = await bootPlugin();
+        await installHolder();
+        const first = await installFromCloud('v1-free');
+        expect(first.status, JSON.stringify(first.payload)).toBe(200);
+        const before = ledger();
+
+        const res = await installFromCloud('v2-ns-held');
+
+        expectNamespaceRefusal(res);
+        expect(ql.registry.getPackage(INCOMING_ID)?.manifest?.version).toBe('1.0.0');
+        expect(ledger()).toEqual(before);
+        expect(ledger().incoming?.version).toBe('1.0.0');
         expectHolderFlowKept(ql);
     });
 });

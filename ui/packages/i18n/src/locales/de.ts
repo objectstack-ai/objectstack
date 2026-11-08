@@ -3589,6 +3589,7 @@ const de = {
       organizationExists: 'Diese Organisation existiert bereits.',
       slugTaken: 'Dieser URL-Slug ist bereits vergeben.',
       notAllowedToCreate: 'Sie dürfen keine neue Organisation erstellen.',
+      organizationLimitReached: 'Sie haben die maximale Anzahl an Organisationen erreicht, die Sie erstellen können. Organisationen, zu denen Sie eingeladen wurden, zählen nicht dazu.',
       notTheRecipient: 'Sie sind nicht der Empfänger dieser Einladung.',
       invitationNotFound: 'Diese Einladung existiert nicht mehr oder ist abgelaufen.',
       unknown: 'Etwas ist schiefgelaufen. Bitte versuchen Sie es erneut.',

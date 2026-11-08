@@ -27,7 +27,7 @@
 - 公开仓修复只由 `security#1` 席以无卡派发令派 `os-dev`,`xhigh`;机制只进派发令与公告。
 - 用到公告的临时私有 fork ⇒ 修复从该 fork 落地。
 - 私有仓私卡 = 该仓带 `security` 标签的普通 issue,经中继 `issue_create` 立,机制写在其中。
-- 私有仓修复由 `security#1` 席照该卡如常派发,`xhigh`;⛔ 不另起无卡派发令或公告。
+- 私有仓卡归该仓车道(cloud 即 cloud 车道),照其规则派修、复核、落地;第 2、6 节照旧。
 
 ## 4. 跨仓发现者(应用仓量框架、cloud 席位)
 
@@ -56,10 +56,10 @@
 - 立卡门、server 与 security 车道、信箱、`checklist-test` 与 `os-dev` 只指向本文,⛔ 不留第二份。
 - ⛔ 本规则不新增门禁、不新增标签。
 
-## 9. 归属:`security#1` 席
+## 9. 归属:公告归 `security#1` 席,私有仓卡归该仓车道
 
-- 每份安全发现从接收到发布归 `security#1` 席(章程 `lanes/security.md`),发现者只报不修。
+- 公开仓的公告从接收到发布归 `security#1` 席(章程 `lanes/security.md`),发现者只报不修。
 - ⛔ 不扩本 PR 或分支,不自开修复分支,不在同一面顺手加固;dev 只走第 5 节上报。
-- 席位两件事:照第 3 节建私卡;敲 `Notify: security · GHSA-ID`(私有仓 `OWNER/REPO#N`),只带编号。
-- 中继拒(第 3 节)⇒ 机制在会话里交 `security#1` 席;席空缺 ⇒ 交维护者;发布清单归维护者。
+- 席位两件事:照第 3 节建私卡;公告敲 `Notify: security · GHSA-ID`,只带编号;私有仓不敲。
+- 中继拒 ⇒ 机制会话里交 `security#1` 或私有仓车道席;席空缺交维护者;发布清单归维护者。
 - 任务绕不开它 ⇒ 报 `blocked`,只写「a security item is with the owner seat」;席位停卡,⛔ 不绕行。
