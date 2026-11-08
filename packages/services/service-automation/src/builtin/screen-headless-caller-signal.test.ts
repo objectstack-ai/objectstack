@@ -215,7 +215,10 @@ function twoScreenFlow() {
             },
             {
                 id: 'review', type: 'screen', label: 'Review',
-                config: { fields: [{ name: 'tags', label: 'Tags', type: 'text' }] },
+                // Untyped on purpose: since #31491 a `text` field is a string
+                // value domain, and `tags` here is an ARRAY — its shape would
+                // pause the screen for a reason this test does not measure.
+                config: { fields: [{ name: 'tags', label: 'Tags' }] },
             },
             { id: 'end', type: 'end', label: 'End' },
         ],

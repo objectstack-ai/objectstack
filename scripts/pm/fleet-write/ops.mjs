@@ -238,9 +238,10 @@
  * it is fenced the same way. These are the seven fences:
  *
  *   - the WORKFLOW: the run's `path` is one of `RERUN_FAILED_WORKFLOWS`, a
- *     closed list matched whole and joined only by a PR that adds the path
- *     here — never a request-time input, since the payload carries no key
- *     that names a workflow;
+ *     reviewed allowlist matched whole and joined only by a PR that adds the
+ *     path here, each entry after `ci.yml` a READ-ONLY check workflow (the
+ *     definition sits on the list) — never a request-time input, since the
+ *     payload carries no key that names a workflow;
  *   - the EVENT: the run's `event` is `pull_request` — a push, merge-group,
  *     schedule, release or `workflow_dispatch` run is refused;
  *   - ONCE: the run's `run_attempt` is 1. A second failure is real, and a
@@ -249,10 +250,11 @@
  *   - the HEAD: the run's `head_sha` is its pull request's CURRENT head. The
  *     pull is the run's `pull_requests[0].number`, and its head is read with
  *     the pull's own `GET /repos/{repo}/pulls/{n}`, never from the copy the
- *     run embeds. `ci.yml`'s concurrency group is keyed by the pull number
- *     with `cancel-in-progress: true`, so a stale head's re-run would cancel
- *     the current head's run. A run with no `pull_requests` entry (a fork
- *     pull request's run, or the field empty) is refused by name;
+ *     run embeds. Each listed workflow's concurrency group is keyed by the
+ *     pull number and cancels in progress on `pull_request`, so a stale
+ *     head's re-run would cancel the current head's run. A run with no
+ *     `pull_requests` entry (a fork pull request's run, or the field empty)
+ *     is refused by name;
  *   - ALONE: a stroke carrying it carries exactly that one action (`alone`),
  *     so the wider token serves one request;
  *   - the GRANT: `actions: write` is minted for that stroke alone, through the
@@ -828,10 +830,25 @@ export const WORKFLOW_DISPATCH_PATH_SHAPE = /\/actions\/workflows\/[^/]+\/dispat
  * own `path`, as `GET /actions/runs/{id}` answers it, matched WHOLE (measured
  * on run 39713789453: `.github/workflows/ci.yml`, no ref suffix). Joined only
  * by a PR that adds the path here; ⛔ never a key of the payload.
- * `validate.mjs --self-test` pins every entry to a workflow on disk that runs
- * on `pull_request`.
+ *
+ * A reviewed allowlist. `ci.yml` is the entry the op was made for. Every other
+ * entry is a READ-ONLY check workflow: it uses no `secrets.*` but
+ * `GITHUB_TOKEN`, deploys nothing (no `environment:`), and its token is read-only (a
+ * `permissions:` block covering every job, no `write` scope). A re-run of such a run
+ * can change nothing but its own check, so re-running it once costs only runner time.
+ * Each entry, and the reading that admitted it:
+ *
+ *   - `.github/workflows/ci.yml` — the op's own workflow (the measured run above).
+ *   - `.github/workflows/check-links.yml` — `Check Documentation Links`, advisory;
+ *     `contents: read` on its one job, no secret, offline lychee. Its setup step
+ *     can fail having checked ZERO links, and its log says so ("No links were
+ *     checked"); that red is the one a seat re-runs once.
+ *
+ * `validate.mjs --self-test` pins the list exactly, every entry to a workflow on
+ * disk that runs on `pull_request`, and every entry after `ci.yml` to the
+ * read-only definition read from the file itself.
  */
-export const RERUN_FAILED_WORKFLOWS = Object.freeze(['.github/workflows/ci.yml']);
+export const RERUN_FAILED_WORKFLOWS = Object.freeze(['.github/workflows/ci.yml', '.github/workflows/check-links.yml']);
 /** The one event whose run a `run_rerun_failed` may re-run: a pull request's. */
 export const RERUN_FAILED_EVENT = 'pull_request';
 /** The one attempt it may re-run — once: a second failure is real. The read-back wants the attempt after it. */
@@ -896,7 +913,7 @@ export const RERUN_FAILED_FENCES = Object.freeze([
     fence: 'head',
     wants:
       "a run whose head_sha is its pull request's CURRENT head (the pull named by pull_requests[0], read with its own GET, " +
-      "never the run's embedded copy), since ci.yml's concurrency group is keyed by the pull number and a stale head's re-run cancels the current head's run",
+      "never the run's embedded copy), since each listed workflow's concurrency group is keyed by the pull number and a stale head's re-run cancels the current head's run",
     reads: (run, pull) => {
       const n = rerunFailedPullNumber(run);
       if (n === null) return "no pull_requests entry — a fork pull request's run, or none";
