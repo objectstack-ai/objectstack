@@ -117,6 +117,10 @@ export * from './crypto-provider-service.js';
 // judges a failed row with the same table the HTTP door answers with. `rest`
 // keeps the emission half and re-exports the public names.
 export * from './data-error-classification.js';
+// [#31271] The `/api/v1/actions` door's answer to a thrown value, beside the
+// `/data` door's classification above: the runtime door and the MCP
+// `run_action` / `resume_run` tools both answer through it.
+export * from './actions-door-answer.js';
 // [#22049] The one reading of a share-link password's request header pair
 // (`X-Share-Password` + the `X-Share-Password-Encoding` that declares it), for
 // the two mounts of the public share-link routes: `plugin-sharing`'s routes and

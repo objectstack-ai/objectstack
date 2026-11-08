@@ -61,6 +61,7 @@ import { maskComments } from '../../../../scripts/js-comment-mask.mjs';
 
 import {
   createHostCryptoProvider,
+  cryptoProviderPlugins,
   HostCryptoProviderRefusal,
   refuseTwoCryptoProviderPlugins,
   refuseUnloadedCryptoProviderPlugins,
@@ -486,6 +487,26 @@ describe('a plugins entry that did not load refuses the boot unless it is ruled 
     expect(refusalOf([])).toBeUndefined();
   });
 
+  it('a devPlugins entry is named by the list it was written in', () => {
+    const refusal = refusalOf([
+      { list: 'devPlugins', index: 0, entry: '@acme/dev-kms', error: new Error('a') },
+      { index: 1, entry: '@acme/kms', error: new Error('b') },
+    ]);
+    expect(refusal!.message).toContain("devPlugins[0] ('@acme/dev-kms') did not load (a)");
+    expect(refusal!.message).toContain("plugins[1] ('@acme/kms') did not load (b)");
+  });
+
+  it('reads a declaration as cryptoProviderPlugins does: an entry it counts as the provider is refused, one it does not is ruled out', () => {
+    const declaring = providerPlugin('com.example.kms-crypto', kmsProvider().provider);
+    const other = { name: 'com.example.widgets', providesServices: ['widgets'], init: async () => {} };
+    const none = { name: 'com.example.plain', init: async () => {} };
+    for (const candidate of [declaring, other, none]) {
+      const counted = cryptoProviderPlugins([candidate]).length > 0;
+      const refused = refusalOf([{ index: 0, entry: candidate, error: new Error('x') }]) !== undefined;
+      expect(refused, (candidate as { name: string }).name).toBe(counted);
+    }
+  });
+
   it('every refused entry is named, and the ruled-out ones are not', () => {
     const refusal = refusalOf([
       { index: 0, entry: '@acme/one', error: new Error('a') },
@@ -663,7 +684,7 @@ describe('the wiring inside run()', () => {
   });
 
   it('refuses an unloaded entry that may provide the crypto provider right after the plugins loop, before the host provider is built', () => {
-    const record = SERVE.indexOf('unloadedStackPlugins.push({ index, entry: plugin, materialized, error: e });');
+    const record = SERVE.indexOf('unloadedStackPlugins.push(');
     const check = SERVE.indexOf('refuseUnloadedCryptoProviderPlugins(unloadedStackPlugins);');
     const host = SERVE.indexOf('hostCrypto = createHostCryptoProvider(() => localCryptoProvider.resolve());');
     expect(record).toBeGreaterThan(0);

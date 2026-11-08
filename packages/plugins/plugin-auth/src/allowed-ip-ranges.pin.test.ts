@@ -46,7 +46,7 @@ import {
   builtinSettingsManifests,
   registerSettingsRoutes,
 } from '@objectstack/service-settings';
-import { AuthzStoreUnavailableError } from '@objectstack/core';
+import { AuthzStoreUnavailableError, hashApiKey } from '@objectstack/core';
 import { AuthPlugin } from './auth-plugin.js';
 import type { AuthManager } from './auth-manager.js';
 import type { OrganizationAddressReaderContext } from './client-address-read.js';
@@ -89,9 +89,10 @@ interface Rig {
    * `GET /api/v1/auth/client-address` on the same routes. `caller` is what the
    * route's resolution of its caller answers (the settings door's composition,
    * stubbed at that one seam): an organization administrator unless a test
-   * says otherwise; an `Error` is thrown from it.
+   * says otherwise; an `Error` is thrown from it; `'resolved'` leaves that
+   * seam unstubbed, so the route's own composition resolves the caller.
    */
-  orgRead(transport?: Transport, opts?: { caller?: OrganizationAddressReaderContext | Error; query?: string }):
+  orgRead(transport?: Transport, opts?: { caller?: OrganizationAddressReaderContext | Error | 'resolved'; query?: string }):
     Promise<{ status: number; body: any; cacheControl: string | null }>;
 }
 
@@ -184,10 +185,12 @@ async function boot(
   const orgRead: Rig['orgRead'] = async (transport = {}, opts = {}) => {
     const app = mounted();
     const caller = 'caller' in opts ? opts.caller : ORG_ADMIN_CALLER;
-    const resolve = vi.spyOn(plugin as any, 'resolveOrganizationSettingsCaller').mockImplementation(async () => {
-      if (caller instanceof Error) throw caller;
-      return caller;
-    });
+    const resolve = caller === 'resolved'
+      ? undefined
+      : vi.spyOn(plugin as any, 'resolveOrganizationSettingsCaller').mockImplementation(async () => {
+        if (caller instanceof Error) throw caller;
+        return caller;
+      });
     try {
       const res = await app.request(
         `http://localhost:3000/api/v1/auth/client-address${opts.query ?? ''}`,
@@ -196,7 +199,7 @@ async function boot(
       );
       return { status: res.status, body: await res.json(), cacheControl: res.headers.get('cache-control') };
     } finally {
-      resolve.mockRestore();
+      resolve?.mockRestore();
     }
   };
   return { svc, manager, logger: ctx.logger, save, read, orgRead };
@@ -549,6 +552,51 @@ describe('the organization administrator reads the address their access-policy s
       expect(res.body.data).toBeUndefined();
     }
     expect(asked).not.toHaveBeenCalled();
+  });
+});
+
+describe("an API key its own lifecycle refuses is answered that refusal at the organization address read, never a 500", () => {
+  const KEY = 'osk_client_address_lifecycle_pin';
+  const LONG_AGO = '2000-01-01T00:00:00.000Z';
+
+  /**
+   * The route's own caller resolution (the settings door's composition) over
+   * a data engine holding the one `sys_api_key` row `row` describes, read by
+   * the key's at-rest hash, as the admission reads it.
+   */
+  const readWithKey = async (row: Record<string, unknown>) => {
+    const rig = await boot();
+    const keyHash = hashApiKey(KEY);
+    vi.spyOn(rig.manager, 'getDataEngine').mockReturnValue({
+      find: async (object: string, q: any) => (
+        object === 'sys_api_key' && q?.where?.key === keyHash
+          ? [{ id: 'key_1', key: keyHash, prefix: 'osk_client', user_id: 'usr_key_owner', revoked: false, scopes: '[]', ...row }]
+          : []
+      ),
+    } as any);
+    const asked = vi.spyOn(rig.manager, 'trustsForwardedHeaders');
+    const res = await rig.orgRead({ headers: { 'x-api-key': KEY }, remoteAddress: '203.0.113.9' }, { caller: 'resolved' });
+    expect(asked).not.toHaveBeenCalled();
+    expect(res.body.success).toBe(false);
+    expect(res.body.data).toBeUndefined();
+    // A refusal the caller was told is no fault: the route logs no error line for it.
+    expect(rig.logger.error.mock.calls.map(([line]) => line), JSON.stringify(res)).toEqual([]);
+    return res;
+  };
+
+  it('a revoked key: 403 API_KEY_REVOKED, the refusal\'s own status, code and message', async () => {
+    const res = await readWithKey({ revoked: true });
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe('API_KEY_REVOKED');
+    // The refusal's own located message (its first sentence names the key), not the route's fault text.
+    expect(res.body.error.message.startsWith('This API key (osk_client…) was revoked. ')).toBe(true);
+  });
+
+  it('an expired key: 403 API_KEY_EXPIRED, the refusal\'s own status, code and message', async () => {
+    const res = await readWithKey({ expires_at: LONG_AGO });
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe('API_KEY_EXPIRED');
+    expect(res.body.error.message.startsWith(`This API key (osk_client…) expired on ${LONG_AGO}. `)).toBe(true);
   });
 });
 

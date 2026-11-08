@@ -167,7 +167,7 @@ const result = ConditionalValidationSchema.parse(data);
 | **_packageVersion** | `string` | optional | Owning package version. |
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
 | **type** | `'script'` | ✅ |  |
-| **condition** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | ✅ | Predicate (CEL). If TRUE, validation fails. e.g. P`record.amount < 0`. A TRUE INVARIANT, not a transition gate: re-evaluated against the merged record (the prior row overlaid with this write) on every write, with no exemption for a violation that was already stored — a row that already violates is refused on ANY edit until a repairing write lands (frozen, not bricked). Need a transition condition instead — one that only has to hold from a given state onward — use `Field.requiredWhen` or a field bound (`min` / `max` / `maxLength`), which judge the write rather than the stored row. |
+| **condition** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | ✅ | Predicate (CEL). If TRUE, validation fails. e.g. P`record.amount != null && record.amount < 0`. A TRUE INVARIANT, not a transition gate: re-evaluated against the merged record (the prior row overlaid with this write) on every write, with no exemption for a violation that was already stored — a row that already violates is refused on ANY edit until a repairing write lands (frozen, not bricked). Need a transition condition instead — one that only has to hold from a given state onward — use `Field.requiredWhen` or a field bound (`min` / `max` / `maxLength`), which judge the write rather than the stored row. |
 
 ### Nested Shape: `ConditionalValidation.then[type='state_machine']`
 
@@ -288,7 +288,7 @@ const result = ConditionalValidationSchema.parse(data);
 | **_packageVersion** | `string` | optional | Owning package version. |
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
 | **type** | `'script'` | ✅ |  |
-| **condition** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | ✅ | Predicate (CEL). If TRUE, validation fails. e.g. P`record.amount < 0`. A TRUE INVARIANT, not a transition gate: re-evaluated against the merged record (the prior row overlaid with this write) on every write, with no exemption for a violation that was already stored — a row that already violates is refused on ANY edit until a repairing write lands (frozen, not bricked). Need a transition condition instead — one that only has to hold from a given state onward — use `Field.requiredWhen` or a field bound (`min` / `max` / `maxLength`), which judge the write rather than the stored row. |
+| **condition** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | ✅ | Predicate (CEL). If TRUE, validation fails. e.g. P`record.amount != null && record.amount < 0`. A TRUE INVARIANT, not a transition gate: re-evaluated against the merged record (the prior row overlaid with this write) on every write, with no exemption for a violation that was already stored — a row that already violates is refused on ANY edit until a repairing write lands (frozen, not bricked). Need a transition condition instead — one that only has to hold from a given state onward — use `Field.requiredWhen` or a field bound (`min` / `max` / `maxLength`), which judge the write rather than the stored row. |
 
 ### Nested Shape: `ConditionalValidation.otherwise[type='state_machine']`
 
@@ -502,7 +502,7 @@ const result = ConditionalValidationSchema.parse(data);
 | **_packageVersion** | `string` | optional | Owning package version. |
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
 | **type** | `'script'` | ✅ |  |
-| **condition** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | ✅ | Predicate (CEL). If TRUE, validation fails. e.g. P`record.amount < 0`. A TRUE INVARIANT, not a transition gate: re-evaluated against the merged record (the prior row overlaid with this write) on every write, with no exemption for a violation that was already stored — a row that already violates is refused on ANY edit until a repairing write lands (frozen, not bricked). Need a transition condition instead — one that only has to hold from a given state onward — use `Field.requiredWhen` or a field bound (`min` / `max` / `maxLength`), which judge the write rather than the stored row. |
+| **condition** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | ✅ | Predicate (CEL). If TRUE, validation fails. e.g. P`record.amount != null && record.amount < 0`. A TRUE INVARIANT, not a transition gate: re-evaluated against the merged record (the prior row overlaid with this write) on every write, with no exemption for a violation that was already stored — a row that already violates is refused on ANY edit until a repairing write lands (frozen, not bricked). Need a transition condition instead — one that only has to hold from a given state onward — use `Field.requiredWhen` or a field bound (`min` / `max` / `maxLength`), which judge the write rather than the stored row. |
 
 
 ---
@@ -568,7 +568,7 @@ This schema accepts one of the following structures:
 | **_packageVersion** | `string` | optional | Owning package version. |
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
 | **type** | `'script'` | ✅ |  |
-| **condition** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | ✅ | Predicate (CEL). If TRUE, validation fails. e.g. P`record.amount < 0`. A TRUE INVARIANT, not a transition gate: re-evaluated against the merged record (the prior row overlaid with this write) on every write, with no exemption for a violation that was already stored — a row that already violates is refused on ANY edit until a repairing write lands (frozen, not bricked). Need a transition condition instead — one that only has to hold from a given state onward — use `Field.requiredWhen` or a field bound (`min` / `max` / `maxLength`), which judge the write rather than the stored row. |
+| **condition** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | ✅ | Predicate (CEL). If TRUE, validation fails. e.g. P`record.amount != null && record.amount < 0`. A TRUE INVARIANT, not a transition gate: re-evaluated against the merged record (the prior row overlaid with this write) on every write, with no exemption for a violation that was already stored — a row that already violates is refused on ANY edit until a repairing write lands (frozen, not bricked). Need a transition condition instead — one that only has to hold from a given state onward — use `Field.requiredWhen` or a field bound (`min` / `max` / `maxLength`), which judge the write rather than the stored row. |
 
 ---
 

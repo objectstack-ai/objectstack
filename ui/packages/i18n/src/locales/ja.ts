@@ -3790,6 +3790,7 @@ const ja = {
     sharedObject: '共有された {{object}}',
     redactedFields: '一部の項目は所有者によって非表示にされています: {{fields}}',
     linkedRecord: '関連レコード',
+    linkedUser: '関連ユーザー',
   },
   publicForm: {
     submit: "送信",

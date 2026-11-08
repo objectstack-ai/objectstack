@@ -308,7 +308,7 @@ describe('[#11968] the counter contract (unit level)', () => {
 
   it('the counted operations are the four write verbs, and nothing else', () => {
     // [#30237] `purge`: the permanent delete, and purging or emptying the recycle bin.
-    expect([...WRITE_EPOCH_OPERATIONS].sort()).toEqual(['delete', 'insert', 'purge', 'update']);
+    expect([...WRITE_EPOCH_OPERATIONS].sort()).toEqual(['delete', 'insert', 'purge', 'restore', 'update']);
     for (const op of ['insert', 'update', 'delete', 'purge']) {
       expect(isWriteEpochOperation(op)).toBe(true);
     }

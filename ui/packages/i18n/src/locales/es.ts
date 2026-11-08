@@ -3865,6 +3865,7 @@ const es = {
     sharedObject: '{{object}} compartido',
     redactedFields: 'El propietario ocultó algunos campos: {{fields}}',
     linkedRecord: 'Registro vinculado',
+    linkedUser: 'Usuario vinculado',
   },
   publicForm: {
     submit: "Enviar",

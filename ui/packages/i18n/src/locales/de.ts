@@ -3788,6 +3788,7 @@ const de = {
     sharedObject: 'Geteilt: {{object}}',
     redactedFields: 'Einige Felder hat der Eigentümer ausgeblendet: {{fields}}',
     linkedRecord: 'Verknüpfter Datensatz',
+    linkedUser: 'Verknüpfter Benutzer',
   },
   publicForm: {
     submit: "Absenden",

@@ -3860,6 +3860,7 @@ const pt = {
     sharedObject: '{{object}} compartilhado',
     redactedFields: 'Alguns campos foram ocultados pelo proprietário: {{fields}}',
     linkedRecord: 'Registro vinculado',
+    linkedUser: 'Usuário vinculado',
   },
   publicForm: {
     submit: "Enviar",

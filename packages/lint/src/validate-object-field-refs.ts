@@ -103,6 +103,22 @@
  *  - **`lookupFilters[].field`** — the picker's base filter.
  *  - **`dependsOn[]`** (both arms: a name, or `{ field, param }`) — the fields
  *    whose values gate this field and, on a picker, scope its candidates.
+ *  - **`summaryOperations.filter`** — every field key of a roll-up's child-row
+ *    predicate (#31224), judged against the CHILD object
+ *    `summaryOperations.object` names, never the object that owns the summary
+ *    field: the engine ANDs the filter with the parent-FK match and runs it as
+ *    the `where` of an aggregate on the child (`summary-aggregate.ts`
+ *    `aggregateSummaryValue`). Measured on a real `SqlDriver` (better-sqlite3):
+ *    a key the child lacks makes every child insert answer
+ *    `SummaryRecomputeError` (the row IS written) and the roll-up keeps its
+ *    stale value; the parse cannot see it, because one field's Zod parse has
+ *    no view of another object's field map. The keys are read as AUTHORED
+ *    ({@link judgeSummaryFilter}), not through `walkFilterFieldKeys`, which
+ *    flattens a dotted key and a nested condition into one path: that `where`
+ *    serves only the nested one-level relation form (#20802) and refuses the
+ *    dotted spelling (`assertFilterIsMaterializable`), a condition beneath a
+ *    second relation, and a field computed on read, each of which would fail
+ *    every recompute the same way.
  *
  * ## Which object a field-level name addresses — measured on each reader
  *
@@ -218,6 +234,7 @@ import {
   type FieldPathVerdict,
   type ObjectGraph,
 } from './object-graph.js';
+import { classifyDottedFilterHead, isVirtualSearchField } from '@objectstack/spec/data';
 
 /**
  * A field-name list entry — object-level, or on one of the object's fields —
@@ -439,6 +456,30 @@ const FIELD_NAME_SLOTS: readonly FieldNameSlot[] = [
 ];
 
 /**
+ * The hints at a roll-up filter key (#31224), one line each: the position's
+ * remedy for each verdict {@link judgeSummaryFilter} gives. An unknown key's
+ * verdict carries the "Did you mean" that names the nearest field.
+ */
+const SUMMARY_FILTER_PRESCRIPTION =
+  'Fix the key — `summaryOperations.filter` runs on the child object `summaryOperations.object` '
+  + 'names, so each key is a field of that child, not of the object that owns this summary.';
+const SUMMARY_FILTER_DENORMALISE =
+  'Denormalise the value onto the child object (a stored field, written when its source changes) '
+  + 'and filter on that field.';
+
+/** A plain condition object with no `$` key — the nested-relation form when it sits under a relation. */
+function isNoOperatorObject(v: unknown): v is AnyRec {
+  return isRec(v) && !Object.keys(v).some((k) => k.startsWith('$'));
+}
+
+/** The nested spelling the engine serves for a dotted relation key (#20802), one level only. */
+function nestedRoute(head: string, rest: string[]): string {
+  return rest.length === 1
+    ? `{ ${head}: { ${rest[0]}: VALUE } }`
+    : `{ ${head}: { FIELD: VALUE } } (one level only)`;
+}
+
+/**
  * {@link resolveFieldPath}, or — at a position whose reader takes the name
  * verbatim — the one-name verdict: a dotted name there is not a path to walk,
  * it is a name no field carries.
@@ -502,6 +543,157 @@ export function validateObjectFieldRefs(stack: AnyRec): ObjectFieldRefFinding[] 
       hint: at.prescription,
     });
     return true;
+  };
+
+  /** A finding this position words itself (not the unknown-name verdict). */
+  const refuseKey = (at: { where: string; path: string }, message: string, hint: string): void => {
+    findings.push({ severity: 'error', rule: OBJECT_FIELD_REF_UNKNOWN, where: at.where, path: at.path, message, hint });
+  };
+
+  /** The declared slice of `name` on `objectName` — authored, else registry-injected. */
+  const fieldOf = (objectName: string, name: string) => {
+    const o = graph.get(objectName);
+    return o ? (o.fields.get(name) ?? o.injected.get(name)) : undefined;
+  };
+
+  /**
+   * [#31224] Judge one roll-up filter against the child object, key by key as
+   * AUTHORED, at the four verdicts the aggregate's `where` gives at recompute:
+   *
+   *  - a key the child lacks — the family's unknown-name verdict;
+   *  - a DOTTED key — refused by `assertFilterIsMaterializable` whenever its
+   *    head is a relation, a computed or a plain scalar field
+   *    (`classifyDottedFilterHead`, the engine's own classification); a
+   *    relation head is given the nested spelling the engine serves (#20802);
+   *  - a field computed on read (`isVirtualSearchField`, the engine's
+   *    predicate) — no column to filter, at the top level or one level down;
+   *  - beneath a relation, the nested form is served ONE level deep: each key
+   *    a field of the related object, undotted, and not a second relation
+   *    holding a condition of its own (`admitRelationCondition`).
+   *
+   * `$and` / `$or` arms and a `$not` body are descended; other `$` keys are
+   * operators and end the descent. An object the stack does not define, or
+   * one with no readable field map, is not judged, as at every position.
+   */
+  const judgeSummaryFilter = (
+    node: AnyRec,
+    path: string,
+    child: string,
+    at: { objPath: string; where: string },
+    depth = 0,
+  ): void => {
+    if (depth > 32 || !graph.get(child)) return;
+    for (const [key, value] of Object.entries(node)) {
+      const here = `${path}.${key}`;
+      if (key === '$and' || key === '$or') {
+        if (Array.isArray(value)) {
+          value.forEach((arm, i) => {
+            if (isRec(arm)) judgeSummaryFilter(arm, `${here}[${i}]`, child, at, depth + 1);
+          });
+        }
+        continue;
+      }
+      if (key === '$not') {
+        if (isRec(value)) judgeSummaryFilter(value, here, child, at, depth + 1);
+        continue;
+      }
+      if (key.startsWith('$')) continue;
+      const pos = { where: at.where, path: here };
+      const subject = here.slice(at.objPath.length + 1);
+
+      if (key.includes('.')) {
+        const [head, ...rest] = key.split('.');
+        if (!fieldOf(child, head)) {
+          judge({ against: child, name: head, verbatim: true, subject, ...pos, prescription: SUMMARY_FILTER_PRESCRIPTION });
+          continue;
+        }
+        const headMeta = fieldOf(child, head)!;
+        const headClass = classifyDottedFilterHead(headMeta as never);
+        if (headClass === 'relation') {
+          refuseKey(
+            pos,
+            `"${key}" is a dotted path through the relation "${head}" of "${child}"; the roll-up's `
+              + 'query refuses a dotted key, so every recompute fails.',
+            `Nest the condition beneath the relation field: ${nestedRoute(head, rest)}.`,
+          );
+        } else if (headClass !== null) {
+          refuseKey(
+            pos,
+            `"${key}" is a dotted path into "${head}", a ${headMeta.type} field of "${child}"; no `
+              + 'backend serves the path, so every recompute fails and the summary stays stale.',
+            SUMMARY_FILTER_DENORMALISE,
+          );
+        }
+        continue;
+      }
+
+      const meta = fieldOf(child, key);
+      if (!meta) {
+        judge({ against: child, name: key, verbatim: true, subject, ...pos, prescription: SUMMARY_FILTER_PRESCRIPTION });
+        continue;
+      }
+      if (isVirtualSearchField(meta as never)) {
+        refuseKey(
+          pos,
+          `"${key}" is a ${meta.type} field of "${child}", computed on read, so the roll-up's `
+            + 'query has no column to filter and every recompute fails.',
+          SUMMARY_FILTER_DENORMALISE,
+        );
+        continue;
+      }
+      if (classifyDottedFilterHead(meta as never) !== 'relation' || !isNoOperatorObject(value)) continue;
+
+      // The nested-relation form, one level (#20802).
+      const target = meta.reference;
+      if (!target || !graph.get(target)) continue;
+      const keys = Object.keys(value);
+      if (keys.length === 0) {
+        refuseKey(
+          pos,
+          `the condition beneath the relation "${key}" names no field of "${target}", so the `
+            + "roll-up's query refuses it and every recompute fails.",
+          `Name a field of "${target}": { ${key}: { FIELD: VALUE } }.`,
+        );
+        continue;
+      }
+      for (const inner of keys) {
+        const innerPath = `${here}.${inner}`;
+        const innerPos = { where: at.where, path: innerPath };
+        const innerSubject = innerPath.slice(at.objPath.length + 1);
+        if (inner.includes('.')) {
+          refuseKey(
+            innerPos,
+            `"${inner}" is a dotted path beneath the relation "${key}"; the nested condition `
+              + 'reaches one level only, so every recompute fails.',
+            SUMMARY_FILTER_DENORMALISE,
+          );
+          continue;
+        }
+        const innerMeta = fieldOf(target, inner);
+        if (!innerMeta) {
+          judge({ against: target, name: inner, verbatim: true, subject: innerSubject, ...innerPos, prescription:
+            `Fix the key — beneath the relation "${key}" each key is a field of "${target}".` });
+          continue;
+        }
+        if (classifyDottedFilterHead(innerMeta as never) === 'relation' && isNoOperatorObject(value[inner])) {
+          refuseKey(
+            innerPos,
+            `"${inner}" is itself a relation of "${target}" holding a condition; the nested `
+              + 'condition reaches one level only, so every recompute fails.',
+            SUMMARY_FILTER_DENORMALISE,
+          );
+          continue;
+        }
+        if (isVirtualSearchField(innerMeta as never)) {
+          refuseKey(
+            innerPos,
+            `"${inner}" is a ${innerMeta.type} field of "${target}", computed on read, so the `
+              + 'related read has no column to filter and every recompute fails.',
+            SUMMARY_FILTER_DENORMALISE,
+          );
+        }
+      }
+    }
   };
 
   const objects = asArray(stack.objects);
@@ -600,6 +792,16 @@ export function validateObjectFieldRefs(stack: AnyRec): ObjectFieldRefFinding[] 
             prescription: slot.prescription,
           });
           if (hit) reported.add(`${at}=${read.name}`);
+        });
+      }
+
+      // ── fields.<f>.summaryOperations.filter — keys of the CHILD (#31224) ──
+      const ops = meta?.type === 'summary' && isRec(field.summaryOperations) ? field.summaryOperations : undefined;
+      const child = ops ? nameOf(ops.object) : undefined;
+      if (ops && child && isRec(ops.filter)) {
+        judgeSummaryFilter(ops.filter, `${objPath}.fields.${fieldName}.summaryOperations.filter`, child, {
+          objPath,
+          where: `${label} › fields.${fieldName}.summaryOperations.filter`,
         });
       }
     }
