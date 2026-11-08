@@ -253,10 +253,19 @@ npx @objectstack/scenarios help                                      # the comma
   refuse bare object names. The build prompt asks for the prefix on EVERY item, and the scorer reports each bare
   non-object item name as a failing Build check (`bare-name:<type>:<name>`), so such a build is never verified.
 - **Persona contract**: the build is asked for one permission set per persona, named `<namespace>_<persona id>`. The runner
-  grants it to that persona's user, and makes a seed row whose scope field names a persona's handle (`owner: u_sam`)
-  owned by that persona's user. A field the card declares in `run.userHandleFields` (`userHandleFields` in
-  `prompts.ts` reads the declaration, never infers it) is loaded with the user's id in place of the handle text, and
-  the record's `seed.rewritten` lists each field so rewritten.
+  grants it to that persona's user, and loads a seed row as owned (`owner_id`) by a persona's user only when the row
+  names that person (`rowOwner` in `prompts.ts`): it IS the persona's `record`, a declared direct lookup on it holds
+  that record's id (`ticket.assignee` = `a02`), or a declared user-handle field on it holds the persona's handle
+  (`owner: u_sam`). The first persona in `run.personas` order the row names owns it. An option value
+  (`visibility` = `public`), a row id scope and a lookup to a row no persona is (a department, a group) name nobody,
+  so those rows keep the inserter, the admin. Each persona's `record` row is loaded with that persona's user id in its
+  `user` field, which the build prompt asks for as an optional `user`-type field. `personaHandles` is the handle map
+  only; `personaRecords` is the record binding. A field the card declares in `run.userHandleFields`
+  (`userHandleFields` in `prompts.ts` reads the declaration, never infers it) is loaded with the user's id in place of
+  the handle text, and the record's `seed.rewritten` lists each field so rewritten. The build prompt's Row ownership
+  section states all of this, and a platform-boundary line: the open-source server has no hierarchy resolver, so a
+  person who must see rows another person owns gets them through what the build models (a read policy, a
+  parent-controlled child, a field naming them).
 - **Structure contract** (`prompts.ts`): every Build check traces to text the build prompt carries, so a faithful build
   never fails for not guessing a name. Besides the seed (objects and fields) and the persona sets, the contract states
   each `expect` row the exact-name scorer checks by name: every lookup's target, every single-choice field with its
