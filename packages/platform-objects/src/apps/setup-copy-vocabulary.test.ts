@@ -51,6 +51,7 @@ import { fr } from './translations/fr.js';
 import { ptBR } from './translations/pt-BR.js';
 import { ru } from './translations/ru.js';
 import { de } from './translations/de.js';
+import { ko } from './translations/ko.js';
 import { enObjects } from './translations/en.objects.generated.js';
 import { zhCNObjects } from './translations/zh-CN.objects.generated.js';
 import { jaJPObjects } from './translations/ja-JP.objects.generated.js';
@@ -61,6 +62,7 @@ import { frObjects } from './translations/fr.objects.generated.js';
 import { ptBRObjects } from './translations/pt-BR.objects.generated.js';
 import { ruObjects } from './translations/ru.objects.generated.js';
 import { deObjects } from './translations/de.objects.generated.js';
+import { koObjects } from './translations/ko.objects.generated.js';
 import { enMetadataForms } from './translations/en.metadata-forms.generated.js';
 import { zhCNMetadataForms } from './translations/zh-CN.metadata-forms.generated.js';
 import { jaJPMetadataForms } from './translations/ja-JP.metadata-forms.generated.js';
@@ -71,6 +73,7 @@ import { frMetadataForms } from './translations/fr.metadata-forms.generated.js';
 import { ptBRMetadataForms } from './translations/pt-BR.metadata-forms.generated.js';
 import { ruMetadataForms } from './translations/ru.metadata-forms.generated.js';
 import { deMetadataForms } from './translations/de.metadata-forms.generated.js';
+import { koMetadataForms } from './translations/ko.metadata-forms.generated.js';
 
 /** The design-record vocabulary an admin-facing string must not carry. */
 const DESIGN_RECORD_VOCABULARY: ReadonlyArray<readonly [string, RegExp]> = [
@@ -145,9 +148,9 @@ function objectSchemas(...modules: Array<Record<string, unknown>>): Map<string, 
   return byName;
 }
 
-const LOCALES = { en, 'zh-CN': zhCN, 'ja-JP': jaJP, 'es-ES': esES, 'zh-Hant': zhHant, ar, fr, 'pt-BR': ptBR, ru, de } as const;
+const LOCALES = { en, 'zh-CN': zhCN, 'ja-JP': jaJP, 'es-ES': esES, 'zh-Hant': zhHant, ar, fr, 'pt-BR': ptBR, ru, de, ko } as const;
 const OBJECT_BUNDLES = {
-  en: enObjects, 'zh-CN': zhCNObjects, 'ja-JP': jaJPObjects, 'es-ES': esESObjects, 'zh-Hant': zhHantObjects, ar: arObjects, fr: frObjects, 'pt-BR': ptBRObjects, ru: ruObjects, de: deObjects,
+  en: enObjects, 'zh-CN': zhCNObjects, 'ja-JP': jaJPObjects, 'es-ES': esESObjects, 'zh-Hant': zhHantObjects, ar: arObjects, fr: frObjects, 'pt-BR': ptBRObjects, ru: ruObjects, de: deObjects, ko: koObjects,
 } as const;
 const FORM_BUNDLES = {
   en: enMetadataForms, 'zh-CN': zhCNMetadataForms, 'ja-JP': jaJPMetadataForms, 'es-ES': esESMetadataForms,
@@ -157,6 +160,7 @@ const FORM_BUNDLES = {
   'pt-BR': ptBRMetadataForms,
   ru: ruMetadataForms,
   de: deMetadataForms,
+  ko: koMetadataForms,
 } as const;
 
 describe('Setup copy carries no design-record vocabulary', () => {
