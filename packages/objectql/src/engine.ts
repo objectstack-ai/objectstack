@@ -384,7 +384,7 @@ export {
 // [#29986 codemod] Class head: units, hooks, functions, body runners, hook dispatch: the methods of the same names below hand the bodies what they read (`HooksAndFunctionsHost`).
 import { HooksAndFunctionsFacet } from './engine-hooks-and-functions.js';
 // [#29986 codemod] Action system and packaged-action activation: the methods of the same names below hand the bodies what they read (`ActionsHost`).
-import { ActionsFacet, type ActionHandlerEntry } from './engine-actions.js';
+import { ActionsFacet, type ActionHandlerEntry, type ExecuteActionOptions } from './engine-actions.js';
 // [#29986 codemod] Registration seams, readable-ids security, formula and default permissions: the methods of the same names below hand the bodies what they read (`SecurityResolversHost`).
 import { SecurityResolversFacet } from './engine-security-resolvers.js';
 // [#29986 codemod] Authz invalidation, middleware, session, driver options, posture, organization probe: the methods of the same names below hand the bodies what they read (`MiddlewareAndContextHost`).
@@ -623,8 +623,14 @@ export class ObjectQL implements IObjectQLEngine {
     object?: string;
   }> = [];
 
-  // Action registry: key = "objectName:actionName"
+  // Action registry: key = "objectName:actionName" — the UNQUALIFIED slot, what
+  // a call that names no package runs ([#31673] unchanged until #31697).
   private actions = new Map<string, ActionHandlerEntry>();
+
+  // [ADR-0150 D4, #31673] The action engine keyed `(package, objectName, name)`:
+  // package coordinate (`actionHandlerCoordinate`) → "objectName:actionName" →
+  // that package's handler. A call that names its package reads it.
+  private packageActions = new Map<string, Map<string, ActionHandlerEntry>>();
 
   /**
    * [ADR-0126 §8] The packaged-ACTION activation ledger's local projection —
@@ -1084,10 +1090,19 @@ export class ObjectQL implements IObjectQLEngine {
 
   /**
    * Execute a named action on an object.
+   *
+   * [ADR-0150 D4, #31673] Handlers are keyed `(package, objectName, name)`.
+   * `options.packageId` names the package coordinate the caller resolved the
+   * action's declaration to (`resolveActionByPackage`; `''` the environment's
+   * own): that package's handler runs, else the one handler registered under
+   * the key when there is exactly one, else nothing (the "not found" miss).
+   * Omitted, the call names no package and runs the handler the last
+   * registration under `objectName:actionName` left — today's answer, kept
+   * until the action backstop (#31697) decides a two-package key.
    */
-  executeAction(objectName: string, actionName: string, ctx: any): Promise<any> {
+  executeAction(objectName: string, actionName: string, ctx: any, options?: ExecuteActionOptions): Promise<any> {
     // [#29986 codemod] The body moved to `engine-actions.ts` (see `ActionsHost`).
-    return ActionsFacet.executeAction.call(actionsHost.of(this), objectName, actionName, ctx);
+    return ActionsFacet.executeAction.call(actionsHost.of(this), objectName, actionName, ctx, options);
   }
 
   /**
@@ -9768,6 +9783,7 @@ export class ObjectQL implements IObjectQLEngine {
     actionsHost.install((engine) => ({
       get actionActivation() { return engine.actionActivation; },
       get actions() { return engine.actions; },
+      get packageActions() { return engine.packageActions; },
       get logger() { return engine.logger; },
       get registry() { return engine.registry; },
     }));
