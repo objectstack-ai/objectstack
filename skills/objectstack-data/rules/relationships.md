@@ -220,22 +220,23 @@ transaction as the write, so it's consistent).
 
 Empty collections roll up to `0` for `count`/`sum`, `null` for `min`/`max`/`avg`.
 
-**Pick the function from the words, and put every qualifier in `filter`.**
-个数 / 数量 / count → `count`; 合计 / 总额 / total → `sum`; 平均 → `avg`. A
-qualified roll-up — 已完成任务数, 待处理工单数, any 已X / 未X / "<state>" count or
-sum — carries that condition in `filter` (a query `where` FilterCondition, ANDed
-with the parent-FK match). Dropped, the field counts EVERY child and shows a
-plausible wrong total that no check on the parent can see — worse than a
-visible 0. This is also how one child feeds several totals: 已完成 / 进行中 /
-逾期 task counts are three `summary` fields over the same child, differing only
-in `filter`; one `procurement_receipt` child yields `received_amount`
+**Pick the function from the request's own words, and put every qualifier in
+`filter`.** "how many" / "number of" → `count`; "total" / "sum" → `sum`;
+"average" → `avg`. A qualified roll-up — "completed task count", "open ticket
+count", any "done / pending / overdue / STATE" count or sum — carries that
+condition in `filter` (a query `where` FilterCondition, ANDed with the
+parent-FK match). Dropped, the field counts EVERY child and shows a plausible
+wrong total that no check on the parent can see — worse than a visible 0. This
+is also how one child feeds several totals: completed / in-progress / overdue
+task counts are three `summary` fields over the same child, differing only in
+`filter`; one `procurement_receipt` child yields `received_amount`
 (`function: 'sum', filter: { status: 'received' }`). A select's value in
 `filter` is its option `value`, never its label; operator and compound forms
 work (`filter: { status: { $in: ['received', 'partial'] } }`). A child moving
-in or out of the predicate (a status change)
-recomputes the parent on its next write like any other child update. A **rate**
-(上座率, 完成率 = a child count ÷ a capacity) is a `formula` over a working
-`summary` — author the summary first; the rate computes only once it does.
+in or out of the predicate (a status change) recomputes the parent on its next
+write like any other child update. A **rate** (occupancy, completion rate = a
+child count ÷ a capacity) is a `formula` over a working `summary` — author the
+summary first; the rate computes only once it does.
 
 **The recompute runs only on a child write.** A `summary` declared after its
 parent rows exist reads `NULL` on every existing parent until a child of it is

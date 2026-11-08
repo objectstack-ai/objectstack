@@ -288,7 +288,7 @@ never `password`, which on a generic object is **plaintext at rest**; `user` is 
 picker; `formula` takes CEL in `expression` (`F\`...\`` from `@objectstack/spec`; see
 **objectstack-formula**).
 
-- A yes/no flag (`is_*`, `has_*`, 是否…) is `{ type: 'boolean', defaultValue: false }`
+- A yes/no flag (`is_*`, `has_*`, "done?", "active?") is `{ type: 'boolean', defaultValue: false }`
   and never `required`: a checkbox always holds one of its two values, so
   `required` can only read as "must be true", and a form that reads it that way
   refuses the unchecked state — the one state a new record starts in. "Must be
@@ -314,7 +314,7 @@ picker; `formula` takes CEL in `expression` (`F\`...\`` from `@objectstack/spec`
 | Hierarchical | `tree` field (self-reference) |
 | Record status / lifecycle | a `select` on the business object (plus a `state_machine` validation) — never a separate status / stage / step table |
 | Approval, review, routing, audit trail | not objects: an approval is a flow node (**objectstack-automation**) and its trail is platform history; model only the people it references (approver, reviewer), as `user` fields beside the owner |
-| Record owner | the platform's `owner_id` (`ownership: 'user'`, the default) — never a hand-added 负责人 / owner lookup, a second owner that owner-scoped visibility and "My records" views never read; `ownership: 'none'` only for a shared catalog or a pure junction table |
+| Record owner | the platform's `owner_id` (`ownership: 'user'`, the default) — never a hand-added "owner" / "person in charge" lookup, a second owner that owner-scoped visibility and "My records" views never read; `ownership: 'none'` only for a shared catalog or a pure junction table |
 
 > **`multiple: true` lookup ≠ junction object.** A multi-value lookup
 > (`{ type: 'lookup', reference: 'x', multiple: true }`) is stored and read as an
