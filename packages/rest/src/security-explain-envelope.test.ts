@@ -57,9 +57,13 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+import { AuthzStoreUnavailableError, ObjectKernel, isServiceNotRegisteredError } from '@objectstack/core';
 // `.js` on purpose — NodeNext resolution requires the extension, and this
 // package's TEST_DEBT ceiling has no margin for another TS2835 (#7248).
 import { RestServer } from './rest-server.js';
+// Pays `@objectstack/objectql`'s first load at collection, never inside a clocked case
+// (the route modules import it lazily).
+import '@objectstack/objectql';
 
 const EXPLAIN = '/api/v1/security/explain';
 const DELEGABLE = '/api/v1/security/my-delegable-scope';
@@ -113,15 +117,22 @@ type Answer = { status: number; body: any };
  *                MISSING the method is the other half (the route's own
  *                duck-type check), which is how both routes reach 501 while
  *                still being driven normally.
+ * @param wiring  overrides for the two reads every arm begins with: the
+ *                security provider itself, and the caller's context.
  */
-function boot(service?: any, context: any = CALLER) {
+function boot(
+    service?: any,
+    context: any = CALLER,
+    wiring: { provider?: () => Promise<unknown>; execCtx?: () => Promise<unknown> } = {},
+) {
     const rest = new RestServer(
         mockServer() as any,
         { getDiscovery: vi.fn().mockResolvedValue({ version: 'v0', routes: {} }) } as any,
         { api: { requireAuth: false } } as any,
     );
-    (rest as any).resolveExecCtx = async () => context;
-    if (service !== undefined) (rest as any).securityServiceProvider = async () => service;
+    (rest as any).resolveExecCtx = wiring.execCtx ?? (async () => context);
+    if (wiring.provider) (rest as any).securityServiceProvider = wiring.provider;
+    else if (service !== undefined) (rest as any).securityServiceProvider = async () => service;
     rest.registerRoutes();
 
     const route = (method: string, path: string) => {
@@ -494,5 +505,36 @@ describe('[#20603] /security/explain — a classified service refusal keeps its 
         expectNestedEnvelope(await boot(throwingExplain(denial)).explainPost(), 403, 'PERMISSION_DENIED');
         const unknown = Object.assign(new Error('nope'), { code: 'OBJECT_NOT_FOUND' });
         expectNestedEnvelope(await boot(throwingExplain(unknown)).explainPost(), 404, 'OBJECT_NOT_FOUND');
+    });
+});
+
+describe('an authorization input that cannot be read answers the explain family\'s 503, never its 500 or 501', () => {
+    const healthy = { explain: vi.fn().mockResolvedValue(DECISION), describeDelegableScope: vi.fn().mockResolvedValue({}) };
+
+    it('a security service that cannot be resolved → 503 SERVICE_UNAVAILABLE, and nothing is asked of it', async () => {
+        const doors = boot(undefined, CALLER, {
+            provider: async () => { throw new Error('the security service failed to construct'); },
+        });
+        expectNestedEnvelope(await doors.explainPost(), 503, 'SERVICE_UNAVAILABLE');
+        expectNestedEnvelope(await doors.explainGet(), 503, 'SERVICE_UNAVAILABLE');
+        expectNestedEnvelope(await doors.delegable(), 503, 'SERVICE_UNAVAILABLE');
+    });
+
+    it('a caller context whose authorization store cannot be read → 503 SERVICE_UNAVAILABLE', async () => {
+        const doors = boot(healthy, CALLER, {
+            execCtx: async () => { throw new AuthzStoreUnavailableError('sys_user_permission_set', new Error('store down')); },
+        });
+        expectNestedEnvelope(await doors.explainPost(), 503, 'SERVICE_UNAVAILABLE');
+        expectNestedEnvelope(await doors.delegable(), 503, 'SERVICE_UNAVAILABLE');
+        expect(healthy.explain).not.toHaveBeenCalled();
+    });
+
+    it('the registry\'s "never registered" rejection keeps the 501 — no security service on this deployment', async () => {
+        const kernel = new ObjectKernel({ skipSystemValidation: true, gracefulShutdown: false } as any);
+        const provider = () => kernel.getServiceAsync('security');
+        await expect(provider()).rejects.toSatisfy(isServiceNotRegisteredError);
+        const doors = boot(undefined, CALLER, { provider });
+        expectNestedEnvelope(await doors.explainPost(), 501, 'NOT_IMPLEMENTED');
+        expectNestedEnvelope(await doors.delegable(), 501, 'NOT_IMPLEMENTED');
     });
 });
