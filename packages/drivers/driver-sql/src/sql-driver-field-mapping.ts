@@ -60,16 +60,11 @@ export class FieldMappingFacet {
   }
 
   /** The body of `SqlDriver#paginationTieBreaker`; the method's docblock there is its contract. */
-  static paginationTieBreaker(this: Pick<FieldMappingHost, 'managedObjectFields' | 'fieldColumnByObject'>, object: string): string | null {
+  static paginationTieBreaker(this: Pick<FieldMappingHost, 'managedObjectFields'>, object: string): string | null {
     const tableName = StorageNameMapping.resolveTableName({ name: object } as any);
     const managed =
       this.managedObjectFields.has(tableName) || this.managedObjectFields.has(object);
-    if (managed) return 'id';
-    // A federated object whose binding NAMES its key column — `external.columnMap`
-    // mapping a remote column to `id` — is not a guess: the binding declares
-    // which remote column identifies a row, the column the by-id doors already
-    // address. Without it, nothing is known and nothing is imposed.
-    return this.fieldColumnByObject[object]?.id ? 'id' : null;
+    return managed ? 'id' : null;
   }
 
   /** The body of `SqlDriver#orderKeysFor`; the method's docblock there is its contract. */
