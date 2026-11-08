@@ -31,7 +31,7 @@ import { authIdentityObjects } from './manifest.js';
 import { createTenancyService } from './tenancy-service.js';
 import { mintScimConnectionCredential } from './scim-connection-service.js';
 import { runDeleteIdpGroupMapping, runSetIdpGroupMapping, type IdpGroupMappingAdminDeps } from './idp-group-mapping-admin.js';
-import { scimGroupProjectionReason, type OrganizationBoundaryJudge } from './scim-group-projection.js';
+import { createScimGroupProjection, scimGroupProjectionReason, type OrganizationBoundaryJudge } from './scim-group-projection.js';
 import { bindTestSecurityCatalog } from './__tests__/security-catalog.testkit.js';
 import { sqliteEnginePool, type BootedSqliteEngine } from './__tests__/sqlite-engine-pool.testkit.js';
 import 'better-auth';
@@ -87,11 +87,15 @@ async function bootEngine(): Promise<BootedSqliteEngine> {
   return { engine, driver };
 }
 
+/** The catalog the security service reads, rebuilt per boot; a case may redefine a set in place after its mapping is saved. */
+let catalogPermissions: Array<Record<string, unknown>> = [];
+
 /** The `security` service plugin-security registers, over a catalog bound to a stub engine (no middleware on the real one). */
 async function securityService(): Promise<OrganizationBoundaryJudge> {
+  catalogPermissions = [{ name: SALES }, { name: ADMIN_FULL_ACCESS }, { name: PLATFORM_OPS, systemPermissions: ['manage_platform_settings'] }];
   const ql = bindTestSecurityCatalog(
     { registerMiddleware: vi.fn(), getSchema: () => undefined },
-    { permissions: [{ name: SALES }, { name: ADMIN_FULL_ACCESS }, { name: PLATFORM_OPS, systemPermissions: ['manage_platform_settings'] }] },
+    () => ({ permissions: catalogPermissions }),
   );
   const services: Record<string, unknown> = {
     manifest: { register: vi.fn() },
@@ -121,6 +125,7 @@ interface Harness {
   token: string;
   door: IdpGroupMappingAdminDeps;
   send: (method: string, path: string, body?: unknown) => Promise<Response>;
+  judge: OrganizationBoundaryJudge;
 }
 
 async function boot(): Promise<Harness> {
@@ -154,7 +159,7 @@ async function boot(): Promise<Harness> {
         ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
       }),
     );
-  return { engine, manager, token, door, send };
+  return { engine, manager, token, door, send, judge };
 }
 
 const ADMIN = { id: 'usr_platform_admin' };
@@ -224,6 +229,35 @@ function observeGrantWrites(h: Harness): Array<{ op: string; actor: unknown }> {
     });
   }
   return writes;
+}
+
+/** The state the vendor hands `reconcileUser` for one user whose one group maps to `mappingId`. */
+function projectedState(userId: string, mappingId: string) {
+  return {
+    provisioningDomainId: CONNECTION,
+    userId,
+    active: true,
+    sources: [],
+    grants: [{ source: { type: 'group' as const, id: 'grp', externalId: 'okta-grp-sales', displayName: 'Sales' }, role: mappingId }],
+  } as never;
+}
+
+/** `engine`, except that every row of `object` it reads back carries no `organization_id`. */
+function withoutOrganization(engine: ObjectQL, object: string): never {
+  const strip = (row: unknown) => (row && typeof row === 'object' ? { ...(row as Record<string, unknown>), organization_id: null } : row);
+  return new Proxy(engine, {
+    get(target, prop, receiver) {
+      const value = Reflect.get(target, prop, receiver);
+      if (prop === 'find' || prop === 'findOne') {
+        return async (name: string, ...rest: unknown[]) => {
+          const result = await (value as (...a: unknown[]) => Promise<unknown>).call(target, name, ...rest);
+          if (name !== object) return result;
+          return Array.isArray(result) ? result.map(strip) : strip(result);
+        };
+      }
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  }) as never;
 }
 
 const projected = (set: string) => ({ permission_set: set, organization_id: ORG, reason: scimGroupProjectionReason(CONNECTION) });
@@ -328,5 +362,67 @@ describe('SCIM group push → mapped permission set', () => {
     );
     expect(deleted.status, JSON.stringify(deleted.body)).toBe(200);
     expect(await grantsOf(h, erin.userId)).toEqual([]);
+  });
+  it('(S1) a connection whose credentials carry no organization is refused at save, like one owned by two', async () => {
+    const h = await boot();
+    // This engine refuses an organization-less credential row outright, so the case is staged at the door's read:
+    // a composition with no organization machinery (no sys_organization) stores the credential with none.
+    const door: IdpGroupMappingAdminDeps = { ...h.door, getDataEngine: () => withoutOrganization(h.engine, 'sys_scim_connection_credential') };
+    const refused = await runSetIdpGroupMapping(
+      door,
+      ADMIN,
+      new Request(`${AUTH}/admin/scim/set-group-mapping`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ connectionId: CONNECTION, groupExternalId: 'okta-grp-sales', permissionSet: SALES }),
+      }),
+    );
+    expect(refused.status).toBe(400);
+    const error = (refused.body as { error: { code: string; fields: Array<{ field: string; code: string }> } }).error;
+    expect(error.code).toBe('VALIDATION_FAILED');
+    expect(error.fields.map((f) => [f.field, f.code])).toEqual([['connectionId', 'rule_violation']]);
+    expect(await h.engine.find('sys_idp_group_mapping', {}, SYSTEM)).toEqual([]);
+  });
+
+  it('(S1) the projection never writes a grant without an organization, whatever a mapping row holds', async () => {
+    const h = await boot();
+    const saved = await saveMapping(h, { connectionId: CONNECTION, groupExternalId: 'okta-grp-sales', permissionSet: SALES });
+    const mappingId = (saved.body as { data: { mappingId: string } }).data.mappingId;
+    const frank = await provision(h, 'frank');
+    const warn = vi.fn();
+    const projection = createScimGroupProjection({
+      getEngine: () => withoutOrganization(h.engine, 'sys_idp_group_mapping') as never,
+      boundary: async () => h.judge,
+      warn,
+    });
+
+    await projection.reconcileUser(projectedState(frank.userId, mappingId), {} as never);
+
+    expect(await grantsOf(h, frank.userId)).toEqual([]);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0][0])).toMatch(/no organization/);
+  });
+
+  it('(S2) reconcile judges the boundary itself: a set redefined as administrator after the save is not granted', async () => {
+    const h = await boot();
+    const saved = await saveMapping(h, { connectionId: CONNECTION, groupExternalId: 'okta-grp-sales', permissionSet: SALES });
+    expect(saved.status, JSON.stringify(saved.body)).toBe(200);
+    const mappingId = (saved.body as { data: { mappingId: string } }).data.mappingId;
+    const gina = await provision(h, 'gina');
+    catalogPermissions = catalogPermissions.map((p) => (p.name === SALES ? { ...p, adminScope: { businessUnits: ['*'] } } : p));
+    expect(await h.judge.organizationBoundaryFailure(SALES), 'the redefined set is outside the boundary').not.toBeNull();
+    const warn = vi.fn();
+
+    // reconcileUser alone, as a vendor path that does not consult roles.exists first would call it.
+    const projection = createScimGroupProjection({ getEngine: () => h.engine as never, boundary: async () => h.judge, warn });
+    await projection.reconcileUser(projectedState(gina.userId, mappingId), {} as never);
+
+    expect(await grantsOf(h, gina.userId)).toEqual([]);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0][0])).toMatch(/grants nothing/);
+
+    // Through the vendor as well: the push lands, and grants nothing.
+    await pushGroup(h, { displayName: 'Sales', externalId: 'okta-grp-sales' }, [gina.scimId]);
+    expect(await grantsOf(h, gina.userId)).toEqual([]);
   });
 });
