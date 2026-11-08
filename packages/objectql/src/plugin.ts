@@ -38,6 +38,11 @@ import { announceStoredExpressionHoles } from './stored-expression-backfill.js';
 import { LifecycleService } from './lifecycle/lifecycle-service.js';
 import { readRecycleBinRetentionEnv, type RecycleBinRetentionSettings } from './recycle-bin/retention.js';
 import { lifecycleSettingsManifest } from './lifecycle/lifecycle-settings.js';
+import {
+    lifecycleClassKeySource,
+    lifecycleObjectKeySource,
+    type LifecycleKeySource,
+} from './lifecycle/lifecycle-key-options.js';
 import type { DanglingReferenceAuditOptions } from './integrity/dangling-reference-audit.js';
 import {
   GLOBAL_ACTION_OBJECT_KEY,
@@ -67,7 +72,7 @@ import {
 import { SecurityCatalogNameConflictError, findEnvironmentHeldSecurityCatalogNames } from './registry.js';
 // One name, one package holder for the bare-name types (a picklist, a mapping, a
 // dataset, an API, an object-less action, a function, a flow, a webhook, a
-// connector, an email template) — the cold boot's seal and its one switch
+// connector, an email template, an agent, a skill) — the cold boot's seal and its one switch
 // (`bare-name-one-holder.ts`, "The cold boot").
 import { sealBareNameHoldersAtColdBoot } from './registry.js';
 import { BARE_NAME_COLD_BOOT_MODE } from './bare-name-one-holder.js';
@@ -1212,7 +1217,19 @@ export class ObjectQLPlugin implements Plugin {
         // ADR-0057 P4: surface the lifecycle governance namespace in Settings
         // (overrides / quotas / growth alerts) when a SettingsService exists.
         try {
-            const settings = ctx.getService('settings') as { registerManifest?: (m: unknown) => void };
+            const settings = ctx.getService('settings') as {
+                registerManifest?: (m: unknown) => void;
+                registerOptionSource?: (namespace: string, key: string, source: LifecycleKeySource) => void;
+            };
+            // [#30208] The keys each lifecycle map admits are what this
+            // deployment has: its lifecycle-declared objects, the lifecycle
+            // classes. Registered BEFORE the manifest, so its registration-time
+            // audit of `OS_LIFECYCLE_*` overrides leaves these keys to be judged
+            // when read, against the registry as it then stands.
+            const objectKeys = lifecycleObjectKeySource(() => this.ql?.registry);
+            settings?.registerOptionSource?.('lifecycle', 'retention_overrides', objectKeys);
+            settings?.registerOptionSource?.('lifecycle', 'quotas', objectKeys);
+            settings?.registerOptionSource?.('lifecycle', 'quota_defaults', lifecycleClassKeySource());
             settings?.registerManifest?.(lifecycleSettingsManifest);
         } catch {
             // No settings service — governance stays at declared defaults.

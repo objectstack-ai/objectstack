@@ -737,15 +737,15 @@ export const ptBR: PlatformTranslationData = {
         },
         retention_overrides: {
           label: 'Substituições de retenção',
-          help: 'Substituições de janela por objeto: { "<object>": { "maxAge": "1y", "expireAfter": "30d" } }. As durações usam h/d/w/y. Definidas por organização, para que uma organização regulada guarde anos e uma de desenvolvimento guarde dias. Uma substituição mais curta que o mínimo exigido por um recurso da plataforma (por exemplo, a janela de detecção de duplicatas da fila de tarefas) é ignorada e registrada como erro, e a janela padrão continua valendo.',
+          help: 'Substituições de janela por objeto. As durações usam h/d/w/y. Definidas por organização, para que uma organização regulada guarde anos e uma de desenvolvimento guarde dias. Uma substituição mais curta que o mínimo exigido por um recurso da plataforma (por exemplo, a janela de detecção de duplicatas da fila de tarefas) é ignorada e registrada como erro, e a janela padrão continua valendo.',
         },
         quotas: {
           label: 'Cotas de linhas',
-          help: 'Quantidade máxima de linhas por objeto: { "<object>": 1000000 }. Ultrapassar gera um alerta de governança — as cotas nunca excluem além da política declarada.',
+          help: 'Quantidade máxima de linhas por objeto. Ultrapassar gera um alerta de governança — as cotas nunca excluem além da política declarada.',
         },
         quota_defaults: {
           label: 'Cotas padrão por classe',
-          help: 'Cotas de reserva por classe de ciclo de vida: { "telemetry": 1000000, "transient": 500000, "event": 100000, "audit": 5000000 }.',
+          help: 'Cotas de reserva por classe de ciclo de vida (telemetry, transient, event, audit).',
         },
         growth_alert_rows: {
           label: 'Limite de alerta de crescimento (linhas por varredura)',

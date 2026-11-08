@@ -167,9 +167,11 @@ Starts development mode. Three usage shapes:
 3. **Monorepo root** (cwd has `pnpm-workspace.yaml`) — orchestrates `pnpm -r dev` across packages.
 
 Once the local server is up, `os dev` in an interactive terminal offers
-**`d` to deploy**: it runs [`os deploy`](#os-deploy) in the same terminal, and
-when you are not logged in to ObjectOS Cloud the same key runs `os cloud login`
-first. Saving a file never deploys.
+**`d` to deploy**: it runs [`os deploy`](#os-deploy) in the same terminal. When
+the target is ObjectOS Cloud and you are not logged in, the same key runs
+`os cloud login` first. When the target is a runtime
+[`os environments use-runtime`](#deploy-to-a-self-hosted-runtime) remembered, the
+key deploys there and asks for no cloud login. Saving a file never deploys.
 
 ```bash
 os dev                     # Auto-compile cwd config, then start
@@ -3241,6 +3243,7 @@ is its production, so a deploy is always a deliberate act.
 | `--wait-timeout <seconds>` | — | How long to wait for the environment to serve the new version (default `600`) |
 | `-s, --server <url>` | `OS_CLOUD_URL` | Control-plane URL. Default `https://cloud.objectos.ai`, or the URL recorded by `os cloud login` |
 | `-t, --token <key>` | `OS_CLOUD_API_KEY` | Bearer token; `$OS_TOKEN` and `~/.objectstack/cloud.json` are the fallbacks |
+| `--confirm-global-uniques` | — | Self-hosted target only: confirm the app's installation-wide `unique` constraints are genuinely platform-wide when the runtime's refusal asks (as [`os package install`](#os-package-install)). Refused when the target is ObjectOS Cloud |
 | `--confirm-access-upgrade <token>` | — | Self-hosted target only: confirm the upgrade's access findings with the finding-set token the runtime's refusal printed (as [`os package install`](#os-package-install)). Refused when the target is ObjectOS Cloud |
 | `--confirm-upgrade <token>` | — | Self-hosted target only: confirm the upgrade's schema findings (a suspected rename, a type change that is not safe) with the finding-set token the runtime's refusal printed (as [`os package install`](#os-package-install)). Refused when the target is ObjectOS Cloud |
 
@@ -3263,11 +3266,13 @@ answers are the ones printed.
    build is printed; nothing is installed. A runtime that refuses it, or does not
    serve install-local, stops the deploy with exit `1`. A runtime that predates the
    dry run ignores it and installs: the command says so and exits `1`.
-3. **Install** — with `--confirm-access-upgrade` and `--confirm-upgrade` passed
-   through. The endpoint's refusals (an access upgrade to confirm, a schema
-   upgrade to confirm, a package the running kernel cannot register, …) stop the
-   deploy with exit `1`. An upgrade refusal prints its retry as
-   `os deploy --confirm-access-upgrade <token>` for access findings or
+3. **Install** — with `--confirm-global-uniques`, `--confirm-access-upgrade` and
+   `--confirm-upgrade` passed through. The endpoint's refusals (installation-wide
+   uniques to confirm on an `isolated` runtime, an access upgrade to confirm, a
+   schema upgrade to confirm, a package the running kernel cannot register, …)
+   stop the deploy with exit `1`, and the retry they print names `os deploy`:
+   `os deploy --confirm-global-uniques` for installation-wide uniques,
+   `os deploy --confirm-access-upgrade <token>` for access findings, or
    `os deploy --confirm-upgrade <token>` for schema findings.
 4. **Live** — install-local registers the package in the running kernel before it
    answers, so the answer is the verdict: `hotLoaded` prints `Live: … now serves …`

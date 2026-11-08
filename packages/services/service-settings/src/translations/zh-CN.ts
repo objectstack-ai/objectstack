@@ -609,17 +609,17 @@ export const zhCN: PlatformTranslationData = {
         },
         retention_overrides: {
           label: '保留期覆盖',
-          help: '按对象覆盖保留窗口：{ "<object>": { "maxAge": "1y", "expireAfter": "30d" } }。时长单位为 h/d/w/y。'
+          help: '按对象覆盖保留窗口。时长单位为 h/d/w/y。'
             + '按组织设置，因此受监管的组织可以保留数年，开发用的组织只保留数天。'
             + '短于某项平台功能所需最短窗口（例如作业队列的重复检测窗口）的覆盖会被忽略并记为错误，继续沿用默认窗口。',
         },
         quotas: {
           label: '行数配额',
-          help: '按对象的最大行数：{ "<object>": 1000000 }。超出时触发治理告警——配额绝不会删除已声明策略之外的数据。',
+          help: '按对象的最大行数。超出时触发治理告警——配额绝不会删除已声明策略之外的数据。',
         },
         quota_defaults: {
           label: '按类别的默认配额',
-          help: '按生命周期类别的兜底配额：{ "telemetry": 1000000, "transient": 500000, "event": 100000, "audit": 5000000 }。',
+          help: '按生命周期类别的兜底配额（telemetry、transient、event、audit）。',
         },
         growth_alert_rows: {
           label: '增长告警阈值（每次清理的行数）',

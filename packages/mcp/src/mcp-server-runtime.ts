@@ -1583,7 +1583,7 @@ export class MCPServerRuntime {
             // are kept and whose sentence is withheld unless `refusal: true`.
             const uri = `objectstack://objects/${objectName}/records/${recordId}`;
             const envelope = dataDoorRefusalEnvelope(err, objectName);
-            let body: { error: string; code?: string; status?: number };
+            let body: { error: string; code?: string; status?: number; declaredCode?: string; userMessage?: string };
             if (envelope) {
               body = {
                 error: envelope.message,
@@ -1600,7 +1600,15 @@ export class MCPServerRuntime {
                   request: { method: 'resources/read', path: uri },
                 });
               }
-              body = { error: door.message, ...(door.code !== undefined ? { code: door.code } : {}), status: door.status };
+              // [#31373] …and the door's `declaredCode` / `userMessage`, after
+              // `status`, when it serves them, as the record data tools do.
+              body = {
+                error: door.message,
+                ...(door.code !== undefined ? { code: door.code } : {}),
+                status: door.status,
+                ...(door.declaredCode !== undefined ? { declaredCode: door.declaredCode } : {}),
+                ...(door.userMessage !== undefined ? { userMessage: door.userMessage } : {}),
+              };
             }
             return {
               contents: [{
