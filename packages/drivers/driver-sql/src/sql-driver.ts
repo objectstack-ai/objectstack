@@ -8927,6 +8927,7 @@ export class SqlDriver implements IDataDriver {
       get knex() { return driver.knex; },
       readBackInsertedRows: (...a) => driver.readBackInsertedRows(...a),
       resyncSequenceToDataMax: (...a) => driver.resyncSequenceToDataMax(...a),
+      remoteColumn: (...a) => driver.remoteColumn(...a),
       rotationShardsOf: (...a) => driver.rotationShardsOf(...a),
       rotationWriteTarget: (...a) => driver.rotationWriteTarget(...a),
       stampInsertTimestamps: (...a) => driver.stampInsertTimestamps(...a),
