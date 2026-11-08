@@ -39,6 +39,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import '@objectstack/driver-turso';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
