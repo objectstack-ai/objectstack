@@ -170,7 +170,8 @@ function expectRefusal(err: Refusal | undefined, incoming: string, holder: Holde
 
 describe('the covered types, in family order', () => {
   it('the four join the list after the request family; the registry types are every covered type but the function', () => {
-    expect(BARE_NAME_ONE_HOLDER_TYPES).toEqual([
+    // The families after this one follow it (the AI family's file pins the whole list).
+    expect(BARE_NAME_ONE_HOLDER_TYPES.slice(0, 10)).toEqual([
       'picklist', 'mapping', 'dataset',
       'api', 'action', 'function',
       'flow', 'webhook', 'connector', 'email_template',
