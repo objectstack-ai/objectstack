@@ -4,15 +4,14 @@
  * Pins that the Access matrix never AUTHORS the retired lifecycle bits
  * `allowRestore` / `allowPurge` (objectui#6595).
  *
- * Both keys claimed to gate `restore` / `purge` ObjectQL operations that did
- * not exist then — a dispatched restore/purge was denied unconditionally by the
+ * Both keys gated `restore` / `purge` ObjectQL operations that have never
+ * existed — a dispatched restore/purge is denied unconditionally by the
  * evaluator's fail-closed destructive-operation backstop — so every tick of
  * the `Re` / `Pu` checkboxes was a grant no runtime has ever read.
  * `@objectstack/spec` retired both as `retiredKey()` tombstones
  * (objectstack#12497; maintainer ruling 2026-08-26 accepting objectstack#1883
- * recommendation B, ADR-0049 enforce-or-remove). They do not return: the
- * operations now exist with the recycle bin (ADR-0148), granted by the new
- * keys `allowRestoreOwnDeleted` / `manageRecycleBin`.
+ * recommendation B, ADR-0049 enforce-or-remove). They return with the M2
+ * lifecycle initiative, whose restart is recorded on objectstack#1883.
  *
  * Two directions are pinned, because a missing column is only half of it:
  *  - the COLUMN SET, not merely the absence of two keys. A set assertion is
