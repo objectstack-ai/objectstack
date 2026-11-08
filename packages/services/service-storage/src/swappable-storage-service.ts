@@ -189,6 +189,26 @@ export class SwappableStorageService implements IStorageService {
   }
 
   /**
+   * Hand the active adapter the object key of a chunked upload
+   * (S3StorageAdapter-specific).
+   *
+   * S3 addresses a multipart upload by key AND upload id, while the
+   * `IStorageService` chunk, completion and abort methods carry the upload id
+   * alone; the S3 adapter answers the key from what this call gave it. Not on
+   * `IStorageService`, so without this passthrough a caller holding the proxy
+   * (the kernel's `storage` service) never reached the adapter's
+   * `setUploadKey`, and chunk 0 of every S3 chunked upload failed.
+   *
+   * A no-op for an adapter that keeps the key itself (the local adapter
+   * records it beside the parts when the upload starts).
+   */
+  setUploadKey(uploadId: string, key: string): void {
+    const inner = this.inner as unknown as { setUploadKey?: (uploadId: string, key: string) => void };
+    if (typeof inner.setUploadKey !== 'function') return;
+    inner.setUploadKey(uploadId, key);
+  }
+
+  /**
    * Verify a presigned HMAC token (LocalStorageAdapter-specific).
    *
    * `IStorageService` does not declare this method, but `storage-routes`

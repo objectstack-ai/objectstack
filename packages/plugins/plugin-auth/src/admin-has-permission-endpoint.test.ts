@@ -118,8 +118,8 @@ async function stage() {
   ]) {
     // [#11767] default audience posture is invite_only: fixture users beyond
     // the first enter through the invitation carve-out.
-    await inviteForAudienceGate(manager, email);
-    const res = await direct('/sign-up/email', { email, password: PASSWORD, name });
+    const invitationId = await inviteForAudienceGate(manager, email);
+    const res = await direct('/sign-up/email', { email, password: PASSWORD, name, invitationId });
     expect(res.status, `sign-up ${email}: ${await res.clone().text()}`).toBe(200);
   }
 

@@ -52,6 +52,8 @@ import {
   createDefaultDatasourceDriverFactory,
   type DatasourceConnectionService,
 } from '@objectstack/service-datasource';
+// Paid at collection: the source under test loads it on first use (`check:test-source-alias`).
+import '@objectstack/metadata';
 import { AppPlugin } from './app-plugin.js';
 import { DefaultDatasourcePlugin } from './default-datasource-plugin.js';
 import { createDispatcherPlugin } from './dispatcher-plugin.js';
@@ -387,7 +389,7 @@ async function signUp(email: string): Promise<string> {
   const res = await req('/auth/sign-up/email', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password: MEMBER_PASSWORD, name: email.split('@')[0] }),
+    body: JSON.stringify({ email, password: MEMBER_PASSWORD, name: email.split('@')[0], invitationId: `inv_spike_${email.split('@')[0]}` }),
   });
   if (!res.ok) throw new Error(`spike signUp failed: ${res.status} ${await res.text()}`);
   return ((await res.json()) as any).token;
@@ -836,7 +838,7 @@ describe('(h) under the `isolated` posture every external object states its orga
     }, { context: { isSystem: true, tenantId: org } });
     const signedUp = await wReq('/auth/sign-up/email', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password: MEMBER_PASSWORD, name: email.split('@')[0] }),
+      body: JSON.stringify({ email, password: MEMBER_PASSWORD, name: email.split('@')[0], invitationId: `inv_spike_walled_${email.split('@')[0]}` }),
     });
     if (!signedUp.ok) throw new Error(`walled signUp failed: ${signedUp.status} ${await signedUp.text()}`);
     const users = await wEngine.find('sys_user', { where: { email }, limit: 1, context: { isSystem: true } });

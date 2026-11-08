@@ -214,6 +214,7 @@ This schema accepts one of the following structures:
 | **password** | `string` | ✅ |  |
 | **name** | `string` | ✅ |  |
 | **image** | `string` | optional |  |
+| **invitationId** | `string` | optional | The id of the invitation this sign-up presents: the last path segment of its /accept-invitation/ link. Under the invite_only audience posture a sign-up is admitted only by the invitation it presents, pending, unexpired and addressed to this email; an address alone is refused SELF_REGISTRATION_CLOSED. The first account of a new deployment needs none, and the other postures do not read it. |
 
 
 ---
