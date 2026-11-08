@@ -383,9 +383,9 @@ describe('#6877 §2 — well-formed single-value requests behave exactly as befo
         expect(protocol.historyMetaItem.mock.calls[0][0]).toMatchObject({ limit: 5, sinceSeq: 3 });
     });
 
-    it('GET /meta/_drafts?type=object&packageId=com.acme still narrows both ways', async () => {
+    it('GET /meta/_drafts?type=object&package=com.acme still narrows both ways', async () => {
         const { drive, protocol } = boot();
-        await drive('GET', `${META}/_drafts`, { query: { type: 'object', packageId: 'com.acme' } });
+        await drive('GET', `${META}/_drafts`, { query: { type: 'object', package: 'com.acme' } });
         expect(protocol.listDrafts.mock.calls[0][0]).toEqual({ type: 'object', packageId: 'com.acme' });
     });
 

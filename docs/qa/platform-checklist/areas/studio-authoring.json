@@ -2176,7 +2176,7 @@
       "title": "Studio asks before an unsent edit is left behind: a held (incomplete) or dirty edit in any pillar survives a pillar switch, a rail switch, the package switcher, Home and a reload — or is discarded only after the author confirms",
       "since": "v18",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -2197,7 +2197,7 @@
         "Automations, held step: open the flow, add a step whose required input is empty — the strip names '{input} on the step “{step}” needs a value'; repeat departures (a), (b) with another flow in the rail, and (e)",
         "Interfaces, held widget: open the app's dashboard, add a widget and leave its Dataset empty — the strip names 'Dataset on the widget “…” needs a value'; repeat departures (a) and (e)",
         "controls: Access — tick one matrix checkbox (dirty, not held); Interfaces — rename a navigation entry with nav editing open; repeat departures (a), (d) and (e) for each. A control is dirty only until its autosave lands: Studio's shared draft autosave fires 1.5 s after the LAST edit (ui/packages/app-shell/src/views/studio-design/useDraftAutoSave.ts), so start each departure inside that window, timed from the edit, and record the gap. A departure after the save landed leaves a clean pillar, where no prompt is correct and not a fail of acceptance[0] or [1]",
-        "server truth after each answer: GET /api/v1/meta/_drafts?packageId=PKG (the package's pending drafts) and the item's draft read (GET /api/v1/meta/TYPE/NAME?state=draft&package=PKG) — after Leave they carry nothing of the discarded edit; after Stay, finishing the edit (an option with a value, a target, the input, a dataset) lets the autosave PUT carry it. The item draft read answers 404 NO_DRAFT when the item has no pending draft (packages/metadata-protocol/src/protocol.ts noPendingDraftError), so for a held edit that never saved, a 404 before AND after Leave is the 'unchanged' reading, not a failed read"
+        "server truth after each answer: GET /api/v1/meta/_drafts?package=PKG (the package's pending drafts) and the item's draft read (GET /api/v1/meta/TYPE/NAME?state=draft&package=PKG) — after Leave they carry nothing of the discarded edit; after Stay, finishing the edit (an option with a value, a target, the input, a dataset) lets the autosave PUT carry it. The item draft read answers 404 NO_DRAFT when the item has no pending draft (packages/metadata-protocol/src/protocol.ts noPendingDraftError), so for a held edit that never saved, a 404 before AND after Leave is the 'unchanged' reading, not a failed read"
       ],
       "acceptance": [
         {
@@ -2221,7 +2221,7 @@
         {
           "clause": "Leave discards only after the author said so, and writes nothing: the pending drafts and the item's draft read carry nothing of the discarded edit",
           "oracle": "api",
-          "verify": "GET /api/v1/meta/_drafts?packageId=PKG and the item's ?state=draft read, before and after the confirmed departure, are unchanged by the discarded edit",
+          "verify": "GET /api/v1/meta/_drafts?package=PKG and the item's ?state=draft read, before and after the confirmed departure, are unchanged by the discarded edit",
           "evidence": "the before/after reads"
         }
       ],
@@ -2283,7 +2283,8 @@
           "date": "2026-11-04",
           "change": "steps[1] and acceptance[1].verify corrected from QA run #29893 (W5-STUDIO, at 589049b0): the label 'Priority' collides with an earlier run's published field (the card's steps[2] is steps[1] at this base), and the clean-pillar 'no prompt' half needs user activation first. Read at base f68b47ca",
           "ref": "#29906"
-        }
+        },
+        { "revision": 8, "date": "2026-11-08", "change": "GET /api/v1/meta/_drafts re-spelled ?packageId=PKG to ?package=PKG: the drafts door now reads ?package= through the binding every /meta read uses and refuses the retired ?packageId= with 400 VALIDATION_ERROR. Not loosened: every clause still scores the same server reads", "ref": "#31490" }
       ]
     },
     {
@@ -2291,7 +2292,7 @@
       "title": "Publish refuses while an edit is held: the refusal names what the held edit needs, nothing is published and no draft changes — and once the edit is finished, Publish goes",
       "since": "v18",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -2305,12 +2306,12 @@
         ]
       },
       "steps": [
-        "record the baseline: GET /api/v1/meta/_drafts?packageId=PKG (the pending set) and the live read of each item about to be edited",
+        "record the baseline: GET /api/v1/meta/_drafts?package=PKG (the pending set) and the live read of each item about to be edited",
         "Data: add a Picklist field with no option (held: 'the field “…” needs at least one option'); click Publish, then 'Publish all' in the review sheet; capture the toast and the network trace",
         "finish the field (an option with a value), let the autosave land, Publish again",
         "Automations: add a step and leave its required input empty (held); Publish; capture; finish the input; Publish again",
         "Interfaces: add a dashboard widget with no Dataset (held); Publish; capture; bind it, a Dataset and then a measure (with the Dataset alone the widget is held again on 'Values (measures) … needs a value', engine.studio.held.widgetNeedsInput); Publish again",
-        "after each refused Publish re-read GET /api/v1/meta/_drafts?packageId=PKG and the live reads; after each accepted Publish read the toast's count and the live read of the edited item"
+        "after each refused Publish re-read GET /api/v1/meta/_drafts?package=PKG and the live reads; after each accepted Publish read the toast's count and the live read of the edited item"
       ],
       "acceptance": [
         {
@@ -2322,7 +2323,7 @@
         {
           "clause": "the refusal promotes nothing: no publish request leaves the browser and the pending drafts and live reads are unchanged",
           "oracle": "network",
-          "verify": "no POST /api/v1/packages/PKG/publish-drafts (nor any single-item publish) in the trace after the refused click; GET /api/v1/meta/_drafts?packageId=PKG and the live reads equal the baseline",
+          "verify": "no POST /api/v1/packages/PKG/publish-drafts (nor any single-item publish) in the trace after the refused click; GET /api/v1/meta/_drafts?package=PKG and the live reads equal the baseline",
           "evidence": "the trace window + the paired reads"
         },
         {
@@ -2373,7 +2374,8 @@
           "date": "2026-11-04",
           "change": "steps[4] corrected from QA run #29893 (W5-STUDIO, at 589049b0): binding a KPI widget takes a dataset and a measure; with the dataset alone the widget is held again. Read at base f68b47ca",
           "ref": "#29906"
-        }
+        },
+        { "revision": 5, "date": "2026-11-08", "change": "GET /api/v1/meta/_drafts re-spelled ?packageId=PKG to ?package=PKG: the drafts door now reads ?package= through the binding every /meta read uses and refuses the retired ?packageId= with 400 VALIDATION_ERROR. Not loosened: every clause still scores the same server reads", "ref": "#31490" }
       ]
     },
     {
@@ -2877,7 +2879,7 @@
       "title": "Hooks authored in Studio's Hooks tab save pinned and keep their name — a rename is held with the way back named — and their options take effect at runtime: the Run-only-when condition, the retry policy and On Error",
       "since": "v18",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -2912,7 +2914,7 @@
         {
           "clause": "a renamed hook is held, not saved under the partial names: the held line names the original name, and no draft row appears under any other name",
           "oracle": "api",
-          "verify": "no PUT while renamed; GET /api/v1/meta/_drafts?packageId=PKG&type=hook lists only the original name",
+          "verify": "no PUT while renamed; GET /api/v1/meta/_drafts?package=PKG&type=hook lists only the original name",
           "evidence": "the held line + the drafts read"
         },
         {
@@ -2975,7 +2977,8 @@
           "date": "2026-11-08",
           "change": "steps[3] and steps[5] fire each throwing hook on its own record name: two throwing hooks on the same event and trigger hide the log hook's write behind the abort hook. Checklist-accuracy finding of QA run #31486 (owed:weekly, at 0647dabb). Read at base 4894cfe1",
           "ref": "#31499"
-        }
+        },
+        { "revision": 6, "date": "2026-11-08", "change": "GET /api/v1/meta/_drafts re-spelled ?packageId=PKG to ?package=PKG: the drafts door now reads ?package= through the binding every /meta read uses and refuses the retired ?packageId= with 400 VALIDATION_ERROR. Not loosened: every clause still scores the same server reads", "ref": "#31490" }
       ]
     },
     {

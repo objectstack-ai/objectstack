@@ -149,7 +149,7 @@ vi.stubGlobal(
   vi.fn(async (input: unknown) => {
     const url = String(input);
     if (url.startsWith('/api/v1/meta/_drafts')) {
-      const qs = new URL(url, 'http://x').searchParams.get('packageId');
+      const qs = new URL(url, 'http://x').searchParams.get('package');
       const drafts = server.drafts.filter((d) => !qs || d.packageId === qs);
       return new Response(JSON.stringify({ drafts }), { status: 200, headers: { 'content-type': 'application/json' } });
     }

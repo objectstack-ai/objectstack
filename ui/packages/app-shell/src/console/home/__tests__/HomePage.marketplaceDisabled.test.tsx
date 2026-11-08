@@ -158,7 +158,7 @@ const serverConfig = (cloudUrl: string, marketplace: boolean) => ({
  * `usePendingDraftsRow` renders `null` for both `count === null` (what the sink's
  * unparseable answer produced) and `count === 0`, so no assertion in this file
  * moves. Routes are matched on the PATHNAME because the hook appends a
- * `?packageId=` scope for package-bound callers; the full url is what is recorded.
+ * `?package=` scope for package-bound callers; the full url is what is recorded.
  * ─────────────────────────────────────────────────────────────────────────── */
 
 const CONFIG_ROUTE = '/api/v1/runtime/config';

@@ -152,7 +152,7 @@ describe('dogfood: a zh-CN Studio echo of the translated read publishes and serv
     expect(JSON.stringify(saved.json)).toContain('INVALID_METADATA');
     expect(JSON.stringify(saved.json)).toContain('declares a field named `queue`');
 
-    const drafts = await call('GET', `/meta/_drafts?packageId=${PKG}`);
+    const drafts = await call('GET', `/meta/_drafts?package=${PKG}`);
     expect(drafts.status, JSON.stringify(drafts.json)).toBe(200);
     expect(JSON.stringify(drafts.json)).not.toContain(name);
   });

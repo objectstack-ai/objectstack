@@ -157,7 +157,7 @@ beforeEach(() => {
   });
   fetchPackagesMock.mockReset();
   fetchPackagesMock.mockResolvedValue([{ id: PKG, name: 'Acme', writable: true, namespace: 'acme' }]);
-  // The surface's pending-drafts feed (`GET /api/v1/meta/_drafts?packageId=…`).
+  // The surface's pending-drafts feed (`GET /api/v1/meta/_drafts?package=…`).
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {

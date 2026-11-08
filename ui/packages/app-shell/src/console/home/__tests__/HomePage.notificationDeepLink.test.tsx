@@ -163,7 +163,7 @@ import { HomePage } from '../HomePage';
  * byte-identical output to what these cases have always rendered, while a seeded
  * one would add a banner and a `pending-drafts-publish` button to every case's
  * tree. Routes are matched on the PATHNAME because the hook appends a
- * `?packageId=` scope for package-bound callers; the full URL is what gets
+ * `?package=` scope for package-bound callers; the full URL is what gets
  * recorded.
  * ─────────────────────────────────────────────────────────────────────────── */
 

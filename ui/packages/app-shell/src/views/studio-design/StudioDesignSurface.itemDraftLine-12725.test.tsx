@@ -27,7 +27,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
 const PACKAGE_ID = 'com.acme.app';
-const DRAFTS = `/api/v1/meta/_drafts?packageId=${encodeURIComponent(PACKAGE_ID)}`;
+const DRAFTS = `/api/v1/meta/_drafts?package=${encodeURIComponent(PACKAGE_ID)}`;
 const OBJECT = {
   name: 'acme_task',
   label: 'Task',

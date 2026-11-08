@@ -299,7 +299,7 @@ beforeEach(() => {
         );
       }
       if (path === '/api/v1/meta/_drafts') {
-        return json({ drafts: draftRows(url.searchParams.get('packageId'), url.searchParams.get('type')) });
+        return json({ drafts: draftRows(url.searchParams.get('package'), url.searchParams.get('type')) });
       }
       if (path === '/api/v1/meta/app') {
         const pkg = url.searchParams.get('package');

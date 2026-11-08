@@ -28,7 +28,7 @@ import { MetadataClient } from '@object-ui/data-objectstack';
 const PKG = 'com.example.repairs';
 const BASE = 'http://test.local/api/v1/meta';
 const PUBLISHED_URL = `${BASE}/object?package=${PKG}`;
-const DRAFTS_URL = `${BASE}/_drafts?packageId=${PKG}&type=object`;
+const DRAFTS_URL = `${BASE}/_drafts?package=${PKG}&type=object`;
 const OVERLAID_URL = `${BASE}/object?package=${PKG}&preview=draft`;
 
 const technician = {

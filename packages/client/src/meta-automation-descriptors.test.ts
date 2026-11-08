@@ -53,7 +53,7 @@ describe('client.meta (#3563 PR-5)', () => {
         const { client, fetchMock } = createMockClient({ success: true, data: { drafts: [] } });
         await client.meta.listDrafts({ packageId: 'com.acme.crm', type: 'object' });
         expect(String(fetchMock.mock.calls[0][0])).toBe(
-            'http://localhost:3000/api/v1/meta/_drafts?packageId=com.acme.crm&type=object',
+            'http://localhost:3000/api/v1/meta/_drafts?package=com.acme.crm&type=object',
         );
         await client.meta.listDrafts();
         expect(String(fetchMock.mock.calls[1][0])).toBe('http://localhost:3000/api/v1/meta/_drafts');

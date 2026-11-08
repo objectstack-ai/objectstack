@@ -37,7 +37,7 @@ import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 
 const PACKAGE_ID = 'app.hcpl';
-const DRAFTS = `/api/v1/meta/_drafts?packageId=${encodeURIComponent(PACKAGE_ID)}`;
+const DRAFTS = `/api/v1/meta/_drafts?package=${encodeURIComponent(PACKAGE_ID)}`;
 
 /** The scripted chat stream the mocked transport serves. */
 const chat = vi.hoisted(() => {

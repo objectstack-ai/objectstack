@@ -116,7 +116,7 @@ describe('dogfood: an object bound to a datasource that does not exist is refuse
     const saved = await call('PUT', `/meta/object/dsprobe_badds?mode=draft&package=${PKG}`, object('dsprobe_badds', 'dsprobe_nosuch'));
     expectRefused(saved, 'dsprobe_badds', 'dsprobe_nosuch');
 
-    const drafts = await call('GET', `/meta/_drafts?packageId=${PKG}`);
+    const drafts = await call('GET', `/meta/_drafts?package=${PKG}`);
     expect(drafts.status, JSON.stringify(drafts.json)).toBe(200);
     expect(JSON.stringify(drafts.json)).not.toContain('dsprobe_badds');
   });

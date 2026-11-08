@@ -214,7 +214,7 @@ beforeEach(() => {
         });
       }
       if (path === '/api/v1/meta/_drafts') {
-        const scope = url.searchParams.get('packageId');
+        const scope = url.searchParams.get('package');
         return json({ drafts: !scope || scope === PAIR ? draftRows() : [] });
       }
       if (path === '/api/v1/meta/app') return json([{ name: 'crm_app', label: 'CRM' }]);
@@ -274,7 +274,7 @@ describe('a read-only base with its pair listed: Pending, the panel and Publish 
     await waitFor(() => expect(panelPackage()).toBe(PAIR), { timeout: 8000 });
     // objectstack#29691 — the sheet names the base the pair's drafts are saved for.
     expect(panelCustomizationOf()).toBe('HotCRM');
-    await waitFor(() => expect(srv.reads).toContain(`/api/v1/meta/_drafts?packageId=${encodeURIComponent(PAIR)}`));
+    await waitFor(() => expect(srv.reads).toContain(`/api/v1/meta/_drafts?package=${encodeURIComponent(PAIR)}`));
     await waitFor(() => expect(publishButton()).toBeEnabled(), { timeout: 8000 });
     expect(publishButton().parentElement).not.toHaveAttribute('data-disabled-reason');
 
