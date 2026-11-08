@@ -1289,6 +1289,34 @@ describe('the sample data, copied when the door asks — the seed receipt (#3080
     });
 
 
+    it('a copied seed item is an environment seed item like any other: re-saved, or drafted and published, it loads no row twice', async () => {
+        const { protocol, table, writes } = makeProtocol();
+        await protocol.importUnmanagedPackage({ manifest: seededBody(), seedData: true });
+        // The install's one organization, and the rows the install door loaded
+        // from the receipt (`seedSampleData`) under it.
+        table('sys_organization').push({ id: 'org_1', name: 'Acme Corp' });
+        table('crm_account').push(
+            { id: 'a1', title: 'Acme', organization_id: 'org_1' },
+            { id: 'a2', title: 'crm_lead', organization_id: 'org_1' },
+        );
+        const stored = seedRows(table).find((r) => r.name === 'crm_account_seed')!.body;
+        const inserts = () => writes.filter((w) => w.op === 'insert' && w.table === 'crm_account').length;
+
+        // A plain save of the item writes metadata only: a seed is applied when it is PUBLISHED.
+        await protocol.saveMetaItem({ type: 'seed', name: 'crm_account_seed', item: stored, mode: 'publish', packageId: 'com.example.crm-copy' });
+        expect(inserts()).toBe(0);
+
+        // Drafted and published, it is applied — create-only (`ignore`, the spec default): every record already has its row.
+        await protocol.saveMetaItem({ type: 'seed', name: 'crm_account_seed', item: stored, mode: 'draft', packageId: 'com.example.crm-copy' });
+        const published = await protocol.publishPackageDrafts({ packageId: 'com.example.crm-copy' });
+        expect(published.seedApplied).toMatchObject({
+            success: true, inserted: 0, updated: 0,
+            landed: [{ object: 'crm_account', inserted: { total: 0 }, matched: { ids: ['a1', 'a2'], total: 2 } }],
+        });
+        expect(inserts()).toBe(0);
+        expect(table('crm_account').map((r) => r.title)).toEqual(['Acme', 'crm_lead']);
+    });
+
     it('`seedData` is the door\'s, never the published request\'s: the declaration still refuses an undeclared key', async () => {
         const { protocol } = makeProtocol();
         const err = await refusalOf(() => protocol.importUnmanagedPackage({ manifest: seededBody(), withSampleData: true }));

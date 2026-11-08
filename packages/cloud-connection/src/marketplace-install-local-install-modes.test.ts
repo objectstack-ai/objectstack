@@ -626,3 +626,279 @@ describe('install-local — Q6 after a RENAMED copy: the managed install is admi
         expect(h.ledgerHas('com.example.crm')).toBe(false);
     });
 });
+
+describe('install-local — an unmanaged copy\'s sample data, asked for with `seedSampleData` (#30808)', () => {
+    type Row = Record<string, unknown> & { id: string };
+    /** The audit/ownership columns every user-authored object carries. */
+    const OWNED = { owner_id: { type: 'lookup', reference: 'sys_user' }, created_by: { type: 'lookup', reference: 'sys_user' } };
+    /** Account ← contact, the contact naming its account by the account's natural key; listed child first. */
+    const seededCrm = (extra: Record<string, unknown> = {}) => crm({
+        installModes: BOTH,
+        objects: [
+            { name: 'crm_account', label: 'Account', fields: { name: { type: 'text' }, ...OWNED } },
+            { name: 'crm_contact', label: 'Contact', fields: { email: { type: 'text' }, account: { type: 'lookup', reference: 'crm_account' }, ...OWNED } },
+        ],
+        data: [
+            { object: 'crm_contact', externalId: 'email', records: [{ email: 'ada@acme.test', account: 'Acme' }] },
+            { object: 'crm_account', externalId: 'name', records: [{ name: 'Acme' }, { name: 'Globex' }] },
+        ],
+        ...extra,
+    });
+
+    /**
+     * The door over an in-memory data engine the REAL `SeedLoaderService`
+     * writes through, and a protocol double standing in for the import: it
+     * registers the copied objects, writes each dataset the door asks for as
+     * a `seed` item of the new base (the verb's own pins live in
+     * `@objectstack/metadata-protocol`'s `package-unmanaged-install.test.ts`),
+     * and serves them back through `getMetaItems`. `tables` and `seedItems`
+     * outlive a mount, so a second mount is a restart over the same database.
+     */
+    function world() {
+        const tables: Record<string, Row[]> = {};
+        const objects = new Map<string, any>();
+        const packages = new Map<string, { manifest: Record<string, unknown> }>();
+        const seedItems = new Map<string, Record<string, unknown>>();
+        const writes: string[] = [];
+        let nextId = 0;
+        const known = (object: string) => {
+            if (!objects.has(object)) throw new Error(`Object '${object}' not found`);
+            return (tables[object] ??= []);
+        };
+        // The platform tables the loader probes (`sys_organization`, the landed-key
+        // ledger) hold no row here; every other unknown object is refused.
+        const readable = (object: string) => (object.startsWith('sys_') && !objects.has(object) ? [] : known(object));
+        const matches = (row: Row, where: Record<string, unknown>) => Object.entries(where).every(([k, v]) => {
+            if (k.startsWith('$')) throw new Error(`engine double: combinator '${k}' is not implemented`);
+            if (v === null) return row[k] == null;
+            if (v && typeof v === 'object') {
+                const ops = Object.keys(v);
+                if (ops.length !== 1 || ops[0] !== '$in') throw new Error(`engine double: operator(s) ${ops.join(', ')} not implemented`);
+                return ((v as { $in: unknown[] }).$in).includes(row[k]);
+            }
+            return row[k] === v;
+        });
+        const engine: any = {
+            syncSchemas: vi.fn(async () => undefined),
+            manifests: new Map(),
+            getSchema: (name: string) => objects.get(name),
+            registry: {
+                getAllPackages: () => [],
+                getNamespaceOwners: () => [],
+                getPackage: (id: string) => packages.get(id),
+                getObject: (name: string) => objects.get(name),
+            },
+            async find(object: string, query?: any): Promise<unknown[]> {
+                const rows = readable(object).filter((row) => matches(row, query?.where ?? {}));
+                return (typeof query?.limit === 'number' ? rows.slice(0, query.limit) : rows).map((row) => ({ ...row }));
+            },
+            // One record, or the batch the loader inserts a dataset in.
+            async insert(object: string, record: Record<string, unknown> | Record<string, unknown>[]): Promise<Row | Row[]> {
+                const one = (r: Record<string, unknown>) => {
+                    const row = { ...r, id: `r${++nextId}` } as Row;
+                    known(object).push(row);
+                    writes.push(`insert ${object}`);
+                    return { ...row };
+                };
+                return Array.isArray(record) ? record.map(one) : one(record);
+            },
+            async update(object: string, data: Record<string, unknown>, options: any) {
+                let n = 0;
+                for (const row of known(object)) {
+                    if (!matches(row, options?.where ?? {})) continue;
+                    Object.assign(row, data);
+                    n += 1;
+                }
+                return n;
+            },
+            async delete(object: string, options?: any): Promise<boolean> {
+                const id = String(options?.where?.id ?? '');
+                const table = known(object);
+                const at = table.findIndex((r) => r.id === id);
+                if (at < 0) return false;
+                table.splice(at, 1);
+                writes.push(`delete ${object}`);
+                return true;
+            },
+        };
+        const importUnmanagedPackage = vi.fn(async (request: any) => {
+            const source = request.manifest;
+            const targetPackageId = `${source.id}-copy`;
+            if (packages.has(targetPackageId)) {
+                throw Object.assign(new Error(`Package '${targetPackageId}' already exists.`), {
+                    code: 'RESOURCE_CONFLICT', status: 409, details: { targetPackageId },
+                });
+            }
+            packages.set(targetPackageId, { manifest: { id: targetPackageId, namespace: source.namespace } });
+            const copied: Array<{ type: string; name: string }> = [];
+            for (const o of source.objects ?? []) {
+                objects.set(o.name, o);
+                copied.push({ type: 'object', name: o.name });
+            }
+            if (request.seedData === true) {
+                for (const d of source.data ?? []) {
+                    const name = `${d.object}_seed`;
+                    seedItems.set(name, { ...d, _packageId: targetPackageId });
+                    copied.push({ type: 'seed', name });
+                }
+            }
+            return { sourcePackageId: source.id, targetPackageId, namespace: source.namespace, copiedCount: copied.length, copied, strippedLocks: [] };
+        });
+        const getMetaItems = vi.fn(async ({ type, packageId }: { type: string; packageId?: string }) => ({
+            type,
+            items: type !== 'seed' ? [] : [...seedItems.values()]
+                .filter((b) => !packageId || b._packageId === packageId)
+                .map((b) => ({ ...b, _diagnostics: { valid: true } })),
+        }));
+
+        async function boot() {
+            const routes = new Map<string, Handler>();
+            const rawApp = {
+                get: (p: string, h: Handler) => routes.set(`GET ${p}`, h),
+                post: (p: string, h: Handler) => routes.set(`POST ${p}`, h),
+                delete: (p: string, h: Handler) => routes.set(`DELETE ${p}`, h),
+            };
+            const hooks = new Map<string, any>();
+            const register = vi.fn(async () => undefined);
+            const services: Record<string, any> = {
+                manifest: { register },
+                auth: installerAuthService(INSTALLER),
+                objectql: withInstallerGrants(engine, INSTALLER),
+                metadata: { getObject: async (name: string) => objects.get(name) },
+                protocol: { importUnmanagedPackage, getMetaItems },
+            };
+            const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+            const ctx = {
+                hook: (e: string, h: any) => hooks.set(e, h),
+                getService: (name: string) => {
+                    if (name === 'http-server') return { getRawApp: () => rawApp };
+                    const svc = services[name];
+                    if (svc === undefined) throw new Error(`no ${name}`);
+                    return svc;
+                },
+                registerService: (name: string, svc: unknown) => { services[name] = svc; },
+                logger,
+            };
+            const plugin = new MarketplaceInstallLocalPlugin({ controlPlaneUrl: 'off', storageDir: dir });
+            await plugin.start(ctx as any);
+            await hooks.get('kernel:ready')?.();
+            register.mockClear();
+            const purgeC = (manifestId: string) => ({ ...makeC(undefined), req: { ...makeC(undefined).req, param: (k: string) => (k === 'manifestId' ? manifestId : undefined) } });
+            return {
+                install: (body: unknown) => routes.get(`POST ${ROUTE}`)!(makeC(body)),
+                purge: (manifestId: string) => routes.get(`POST ${ROUTE}/:manifestId/purge-sample-data`)!(purgeC(manifestId)),
+                register,
+                logger,
+            };
+        }
+        return { tables, writes, seedItems, packages, importUnmanagedPackage, getMetaItems, boot };
+    }
+
+    it('off by default: the import is not asked for the sample data, no row lands, and the answer says it was skipped', async () => {
+        const w = world();
+        const h = await w.boot();
+        const res = await h.install({ manifest: seededCrm(), installMode: 'unmanaged' });
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
+        expect(w.importUnmanagedPackage.mock.calls[0]![0]).not.toHaveProperty('seedData');
+        expect(res.payload.data.seeded).toEqual({
+            mode: 'skipped',
+            reason: 'an unmanaged install copies metadata, not data: the package\'s sample data was not loaded',
+        });
+        expect(w.seedItems.size).toBe(0);
+        expect(w.writes).toEqual([]);
+    });
+
+    it('asked for: the rows land from the stored seed items, owned by the installer, the lookup resolved in load order', async () => {
+        const w = world();
+        const h = await w.boot();
+        const res = await h.install({ manifest: seededCrm(), installMode: 'unmanaged', seedSampleData: true });
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
+        expect(w.importUnmanagedPackage.mock.calls[0]![0]).toMatchObject({ seedData: true, actor: INSTALLER });
+        expect(res.payload.data.seeded).toEqual({ mode: 'inline', inserted: 3, updated: 0, skipped: 0, errors: 0 });
+        const acme = w.tables.crm_account!.find((r) => r.name === 'Acme')!;
+        expect(w.tables.crm_account!.map((r) => r.name).sort()).toEqual(['Acme', 'Globex']);
+        // The contact's `account: 'Acme'` is the parent row's id: the account dataset loaded first.
+        expect(w.tables.crm_contact).toEqual([expect.objectContaining({ email: 'ada@acme.test', account: acme.id })]);
+        for (const row of [...w.tables.crm_account!, ...w.tables.crm_contact!]) {
+            expect({ owner_id: row.owner_id, created_by: row.created_by }).toEqual({ owner_id: INSTALLER, created_by: INSTALLER });
+        }
+        // Nothing is ledgered or registered under the package's id.
+        expect(h.register).not.toHaveBeenCalled();
+        expect(new LocalManifestSource(dir).read('com.example.crm').entry).toBeNull();
+    });
+
+    it('the purge of the copy\'s base deletes exactly the sample rows; a row the customer wrote in a seeded object stays', async () => {
+        const w = world();
+        const h = await w.boot();
+        await h.install({ manifest: seededCrm(), installMode: 'unmanaged', seedSampleData: true });
+        w.tables.crm_account!.push({ id: 'u1', name: 'Initech', owner_id: INSTALLER });
+        const res = await h.purge('com.example.crm-copy');
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
+        expect(res.payload).toEqual({
+            success: true,
+            data: { manifestId: 'com.example.crm-copy', deleted: 3, skipped: 0, errors: 0, withSampleData: false },
+        });
+        expect(w.tables.crm_account!.map((r) => r.id)).toEqual(['u1']);
+        expect(w.tables.crm_contact).toEqual([]);
+        // The receipt stays: a second purge finds nothing left to delete.
+        const again = await h.purge('com.example.crm-copy');
+        expect(again.payload.data).toMatchObject({ deleted: 0, skipped: 3, errors: 0 });
+    });
+
+    it('a restart after the copy, and after the purge, re-inserts nothing', async () => {
+        const w = world();
+        const first = await w.boot();
+        await first.install({ manifest: seededCrm(), installMode: 'unmanaged', seedSampleData: true });
+        const loaded = w.writes.length;
+        await w.boot();
+        expect(w.writes.length).toBe(loaded);
+        const third = await w.boot();
+        await third.purge('com.example.crm-copy');
+        const purged = w.writes.length;
+        await w.boot();
+        expect(w.writes.length).toBe(purged);
+        expect(w.tables.crm_account).toEqual([]);
+    });
+
+    it('a re-run is refused 409 by the import before anything is loaded again', async () => {
+        const w = world();
+        const h = await w.boot();
+        await h.install({ manifest: seededCrm(), installMode: 'unmanaged', seedSampleData: true });
+        const before = w.writes.length;
+        const res = await h.install({ manifest: seededCrm(), installMode: 'unmanaged', seedSampleData: true });
+        expect(res.status).toBe(409);
+        expect(res.payload.error.code).toBe('RESOURCE_CONFLICT');
+        expect(w.writes.length).toBe(before);
+    });
+
+    it('`seedSampleData` that is not a boolean, or beside a managed install: 400 INVALID_REQUEST, nothing imported or registered', async () => {
+        for (const body of [
+            { manifest: seededCrm(), installMode: 'unmanaged', seedSampleData: 'yes' },
+            { manifest: seededCrm(), seedSampleData: true },
+            { manifest: seededCrm(), installMode: 'managed', seedSampleData: false },
+        ]) {
+            const w = world();
+            const h = await w.boot();
+            const res = await h.install(body);
+            expect(res.status, JSON.stringify(body)).toBe(400);
+            expect(res.payload.error.code).toBe('INVALID_REQUEST');
+            expect(res.payload.error.message).toContain('seedSampleData');
+            expect(w.importUnmanagedPackage).not.toHaveBeenCalled();
+            expect(h.register).not.toHaveBeenCalled();
+            expect(w.writes).toEqual([]);
+        }
+    });
+
+    it('the purge of an id that is no installed base still answers 404; an unreadable receipt answers 503 and deletes nothing', async () => {
+        const w = world();
+        const h = await w.boot();
+        expect((await h.purge('com.example.nothing')).status).toBe(404);
+        await h.install({ manifest: seededCrm(), installMode: 'unmanaged', seedSampleData: true });
+        w.getMetaItems.mockRejectedValueOnce(new Error('sys_metadata is unreachable'));
+        const before = w.writes.length;
+        const res = await h.purge('com.example.crm-copy');
+        expect(res.status).toBe(503);
+        expect(res.payload.error.code).toBe('SERVICE_UNAVAILABLE');
+        expect(w.writes.length).toBe(before);
+    });
+});
