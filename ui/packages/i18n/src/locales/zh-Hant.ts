@@ -3998,6 +3998,7 @@ const zhHant = {
     sharedObject: '分享的 {{object}}',
     redactedFields: '部分欄位已被所有者隱藏：{{fields}}',
     linkedRecord: '已關聯記錄',
+    linkedUser: '已關聯使用者',
   },
   publicForm: {
     submit: '提交',
@@ -4125,6 +4126,22 @@ const zhHant = {
       managedBody: '此人授權的 AI 助手。它們都以此人的權限操作，撤銷會立即終止其訪問。',
       managedEmpty: '此人還沒有授權任何 AI 助手。',
       managedTruncated: '僅顯示最新的部分，此人授權的助手還有更多。',
+    },
+  },
+  effectiveAccess: {
+    title: '實際生效的權限集',
+    body: '此人在你當前組織中實際生效的每個權限集，以及各自的來源。直接分配的權限集也列在下方，可以在那裡移除。',
+    refused: '你無權檢視此人實際生效的權限。',
+    unserved: '此伺服器不提供實際生效權限的查詢。',
+    loadFailed: '無法載入實際生效的權限：{{message}}',
+    empty: '此人在此組織中沒有生效的權限集。',
+    originsLabel: '來源',
+    origin: {
+      direct: '直接分配',
+      position: '崗位：{{position}}',
+      default: '預設繫結',
+      derivedPlatformAdmin: '配置的平台管理員',
+      derivedAiAccess: '已開啟 AI 訪問',
     },
   },
   excelImport: {

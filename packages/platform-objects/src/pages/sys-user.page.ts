@@ -287,6 +287,8 @@ export const SysUserDetailPage: Page = {
                 label: { en: 'Permission Sets', 'zh-CN': '权限集', 'ja-JP': '権限セット', 'es-ES': 'Conjuntos de permisos', 'zh-Hant': '權限集', ar: 'مجموعات الأذونات', fr: 'Ensembles d’autorisations' },
                 icon: 'lock',
                 children: [
+                  // Effective sets with their origins (default / position / direct / derived), read from the server; the stored grant rows stay below.
+                  { type: 'security:effective-access', properties: {} },
                   {
                     type: 'record:related_list',
                     properties: {

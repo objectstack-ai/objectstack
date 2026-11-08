@@ -4593,6 +4593,7 @@ const en = {
     sharedObject: 'Shared {{object}}',
     redactedFields: 'Some fields are hidden by the owner: {{fields}}',
     linkedRecord: 'Linked record',
+    linkedUser: 'Linked user',
   },
   publicForm: {
     submit: 'Submit',
@@ -4726,6 +4727,22 @@ const en = {
       managedBody: 'The AI assistants this person authorized. Each one acts with their permissions, and Revoke ends its access at once.',
       managedEmpty: 'This person has not authorized any AI assistant.',
       managedTruncated: 'Only the newest are shown; this person has authorized more.',
+    },
+  },
+  effectiveAccess: {
+    title: 'Effective permission sets',
+    body: 'Every permission set in force for this person in your current organization, and where each one comes from. Direct grants are also listed below, where they can be removed.',
+    refused: 'You are not allowed to view this person’s effective access.',
+    unserved: 'This server does not report effective access.',
+    loadFailed: 'Could not load effective access: {{message}}',
+    empty: 'No permission set is in force for this person in this organization.',
+    originsLabel: 'Comes from',
+    origin: {
+      direct: 'Direct grant',
+      position: 'Position: {{position}}',
+      default: 'Default binding',
+      derivedPlatformAdmin: 'Configured platform administrator',
+      derivedAiAccess: 'AI access turned on',
     },
   },
   excelImport: {

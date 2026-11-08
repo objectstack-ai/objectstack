@@ -65,14 +65,20 @@ export class FieldMappingFacet {
   }
 
   /** The body of `SqlDriver#paginationTieBreaker`; the method's docblock there is its contract. */
-  static paginationTieBreaker(this: Pick<FieldMappingHost, 'managedObjectFields' | 'mssqlPagingKeyByObject'>, object: string): string | null {
+  static paginationTieBreaker(this: Pick<FieldMappingHost, 'fieldColumnByObject' | 'managedObjectFields' | 'mssqlPagingKeyByObject'>, object: string): string | null {
     const tableName = StorageNameMapping.resolveTableName({ name: object } as any);
     const managed =
       this.managedObjectFields.has(tableName) || this.managedObjectFields.has(object);
     if (managed) return 'id';
-    // [#31327] A federated SQL Server table's own single-column key, read from
-    // its catalog by `primeMssqlPagingKey` — never a guess: an entry exists
-    // only when the remote catalog named the key.
+    // A federated object whose binding NAMES its key column — `external.columnMap`
+    // mapping a remote column to `id` — is not a guess: the binding declares
+    // which remote column identifies a row, the column the by-id doors already
+    // address.
+    if (this.fieldColumnByObject[object]?.id) return 'id';
+    // [#31327] Otherwise, a federated SQL Server table's own single-column key,
+    // read from its catalog by `primeMssqlPagingKey` — not a guess either: an
+    // entry exists only when the remote catalog named the key. Without one of
+    // the three, nothing is known and nothing is imposed.
     return this.mssqlPagingKeyByObject.get(object) ?? null;
   }
 

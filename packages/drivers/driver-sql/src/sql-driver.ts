@@ -7483,6 +7483,18 @@ export class SqlDriver implements IDataDriver {
    * ORDER BY at all** — trading a reshuffle among ties for the loss of the
    * caller's whole sort.
    *
+   * One federated case is not a guess: an object whose `external.columnMap`
+   * maps a remote column to `id` has DECLARED its key column (the one the
+   * by-id doors address), so that column orders its pages too: unkeyed ties
+   * may reshuffle between executions, and a page walk then repeats and loses
+   * rows.
+   *
+   * A second is not a guess either (#31327): on SQL Server, when the binding
+   * names no key, the table's own single-column primary key as its catalog
+   * reports it (`primeMssqlPagingKey`, mapped through the binding's
+   * `columnMap`). SQL Server's `OFFSET … FETCH` needs an ORDER BY, so this is
+   * what an unsorted page of a federated table is ordered by.
+   *
    * Returns the LOGICAL field name; the call site maps it to a physical column
    * like any other sort key.
    */
