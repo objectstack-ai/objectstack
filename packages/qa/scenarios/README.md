@@ -253,10 +253,19 @@ npx @objectstack/scenarios help                                      # the comma
   refuse bare object names. The build prompt asks for the prefix on EVERY item, and the scorer reports each bare
   non-object item name as a failing Build check (`bare-name:<type>:<name>`), so such a build is never verified.
 - **Persona contract**: the build is asked for one permission set per persona, named `<namespace>_<persona id>`. The runner
-  grants it to that persona's user, and makes a seed row whose scope field names a persona's handle (`owner: u_sam`)
-  owned by that persona's user. A field the card declares in `run.userHandleFields` (`userHandleFields` in
-  `prompts.ts` reads the declaration, never infers it) is loaded with the user's id in place of the handle text, and
-  the record's `seed.rewritten` lists each field so rewritten.
+  grants it to that persona's user, and loads a seed row as owned (`owner_id`) by a persona's user only when the row
+  names that person (`rowOwner` in `prompts.ts`): it IS the persona's `record`, a declared direct lookup on it holds
+  that record's id (`ticket.assignee` = `a02`), or a declared user-handle field on it holds the persona's handle
+  (`owner: u_sam`). The first persona in `run.personas` order the row names owns it. An option value
+  (`visibility` = `public`), a row id scope and a lookup to a row no persona is (a department, a group) name nobody,
+  so those rows keep the inserter, the admin. Each persona's `record` row is loaded with that persona's user id in its
+  `user` field, which the build prompt asks for as an optional `user`-type field. `personaHandles` is the handle map
+  only; `personaRecords` is the record binding. A field the card declares in `run.userHandleFields`
+  (`userHandleFields` in `prompts.ts` reads the declaration, never infers it) is loaded with the user's id in place of
+  the handle text, and the record's `seed.rewritten` lists each field so rewritten. The build prompt's Row ownership
+  section states all of this, and a platform-boundary line: the open-source server has no hierarchy resolver, so a
+  person who must see rows another person owns gets them through what the build models (a read policy, a
+  parent-controlled child, a field naming them).
 - **Structure contract** (`prompts.ts`): every Build check traces to text the build prompt carries, so a faithful build
   never fails for not guessing a name. Besides the seed (objects and fields) and the persona sets, the contract states
   each `expect` row the exact-name scorer checks by name: every lookup's target, every single-choice field with its
@@ -265,6 +274,78 @@ npx @objectstack/scenarios help                                      # the comma
   states its change's rows the same way: the new objects (with the card's field minimum), lookups, option fields,
   dashboards and nav targets. `test/runner/prompt-trace.test.ts` reads the checks off the scorer itself and holds every
   card to it.
+
+## Refreshing the gallery — `gallery-refresh`
+
+```bash
+G="$(realpath ../gallery)"   # pnpm runs the script in the package directory: pass absolute paths
+pnpm --filter @objectstack/scenarios gallery-refresh --gallery "$G"                 # every exportable card
+pnpm --filter @objectstack/scenarios gallery-refresh --gallery "$G" --debut         # one card: the gallery's first app
+pnpm --filter @objectstack/scenarios gallery-refresh --gallery "$G" --model sonnet  # the model every turn asks for
+```
+
+One step from "is there a new stable release?" to a local commit in a checkout of objectstack-ai/gallery
+(`src/export/refresh.ts`, CLI `src/export/refresh-cli.ts`). It reads npm's `latest` `@objectstack/cli` and the
+`framework.version` of every app the gallery's `index.json` lists. When the index lists an app and every app states
+that version, it prints one `skip: …` line and exits 0, having run nothing. It also skips when a remote-tracking
+`export/<version>` branch exists: that refresh was pushed and awaits review. Otherwise it:
+
+1. runs every card the gallery may show (origin `generic`, tier `starter` or `delivery`; `--debut`: the first of them
+   by id) with `run-scenarios --modes scratch --packages published --create-version <version>`, so the apps are built
+   on exactly that release, the turns recorded;
+2. exports with screenshots into the checkout (`export-gallery`'s rules: only a run that passed every half);
+3. creates the branch `export/<version>`, commits `apps/` and `index.json` under the checkout's own git identity, and
+   prints the branch, the commit and a ready PR body.
+
+It refuses, exit 1 with the reason, when: `--gallery` is not the top of a git checkout or has uncommitted changes;
+the index does not validate; npm's `latest` is not a plain `MAJOR.MINOR.PATCH`; a local `export/<version>` branch
+already exists; `--debut` meets an index that lists an app; no card may be exported; no app exported; an exported app
+states another framework version; or anything outside `apps/` and `index.json` changed. The last three leave the
+working tree as the export left it, uncommitted. `--work DIR` keeps the records, projects and recording (default: a
+temp directory, named on a refusal). ⛔ It never pushes, never opens a PR and never talks to GitHub.
+
+### The scheduled task's runbook
+
+Ruling D2 (2026-11-06): a daily scheduled Claude Code task in this project's cloud environment runs the refresh on the
+maintainer's subscription login, and the maintainer merges its PR on the gallery.
+
+- **What it runs**: `gallery-refresh` from a fresh checkout of this repository, into a fresh clone of
+  objectstack-ai/gallery; then `git push` of the one branch it created, and one PR.
+- **What it needs**: both repositories in the environment's resources, with push access to the gallery; npm reachable;
+  the container's `claude` logged in with the subscription (`claude auth status` reports `oauth_token`) and neither
+  `ANTHROPIC_API_KEY` nor `ANTHROPIC_AUTH_TOKEN` set (the live driver refuses both); a permission mode that lets the
+  session launch the headless `claude -p` the runner spawns (Auto mode's classifier refuses it, see
+  [the cloud session settings](#running-the-cards-in-a-claude-code-cloud-session)); Chromium for the screenshots
+  (preinstalled in the cloud container). A full refresh runs one `starter` build after another, longer than the
+  2-hour cap on a background command, so the task starts it detached and waits in the foreground.
+- **What it never does**: push `main` or any branch but `export/<version>`, force-push, merge, edit a gallery file by
+  hand, pass `--packages workspace`, or run on an API key. A refusal is reported, never retried around.
+
+The task's prompt, verbatim:
+
+```text
+Refresh the ObjectStack scenario gallery. Run each step in order and stop at the first that fails.
+
+1. Check the login: `unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN; claude auth status` must report oauth_token.
+   Anything else is a failure (step 6).
+2. In the objectstack checkout: `git fetch origin main && git checkout --detach origin/main`, `pnpm install`,
+   `pnpm --filter '@objectstack/scenarios^...' build`.
+3. Clone the gallery beside it: `git clone https://github.com/objectstack-ai/gallery ../gallery`.
+   If ../gallery/index.json is missing or lists no app, add `--debut` to the command in step 4.
+4. Start the refresh detached and wait for it in the foreground:
+   `nohup sh -c 'pnpm --filter @objectstack/scenarios gallery-refresh --gallery "$(realpath ../gallery)" --work /tmp/gallery-refresh; echo "gallery-refresh exit $?"' > /tmp/gallery-refresh.log 2>&1 & echo $! > /tmp/gallery-refresh.pid`
+   then repeat `timeout 590 tail --pid="$(cat /tmp/gallery-refresh.pid)" -f /dev/null` until the process is gone.
+   The log's last line is `gallery-refresh exit N`; any N but 0 is a failure (step 6).
+5. If a line of the log starts with `skip:`, stop: report that line and do nothing else.
+   Otherwise the log names a `branch: export/VERSION`: push exactly that branch
+   (`git -C ../gallery push origin export/VERSION`) and open one pull request on objectstack-ai/gallery from it into
+   main, titled `Gallery refresh for ObjectStack VERSION`, with the text after "open the PR with this body:" as its
+   body. Never push main, never force-push, never merge, never edit a gallery file by hand.
+6. On any failure (a refusal, a non-zero exit, a failed push or PR): search the open issues of
+   objectstack-ai/objectstack for one titled `Gallery refresh failed`. If one exists, add a comment with today's
+   date, the step that failed and the last 40 lines of /tmp/gallery-refresh.log; otherwise open one issue with that
+   title and the same text. Never open a second one.
+```
 
 ## Other agent tools — Codex and the external driver contract
 

@@ -8,7 +8,7 @@
 - PM 循环工具与指令架构文件的归属见 SKILL.md 域车道表 `domain:skills` 行,⛔ 不另抄。
 - 受管面治理执行文件:`.github/CODEOWNERS` 路由半边 + SUBJECT 是受管面本身的门禁/审计脚本。
 - 全量判据在 SKILL.md 域车道表;受管面定义与两层分档见 SKILL.md 〈路径分叉〉,⛔ 不另抄。
-- QA 管理循环执行归本席;qa-run 记录是协议载体不是工作。
+- QA 循环执行归 `qa#1` 席(`qa.md`),本席只管其技能文本;qa-run 记录是协议载体不是工作。
 - 契约复核归派发席席内、决裁勤务归总监席(`director.md`);本席保留 skill 与治理文本。
 
 ## 常设承诺
@@ -22,7 +22,7 @@
 - finding 归分诊首触,自分诊见 `triage-duties.md`;可附证据与「Instruments serve the fleet」答案。
 - 「Instruments serve the fleet」答不出的 finding ⇒ 建议 p3 或不做,⛔ 不自入队;定级归分诊。
 - 内部指令面中文,机器判据恒英文;认领前重读全线程;标签写 read-modify-write 加回读。
-- QA 波次由维护者手动触发,⛔ 不自启。
+- QA 波次由维护者手动触发,⛔ 不自启;checklist-test §6 两条例行按期由 `qa#1` 跑,不是波次。
 
 ## 席内判断
 

@@ -259,6 +259,7 @@ export interface ProtocolHost {
     readonly tenantAuthoredWriteRefusal: ObjectStackProtocolImplementation['tenantAuthoredWriteRefusal'];
     readonly throwMetadataServiceUnavailable: ObjectStackProtocolImplementation['throwMetadataServiceUnavailable'];
     readonly uninstallCleanups: ObjectStackProtocolImplementation['uninstallCleanups'];
+    readonly uninstallGuards: ObjectStackProtocolImplementation['uninstallGuards'];
     readonly uninstalledNamedBaseRefusal: ObjectStackProtocolImplementation['uninstalledNamedBaseRefusal'];
     readonly unknownDatasourceSaveRefusal: ObjectStackProtocolImplementation['unknownDatasourceSaveRefusal'];
     readonly unknownGrantObjectSaveRefusal: ObjectStackProtocolImplementation['unknownGrantObjectSaveRefusal'];

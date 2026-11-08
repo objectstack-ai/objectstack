@@ -527,6 +527,7 @@ import type {
     UninstallCleanup,
     UninstallCleanupOutcome,
     UninstallDeclared,
+    UninstallGuard,
 } from './protocol-package-lifecycle-types.js';
 export { captureUninstallDeclared } from './protocol-package-lifecycle-types.js';
 export type {
@@ -537,6 +538,8 @@ export type {
     UninstallCleanup,
     UninstallCleanupOutcome,
     UninstallDeclared,
+    UninstallGuard,
+    UninstallGuardRefusal,
 } from './protocol-package-lifecycle-types.js';
 import { METADATA_MUTATION_CLUSTER_CHANNEL } from './protocol-mutation-events.js';
 import type {
@@ -760,6 +763,9 @@ export class ObjectStackProtocolImplementation implements
 
     /** [#2747] Named uninstall cleanups, run by {@link deletePackage}. */
     private uninstallCleanups = new Map<string, UninstallCleanup>();
+
+    /** [#31232] Named pre-uninstall guards, asked by {@link deletePackage} before it reads or moves anything. */
+    private uninstallGuards = new Map<string, UninstallGuard>();
 
     /**
      * Awaited per-type mutation projectors (ADR-0094), keyed by singular
@@ -1379,6 +1385,7 @@ export class ObjectStackProtocolImplementation implements
             tenantAuthoredWriteRefusal: (...a) => protocol.tenantAuthoredWriteRefusal(...a),
             throwMetadataServiceUnavailable: (...a) => protocol.throwMetadataServiceUnavailable(...a),
             get uninstallCleanups() { return protocol.uninstallCleanups; },
+            get uninstallGuards() { return protocol.uninstallGuards; },
             uninstalledNamedBaseRefusal: (...a) => protocol.uninstalledNamedBaseRefusal(...a),
             unknownDatasourceSaveRefusal: (...a) => protocol.unknownDatasourceSaveRefusal(...a),
             unknownGrantObjectSaveRefusal: (...a) => protocol.unknownGrantObjectSaveRefusal(...a),
@@ -1411,6 +1418,27 @@ export class ObjectStackProtocolImplementation implements
     registerUninstallCleanup(name: string, cleanup: UninstallCleanup): void {
         // [#29985 codemod] The body moved to `protocol-class-head.ts`; it reaches this class through `protocol-host.ts`.
         return ProtocolClassHeadFacet.registerUninstallCleanup(protocolHost(this), name, cleanup);
+    }
+
+    /**
+     * [#31232] Register a named pre-uninstall guard: the before-half of
+     * {@link registerUninstallCleanup}. {@link deletePackage} asks every
+     * registered guard, in registration order, before it reads or moves
+     * anything, and throws the first refusal one answers as its own, with
+     * `code` and `status` as the guard spelled them; nothing is removed. A
+     * guard that throws refuses with its throw. With no guard registered the
+     * verb behaves exactly as it did before guards existed.
+     *
+     * Called by a plugin that owns a verdict this package must not know — the
+     * runtime registers its dependent-rule scan (an active validation rule of
+     * another enabled package reading a field the package adds through
+     * `objectExtensions`), the one the package doors ask, so every caller of
+     * the verb is refused on the verdict those doors answer, and this package
+     * holds no copy of it. One guard per name; a second registration replaces
+     * the first (idempotent re-init).
+     */
+    registerUninstallGuard(name: string, guard: UninstallGuard): void {
+        return ProtocolClassHeadFacet.registerUninstallGuard(protocolHost(this), name, guard);
     }
 
     /**
@@ -10915,7 +10943,10 @@ export class ObjectStackProtocolImplementation implements
      *
      * [#21276] The steps, in order. Nothing durable happens before step 4, so
      * a refusal at any of steps 1–4 leaves everything as it was:
-     *  1. the retired-key refusal (`INVALID_REQUEST`) — pure;
+     *  1. the retired-key refusal (`INVALID_REQUEST`) — pure; then [#31232]
+     *     every registered pre-uninstall guard ({@link registerUninstallGuard}),
+     *     in registration order — the first refusal is thrown with its own
+     *     `code` and `status`, a guard's throw as is;
      *  2. the `sys_metadata` read — a read; a failure is thrown;
      *  3. the registry's uninstall refusal (another package extends an object
      *     this one owns, ADR-0029), asked through
@@ -10937,14 +10968,18 @@ export class ObjectStackProtocolImplementation implements
         // [#25467 cut 35] The body moved to `protocol-package-uninstall.ts` (see `PackageUninstallHost`).
         const readEngine = () => this.engine;
         const readGetServicesRegistry = () => this.getServicesRegistry;
+        const readEnvironmentId = () => this.environmentId;
+        const readUninstallGuards = () => this.uninstallGuards;
         const host: ThisParameterType<typeof deletePackage> = {
             deleteMetaItem: (...a) => this.deleteMetaItem(...a),
             get engine() { return readEngine(); },
+            get environmentId() { return readEnvironmentId(); },
             findEnvironmentRows: (...a) => this.findEnvironmentRows(...a),
             get getServicesRegistry() { return readGetServicesRegistry(); },
             packagelessAddress: (...a) => this.packagelessAddress(...a),
             runUninstallCleanups: (...a) => this.runUninstallCleanups(...a),
             shouldDropStorage: (...a) => this.shouldDropStorage(...a),
+            get uninstallGuards() { return readUninstallGuards(); },
         };
         return deletePackage.call(host, request);
     }

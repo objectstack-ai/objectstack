@@ -39,7 +39,8 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
           import: "匯入",
           export: "匯出",
           platform_admin_standing_change: "平台管理員權限變更",
-          action_invocation: "動作呼叫"
+          action_invocation: "動作呼叫",
+          package_uninstall: "解除安裝套件"
         }
       },
       user_id: {

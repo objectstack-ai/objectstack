@@ -141,3 +141,62 @@ describe('os package install --dry-run (#30884)', () => {
     expect(out).toContain('does not support a dry run: it ignored `--dry-run` and INSTALLED com.acme.crm@latest');
   });
 });
+
+/**
+ * [epic cloud#3652 Q3, #30884] `os package install --confirm-upgrade <token>`
+ * — the install-local body's `confirmSchemaUpgrade`, and how the command
+ * renders the runtime's `SCHEMA_UPGRADE_CONFIRMATION_REQUIRED` refusal: every
+ * finding, both ways forward, the exact retry with the token, exit 1.
+ */
+describe('os package install --confirm-upgrade (epic cloud#3652 Q3)', () => {
+  const TOKEN = 'schema-upgrade:0123456789abcdef0123456789abcdef';
+  const INSTALLED = {
+    manifestId: 'com.acme.crm', version: '2.0.0', versionId: 'ver_2', installedAt: '2026-11-07T00:00:00.000Z',
+    hotLoaded: true, storageDir: '/srv/runtime/.objectstack/installed-packages',
+  };
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it('sends the token verbatim as `confirmSchemaUpgrade`, and no such key without the flag', async () => {
+    let { sent } = stubRuntime({ ok: true, status: 200, body: { success: true, data: INSTALLED } });
+    await runInstall(['--confirm-upgrade', TOKEN]);
+    expect(sent[0]).toMatchObject({ packageId: 'com.acme.crm', confirmSchemaUpgrade: TOKEN });
+
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    ({ sent } = stubRuntime({ ok: true, status: 200, body: { success: true, data: INSTALLED } }));
+    await runInstall([]);
+    expect(sent[0]).not.toHaveProperty('confirmSchemaUpgrade');
+  });
+
+  it('renders the refusal: every finding, renamedFrom or the token, and exits 1', async () => {
+    stubRuntime({
+      ok: false,
+      status: 409,
+      body: {
+        success: false,
+        error: {
+          code: 'SCHEMA_UPGRADE_CONFIRMATION_REQUIRED',
+          message: 'Upgrading "com.acme.crm" would change stored fields in a way the schema sync does not carry',
+          details: {
+            manifestId: 'com.acme.crm',
+            findingSet: TOKEN,
+            findings: [
+              { kind: 'suspected_rename', describe: 'acme_lead.company (text) is removed while acme_lead.account_name (text) is added' },
+              { kind: 'type_change', describe: 'acme_deal.amount changes type text → number (needs_confirm)' },
+            ],
+          },
+        },
+      },
+    });
+    const { out, exit } = await runInstall([]);
+    expect(exit).toBe(1);
+    expect(out).toContain('acme_lead.company (text) is removed while acme_lead.account_name (text) is added');
+    expect(out).toContain('acme_deal.amount changes type text → number (needs_confirm)');
+    expect(out).toContain('`renamedFrom`');
+    expect(out).toContain(`os package install com.acme.crm --confirm-upgrade ${TOKEN}`);
+  });
+});

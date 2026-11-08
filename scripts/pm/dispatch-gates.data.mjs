@@ -1277,6 +1277,16 @@ export const CHANGE_KIND_ROWS = [
       },
     ],
   },
+  {
+    kind: "takes away a claim a published README makes (a fenced import or member call newly written in a published document, a manifest field or workspace glob that moves the documents or their type entries, or a claimed name a reached package's source stops declaring — read from the DIFF against the merge base)",
+    matches: 'published-readme-claim',
+    gates: [
+      {
+        name: 'check:published-readme-exports',
+        why: "every name a published README's fenced code imports from this repo's scope, and every member it calls on a value built from one, must exist in the BUILT type entry that import resolves to. So a README edit that writes a new claim moves it, and so does a removed or renamed declaration of a claimed name in the imported package or its workspace dependencies, or a manifest that changes what is published or where the types are. It printed in the artifact-roster block and no card was handed it (#31292, the family #31257 left): its reach is the built types of 68 packages, so a path net would name it for nearly every card. This row reaches it through the names the 129 documents claim, matched against the declarations the diff removes, measured against the gate's own reader (364 claims, none missed; 17 of the last 500 commits on main derive it, against 303 that touched a reached package's TypeScript). ⚠ It needs the packages BUILT: on an unbuilt tree it exits 3, PREREQUISITE NOT MET, and that exit means NOT MEASURED, never green. Build first, exactly as lint.yml does: pnpm exec turbo run build --filter=./packages/* --filter=./packages/*/* (quote the filter values for your shell). Repair the README to name what the package really exports, or keep the export; the baseline is MAINTAINER-ONLY",
+      },
+    ],
+  },
 ];
 
 /**

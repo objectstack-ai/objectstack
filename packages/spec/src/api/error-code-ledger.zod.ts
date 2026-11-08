@@ -1081,10 +1081,10 @@ export const ERROR_CODE_LEDGER = {
     // synonym of any standard member: the manifest is well-formed, and the
     // refusal comes from what the deployment already holds.
     'DEFAULT_RECORD_PAGE_CONFLICT',
-    // [ADR-0148 D2, card #30235] The recycle bin's three restore refusals,
+    // [ADR-0148 D2, card #30235] The recycle bin's four restore refusals,
     // REGISTERED AHEAD OF THEIR PRODUCER: the engine's restore (#30237) stamps
     // them and asserts these strings by value; the Console (#30239) reads them
-    // in its own language. `status: 409` for all three — the entry is intact
+    // in its own language. `status: 409` for all four — the entry is intact
     // and the live state conflicts with writing it back; a restore refuses
     // with the reason and never forces a write. The spec spells them once, in
     // `RECYCLE_BIN_RESTORE_REFUSAL_CODES` (`data/recycle-bin.zod.ts`). RESTORE is
@@ -1096,6 +1096,9 @@ export const ERROR_CODE_LEDGER = {
     // An object of the entry no longer exists in the registry: its package
     // was uninstalled.
     'RESTORE_PACKAGE_UNINSTALLED',
+    // [#30237, ruling 6710220841] A row's master-detail parent is not live but
+    // is the record of another bin entry: restoring that entry first clears it.
+    'RESTORE_PARENT_IN_RECYCLE_BIN',
   ],
   '@objectstack/core': [
     // [#23367, ruling A] The API-key lifecycle refusals: three distinct key
@@ -1368,6 +1371,20 @@ export const ERROR_CODE_LEDGER = {
     'PLUGIN_REGISTER_FAILED',
     'RESEED_NO_ROWS',                // reseed ran but wrote nothing
     'RESEED_SKIPPED',                // reseed declined to run; message carries why
+    // [epic cloud#3652 Q3, #30884] install-local refused a managed UPGRADE
+    // whose package upgrade plan (`comparePackageVersions`,
+    // `@objectstack/metadata-core`) lists an undeclared suspected rename (a
+    // stored field removed while one is added, nothing linking them) or a
+    // `needs_confirm` / `destructive` type change — or has no installed
+    // record it can read to compare against — 409, before any write
+    // (step 2c′, after the access gate), until the same request carries the
+    // finding set's token (`confirmSchemaUpgrade`); `details.findings` names
+    // each. The sibling of ACCESS_UPGRADE_CONFIRMATION_REQUIRED above, its own
+    // code because its findings and its token are its own: an access token
+    // never confirms a schema finding, nor the reverse. READ off the wire by
+    // `os package install` (`packages/cli/src/commands/package/install.ts`),
+    // which prints each finding and the `--confirm-upgrade` retry.
+    'SCHEMA_UPGRADE_CONFIRMATION_REQUIRED',
     // [#9246] ADR-0120 D5e posture gate: the marketplace install seam stops an
     // install that declares installation-wide (`'global'`) unique constraints
     // under the `isolated` tenancy posture, 409, until the caller confirms them

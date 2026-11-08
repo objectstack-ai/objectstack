@@ -39,7 +39,8 @@ export const ruObjects: NonNullable<TranslationData['objects']> = {
           import: "Импорт",
           export: "Экспорт",
           platform_admin_standing_change: "Изменение статуса администратора платформы",
-          action_invocation: "Вызов действия"
+          action_invocation: "Вызов действия",
+          package_uninstall: "Удаление пакета"
         }
       },
       user_id: {

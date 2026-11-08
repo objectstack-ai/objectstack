@@ -66,13 +66,24 @@ export interface AggregationHost {
   readonly numericFields: SqlDriver['numericFields'];
   presentReadColumns: SqlDriver['presentReadColumns'];
   readPresentationKind: SqlDriver['readPresentationKind'];
+  remoteColumn: SqlDriver['remoteColumn'];
 }
 
 /** The bodies of the "Aggregation" section of `SqlDriver`: a stateless facet, called by the class's stubs. */
 export class AggregationFacet {
   /** The body of `SqlDriver#aggregate`; the method's docblock there is its contract. */
-  static async aggregate(this: Pick<AggregationHost, 'aggregandColumnClassOf' | 'aggregateBackendFault' | 'aliasIdentifierSql' | 'applyFilters' | 'applyTenantScope' | 'buildDateBucketExpr' | 'coercionKey' | 'config' | 'dateGranularityCapabilities' | 'dialectName' | 'foldEmptyAggregateAnswers' | 'getBuilder' | 'knex' | 'mapAggregateFunc' | 'presentReadColumns' | 'readPresentationKind'>, object: string, query: DriverQuery, options?: DriverOptions): Promise<Record<string, unknown>[]> {
+  static async aggregate(this: Pick<AggregationHost, 'aggregandColumnClassOf' | 'aggregateBackendFault' | 'aliasIdentifierSql' | 'applyFilters' | 'applyTenantScope' | 'buildDateBucketExpr' | 'coercionKey' | 'config' | 'dateGranularityCapabilities' | 'dialectName' | 'foldEmptyAggregateAnswers' | 'getBuilder' | 'knex' | 'mapAggregateFunc' | 'presentReadColumns' | 'readPresentationKind' | 'remoteColumn'>, object: string, query: DriverQuery, options?: DriverOptions): Promise<Record<string, unknown>[]> {
     const builder = this.getBuilder(object, options);
+    // The column a FIELD names in this statement: its `external.columnMap`
+    // remote column on a federated object, the field itself otherwise. Every
+    // identifier below is spelled through it, while every registry lookup
+    // (`readPresentationKind`, `aggregandColumnClassOf`, the bucket's
+    // `temporalFieldKind`) and every output key stays the FIELD — the name the
+    // caller asked for and reads back. `find()` / `count()` / the WHERE have
+    // always mapped (`remoteColumn` in `findRows`, `applyFilters`); this door
+    // named the field verbatim, so a mapped object's GROUP BY / aggregand /
+    // `distinct` asked the remote table for a column it does not have.
+    const columnOf = (field: string): string => this.remoteColumn(object, field, field);
     this.applyTenantScope(builder, object, options);
 
     if (query.where) {
@@ -115,8 +126,9 @@ export class AggregationFacet {
       // what forced the `as any` on the `buildDateBucketExpr` call below.
       for (const g of query.groupBy) {
         if (typeof g === 'string') {
-          builder.groupBy(g);
-          builder.select(g);
+          const column = columnOf(g);
+          builder.groupBy(column);
+          builder.select(column === g ? g : this.knex.raw(`?? as ${this.aliasIdentifierSql(g)}`, [column]));
           const kind = this.readPresentationKind(table, g);
           if (kind) presentedOutput.set(g, kind);
         } else if (g && typeof g === 'object' && g.field) {
@@ -133,7 +145,7 @@ export class AggregationFacet {
           // moves.
           const outKey = g.alias ?? g.field;
           if (g.dateGranularity) {
-            const bucket = this.buildDateBucketExpr(g.field, g.dateGranularity, table);
+            const bucket = this.buildDateBucketExpr(g.field, g.dateGranularity, table, columnOf(g.field));
             if (!bucket) {
               // [#6212] Was a bare `throw new Error(...)`; see
               // {@link refuseDateBucketedGroupBy} for why it now carries the
@@ -147,14 +159,15 @@ export class AggregationFacet {
             builder.groupByRaw(bucket.sql, bucket.bindings);
             builder.select(this.knex.raw(`${bucket.sql} as ${this.aliasIdentifierSql(outKey)}`, [...bucket.bindings]));
           } else {
-            builder.groupBy(g.field);
+            const column = columnOf(g.field);
+            builder.groupBy(column);
             // Aliased only when the name actually moves: an alias equal to
-            // the field would otherwise rewrite `select "region"` into
+            // the column would otherwise rewrite `select "region"` into
             // `select "region" as "region"` on every dialect for no gain.
             // [#13714] The alias half is {@link aliasIdentifierSql}, never a
-            // `??` binding — the FIELD stays a `??` reference (it may be
+            // `??` binding — the COLUMN stays a `??` reference (it may be
             // qualified), the alias is one identifier by definition.
-            builder.select(outKey === g.field ? g.field : this.knex.raw(`?? as ${this.aliasIdentifierSql(outKey)}`, [g.field]));
+            builder.select(outKey === column ? column : this.knex.raw(`?? as ${this.aliasIdentifierSql(outKey)}`, [column]));
             // Keyed by the OUTPUT column, like the aggregation branch below —
             // `presentReadColumns` matches on the name the row actually
             // carries, so an aliased group value went unpresented before.
@@ -230,7 +243,7 @@ export class AggregationFacet {
           if (fieldExpr === '*') {
             builder.select(this.knex.raw(`${lowering.sql}(*) as ${this.aliasIdentifierSql(agg.alias)}`));
           } else {
-            builder.select(this.knex.raw(`${rawFunc} as ${this.aliasIdentifierSql(agg.alias)}`, [fieldExpr]));
+            builder.select(this.knex.raw(`${rawFunc} as ${this.aliasIdentifierSql(agg.alias)}`, [columnOf(fieldExpr)]));
           }
           // [#15546] What this aggregate answers over NOTHING, read from the
           // policy rather than restated: `sum` (and the two counts, which never
@@ -279,7 +292,7 @@ export class AggregationFacet {
           if (fieldExpr === '*') {
             builder.select(this.knex.raw(`${lowering.sql}(*)`));
           } else {
-            builder.select(this.knex.raw(rawFunc, [fieldExpr]));
+            builder.select(this.knex.raw(rawFunc, [columnOf(fieldExpr)]));
           }
         }
       }

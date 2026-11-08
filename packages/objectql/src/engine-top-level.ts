@@ -163,6 +163,10 @@ const ENGINE_OPERATION_VERBS: Record<OperationContext['operation'], boolean> = {
   // narrowing of `registerHook` this verb does not make. The permanent delete
   // still fires `beforeDelete` / `afterDelete`.
   purge: false,
+  // [#30237] The recycle bin's restore names no hook pair either, for the same
+  // reason: inside the namespace `beforeRestore` / `afterRestore` would be
+  // refused at registration. A restore runs no insert hook (ADR-0148 D2).
+  restore: false,
 };
 
 /**
@@ -3675,8 +3679,12 @@ export interface OperationContext {
    * `ast`, so `@objectstack/plugin-security`'s AST path (step 3), which hands the
    * verb to the RLS compiler raw, never sees it (#7809,
    * `engine-middleware-operation-vocabulary.test.ts`).
+   *
+   * `restore` [#30237, ADR-0148 D2] writes one recycle-bin entry back, and is
+   * dispatched like `purge(entryId)`: on the business object of the entry's
+   * master row, with no `ast` and no id (`recycle-bin/restore.ts`).
    */
-  operation: 'find' | 'findOne' | 'insert' | 'update' | 'delete' | 'count' | 'aggregate' | 'purge';
+  operation: 'find' | 'findOne' | 'insert' | 'update' | 'delete' | 'count' | 'aggregate' | 'purge' | 'restore';
   ast?: QueryAST;
   data?: any;
   options?: any;

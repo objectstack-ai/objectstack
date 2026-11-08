@@ -59,7 +59,7 @@ export const StripeBalanceSweep = defineFlow({
 });
 ```
 
-`requires: ['automation', 'triggers', 'job']`. Convert Swagger 2.0 or YAML and
+`requires: ['automation', 'triggers']`. Convert Swagger 2.0 or YAML and
 dereference every `$ref` offline, in-document ones included: the loader skips a
 `$ref` parameter, request body or response and the derived schema silently
 loses it. `providerConfig.include` allowlists operation keys as the
@@ -127,7 +127,7 @@ export const CarrierCallback = defineFlow({
 });
 ```
 
-`requires: ['automation', 'triggers', 'queue']`. The sender signs each post
+`requires: ['automation', 'triggers']`. The sender signs each post
 under `CARRIER_HOOK_SECRET` (SKILL.md *Signature* bullet). A vendor signing
 its own header adds, keyed by that ref, `signature: { signs: 'body', header:
 'X-DocuSign-Signature-1', algorithm: 'hmac-sha256', encoding: 'base64' }`.

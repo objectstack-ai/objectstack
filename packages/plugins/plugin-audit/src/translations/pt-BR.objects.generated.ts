@@ -39,7 +39,8 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
           import: "Importação",
           export: "Exportação",
           platform_admin_standing_change: "Alteração do status de administrador da plataforma",
-          action_invocation: "Invocação de ação"
+          action_invocation: "Invocação de ação",
+          package_uninstall: "Desinstalação de pacote"
         }
       },
       user_id: {

@@ -419,6 +419,10 @@ export const REST_ROUTE_LEDGER: readonly RestRouteLedgerEntry[] = [
   { route: 'GET /api/v1/security/my-delegable-scope', family: 'security-explain', source: 'route-manager', disposition: 'sdk', client: 'security.describeDelegableScope',
     note: "read half of the delegated-admin gate; strictly self-scoped (no target-user parameter), so a scoped-invitation picker can narrow to what the caller may actually delegate" },
 
+  // ── effective access (ADR-0090 D6/D12) ────────────────────────────────────
+  { route: 'GET /api/v1/security/users/:id/effective-access', family: 'security-explain', source: 'route-manager', disposition: 'sdk', client: 'security.describeEffectiveAccess',
+    note: "one user's effective permission sets with their origins; explain's caller gate in the service, an unknown id refused as a forbidden one" },
+
   // ── per-record shares ─────────────────────────────────────────────────────
   { route: 'GET /api/v1/data/:object/:id/shares', family: 'record-shares', source: 'route-manager', disposition: 'sdk', client: 'shares.list' },
   { route: 'POST /api/v1/data/:object/:id/shares', family: 'record-shares', source: 'route-manager', disposition: 'sdk', client: 'shares.grant' },

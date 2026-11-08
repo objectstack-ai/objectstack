@@ -84,6 +84,7 @@ import type {
     AnalyticsResult,
     AutomationResult,
     DelegableScope,
+    EffectiveAccess,
     FlowRuntimeState,
     FlowUnboundCause,
     ImportObjectResult,
@@ -139,6 +140,8 @@ export async function returnTypePrecisionPins(): Promise<void> {
     // ── shape class 1: the contract type, served bare ────────────────────
     // `res.json(await svc.describeDelegableScope(context))` — no envelope.
     expectTypeOf(await client.security.describeDelegableScope()).toEqualTypeOf<DelegableScope>();
+    // `res.json(await svc.describeEffectiveAccess(id, context))` — no envelope.
+    expectTypeOf(await client.security.describeEffectiveAccess('u1')).toEqualTypeOf<EffectiveAccess>();
 
     // ── shape class 2: contract type inside a route-built ENVELOPE ───────
     // The census's highest-risk band: `sendOk(res, { tables })` means the
@@ -235,6 +238,9 @@ export async function returnTypePrecisionPins(): Promise<void> {
     // @ts-expect-error a DelegableScope is not a string
     const wrongScope: string = await client.security.describeDelegableScope();
 
+    // @ts-expect-error an EffectiveAccess is not a bare list of permission sets
+    const wrongAccess: EffectiveAccess['permissionSets'] = await client.security.describeEffectiveAccess('u1');
+
     // @ts-expect-error the route answers `{ tables }`, not a bare array
     const wrongTables: RemoteTable[] = await client.datasources.external.listTables('ds');
 
@@ -254,6 +260,7 @@ export async function returnTypePrecisionPins(): Promise<void> {
     const wrongClone: CloneDataResult = await client.data.create('lead', {});
 
     void wrongScope;
+    void wrongAccess;
     void wrongTables;
     void wrongFlow;
     void wrongSearch;

@@ -28,6 +28,7 @@ import { predicateSlotRefusal, resolveFlowNodeExpressions, type FlowNodeSiblingB
 import { flowNodeConfigRefusals } from './flow-node-config-refusals';
 import { apiTriggerSecretRefRefusals } from './api-trigger-secret-ref.zod';
 import { apiTriggerSignatureRefusals } from './api-trigger-signature.zod';
+import { flowStartConfigRefusals } from './flow-start-config-refusals';
 import { saveNoticePlacementRefusals } from './save-notice-placement';
 // [#23543 F3] The loose `config` keys of the two sibling-block node types — one
 // table, shared with the two D2 lifts that still run at rehydration.
@@ -1701,6 +1702,15 @@ export const FlowSchema = lazySchema(() => strictObject(
   // `x-objectstack-signature` check for that hook; the five refusals and why
   // each exists are `api-trigger-signature.zod.ts`'s header.
   for (const refusal of apiTriggerSignatureRefusals(flow)) {
+    ctx.addIssue({ code: 'custom', path: [...refusal.path], message: refusal.message });
+  }
+
+  // [#31224 B1] Two start-node `config` shapes that parse and then do nothing:
+  // a `filter` beside `timeRelative` (the sweep reads `timeRelative.filter`),
+  // and a `schedule` the schedule readers cannot use. Why each, and why the
+  // untyped aliases the reader accepts stay accepted, is
+  // `flow-start-config-refusals.ts`'s header.
+  for (const refusal of flowStartConfigRefusals(flow)) {
     ctx.addIssue({ code: 'custom', path: [...refusal.path], message: refusal.message });
   }
 

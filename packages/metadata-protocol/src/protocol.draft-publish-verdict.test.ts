@@ -286,6 +286,28 @@ const CASES: Array<{ rule: string; type: string; item: { name: string } & Record
         },
     },
     {
+        // A roll-up whose child-row filter names a key the child lacks: it
+        // saved and published, and every child write then answered a roll-up
+        // recompute failure. Self-referential, so the child is this item.
+        rule: 'object-field-ref-unknown',
+        type: 'object',
+        item: {
+            name: 'task_tree',
+            label: 'Task Tree',
+            sharingModel: 'private',
+            fields: {
+                name: { type: 'text', label: 'Name' },
+                status: { type: 'text', label: 'Status' },
+                parent: { type: 'lookup', label: 'Parent', reference: 'task_tree' },
+                open_children: {
+                    type: 'summary',
+                    label: 'Open Children',
+                    summaryOperations: { object: 'task_tree', function: 'count', filter: { stauts: 'open' } },
+                },
+            },
+        },
+    },
+    {
         // [#29007] The card's reproduction: a `titleFormat` on an object that
         // authors no `nameField`. The stamped pointer outranks the template,
         // so the save was a silent no-op; the ruling of record (6574393684,
@@ -478,6 +500,24 @@ const CASES: Array<{ rule: string; type: string; item: { name: string } & Record
                 { id: 'e4', source: 'check', target: 'revise', type: 'conditional', condition: "record.name != 'done'" },
                 { id: 'e5', source: 'revise', target: 'push' },
             ],
+        },
+    },
+    {
+        // A step no edge path from start reaches: it saved, read valid:true and
+        // PUBLISHED, and never ran. Refused by lint rather than the flow parse,
+        // so the draft below still saves.
+        rule: 'flow-node-unreachable',
+        type: 'flow',
+        item: {
+            name: 'orphan_step',
+            label: 'Orphan Step',
+            type: 'autolaunched',
+            nodes: [
+                { id: 'start', type: 'start', label: 'Start' },
+                { id: 'stamp', type: 'assignment', label: 'Stamp' },
+                { id: 'end', type: 'end', label: 'End' },
+            ],
+            edges: [{ id: 'e1', source: 'start', target: 'end' }],
         },
     },
     {

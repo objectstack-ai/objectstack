@@ -2019,6 +2019,31 @@ const FLOW_GATE_REACH =
   'the findings the stored stack already had, so a dead flow already stored never blocks another flow\'s ' +
   'save; what is refused is the dead flow\'s own publish.';
 
+const FLOW_NODE_UNREACHABLE_EXPLANATION: RuleExplanation = {
+  rule: 'flow-node-unreachable',
+  covers: 'why an unreached node never runs and what reaches it',
+  paragraphs: [
+    'A flow run starts at the start node and follows edges: the engine executes a node, then the edges ' +
+      'out of it. A top-level node no edge path from the start node leads to is never executed, while the ' +
+      'flow still parses, registers and reports itself as configured, so nothing tells the author the step ' +
+      'is dead.',
+    'A run starts at the FIRST start node, so a second start node is reported too, with a different cure: ' +
+      'delete the extra start node rather than wiring an edge into it, and wire what followed it from a ' +
+      'node that runs.',
+    'Every edge type counts as a path: default, conditional, fault and back. A `boundary_event` node is ' +
+      'reached by attachment to its host node rather than by an edge, so it and the nodes only it leads to ' +
+      'are not judged. Nodes inside a region body (`loop`, `parallel`, `try_catch` and the rest) are not ' +
+      'judged here either: a region is a single-entry acyclic graph, which the region validator already ' +
+      'holds, so every node in it is reached. A flow with no start node, or with an edge whose endpoint ' +
+      'names no node, is not judged: the flow parse refuses those shapes first.',
+    'The rule lives in lint rather than in the flow parse because the metadata save door parses every ' +
+      'save, drafts included: a designer that deletes a node and leaves its successor unwired must still ' +
+      'be able to save the draft. The draft stores with the finding in its diagnostics, and publish ' +
+      'refuses it.',
+    FLOW_GATE_REACH,
+  ],
+};
+
 const FLOW_TIME_RELATIVE_DESCRIPTOR_INVALID_EXPLANATION: RuleExplanation = {
   rule: 'flow-time-relative-descriptor-invalid',
   covers: 'why a refused timeRelative descriptor never binds',
@@ -4224,6 +4249,15 @@ const OBJECT_FIELD_REF_UNKNOWN_EXPLANATION: RuleExplanation = {
       '(the picker scopes its candidates by that key). The referenced object is judged only on ' +
       '`lookup`, `master_detail` and `user` fields, the types that render the picker, and a bare ' +
       '`dependsOn` name that misses on the owning object is reported once, there.',
+    'A summary field\'s `summaryOperations.filter` is judged against the CHILD object ' +
+      '`summaryOperations.object` names: the engine ANDs it with the parent-FK match and runs it as the ' +
+      'query on that child, so every key (inside `$and` / `$or` / `$not` groups) is a field of the child. ' +
+      'That query refuses what it cannot serve, and each refusal makes every child write answer a roll-up ' +
+      'recompute failure (the row is still written) while the summary keeps a stale value. So the rule ' +
+      'refuses a key the child lacks; a dotted key such as `account.status` (write the nested one-level ' +
+      'form `{ account: { status: VALUE } }` instead); a field computed on read, such as a `formula` ' +
+      '(denormalise it onto the child as a stored field); and, beneath a relation, a key the related ' +
+      'object lacks, a dotted key or a second relation holding a condition of its own.',
     '`lookupColumns`, `dependsOn` and `indexes[].fields` are read verbatim (a picker column key, a ' +
       'record key, a physical column), so a dotted name there is one name no field carries; the ' +
       'other positions resolve a relationship path. Not judged: an object this stack does not ' +
@@ -5824,6 +5858,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [SHARING_RULE_RUNTIME_VARIABLE_CONDITION_EXPLANATION.rule]: SHARING_RULE_RUNTIME_VARIABLE_CONDITION_EXPLANATION,
   [SHARING_RULE_OBJECT_NOT_SHAREABLE_EXPLANATION.rule]: SHARING_RULE_OBJECT_NOT_SHAREABLE_EXPLANATION,
   [SHARING_RULE_OBJECT_CONTROLLED_BY_PARENT_EXPLANATION.rule]: SHARING_RULE_OBJECT_CONTROLLED_BY_PARENT_EXPLANATION,
+  [FLOW_NODE_UNREACHABLE_EXPLANATION.rule]: FLOW_NODE_UNREACHABLE_EXPLANATION,
   [FLOW_TIME_RELATIVE_DESCRIPTOR_INVALID_EXPLANATION.rule]: FLOW_TIME_RELATIVE_DESCRIPTOR_INVALID_EXPLANATION,
   [FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE_EXPLANATION.rule]: FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE_EXPLANATION,
   [FLOW_TIME_RELATIVE_OBJECT_MISMATCH_EXPLANATION.rule]: FLOW_TIME_RELATIVE_OBJECT_MISMATCH_EXPLANATION,

@@ -103,6 +103,7 @@ export interface SecurityServiceHost {
   checkControlledByParentWrite: SecurityPlugin['checkControlledByParentWrite'];
   declareEveryone: SecurityPlugin['declareEveryone'];
   describePositionGrants: SecurityPlugin['describePositionGrants'];
+  describeEffectiveAccess: SecurityPlugin['describeEffectiveAccess'];
   explainAccessForCaller: SecurityPlugin['explainAccessForCaller'];
   getEffectiveObjectPermissions: SecurityPlugin['getEffectiveObjectPermissions'];
   getMetadataReadableFields: SecurityPlugin['getMetadataReadableFields'];
@@ -117,7 +118,7 @@ export interface SecurityServiceHost {
 
 /** The `security` service registration `SecurityPlugin#start` runs; the comment above its call there is its contract. */
 export function registerSecurityService(
-  this: Pick<SecurityServiceHost, 'acceptedDefaultPermissionSets' | 'canExport' | 'canReadObject' | 'checkAuthoredRowWrite' | 'checkControlledByParentWrite' | 'declareEveryone' | 'delegatedAdminGate' | 'describePositionGrants' | 'explainAccessForCaller' | 'getEffectiveObjectPermissions' | 'getMetadataReadableFields' | 'getObjectSecurityMeta' | 'getQueryableFields' | 'getReadFilter' | 'getReadableFields' | 'getRecordFieldAccess' | 'getWritableFields' | 'logger' | 'ownershipFloorAlternates' | 'permissionEvaluator' | 'ql' | 'resolvePermissionSetsForContext' | 'tenancyPosture'>,
+  this: Pick<SecurityServiceHost, 'acceptedDefaultPermissionSets' | 'canExport' | 'canReadObject' | 'checkAuthoredRowWrite' | 'checkControlledByParentWrite' | 'declareEveryone' | 'delegatedAdminGate' | 'describeEffectiveAccess' | 'describePositionGrants' | 'explainAccessForCaller' | 'getEffectiveObjectPermissions' | 'getMetadataReadableFields' | 'getObjectSecurityMeta' | 'getQueryableFields' | 'getReadFilter' | 'getReadableFields' | 'getRecordFieldAccess' | 'getWritableFields' | 'logger' | 'ownershipFloorAlternates' | 'permissionEvaluator' | 'ql' | 'resolvePermissionSetsForContext' | 'tenancyPosture'>,
   ctx: PluginContext,
   ql: IObjectQLEngine,
   metadata: IMetadataService,
@@ -369,6 +370,12 @@ export function registerSecurityService(
         // report can never offer another organization's units.
         return this.delegatedAdminGate.describeDelegableScope(sets, callerContext);
       },
+      // [ADR-0090 D6/D12] One user's effective permission sets with where
+      // each comes from, gated as `explain` is; an unknown id is refused
+      // exactly as one the caller may not manage
+      // (`security-plugin-effective-access.ts`).
+      describeEffectiveAccess: (userId: string, callerContext?: any) =>
+        this.describeEffectiveAccess(userId, callerContext),
       // [ADR-0090 D5/D9] Install-time suggestion surface: packages suggest a
       // set for `everyone`; a `manage_metadata` holder accepts it once for
       // the deployment (the `everyone` definition is re-derived) or dismisses,

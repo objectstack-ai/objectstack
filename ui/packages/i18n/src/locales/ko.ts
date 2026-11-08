@@ -1814,10 +1814,6 @@ const ko = {
     },
   },
   console: {
-    organizationMfa: {
-      needsTwoFactor: "다단계 인증 필수에는 2단계 인증이 필요하지만 이 배포에서는 꺼져 있으므로, 체크한 채로 저장하면 거부됩니다. 먼저 2단계 인증을 켜세요: 설정 → 인증에서 다단계 인증 필수를 켜거나(모든 조직에 적용됨), 배포에 OS_AUTH_TWO_FACTOR=true를 설정하세요.",
-      nowRequired: "인증 앱을 아직 설정하지 않은 이 조직의 모든 구성원은 이제 설정해야 합니다. 각 구성원은 이 변경 후 처음 앱을 사용할 때부터 MFA 유예 기간(변경하지 않으면 7일, 설정 → 인증에서 변경 가능)이 시작되며, 기간이 끝나면 데이터에 접근할 수 없습니다. 이미 인증 앱을 사용하는 구성원은 영향을 받지 않습니다.",
-    },
     studio: {
       title: "Studio",
       accessRequired: "Studio를 열려면 Studio 접근 권한이 필요합니다. 관리자가 '설정 → 권한 집합 할당'에서 권한 세트로 부여할 수 있습니다.",
@@ -2216,6 +2212,7 @@ const ko = {
       unsupportedSpecifierType: "지원되지 않는 설정 항목 유형: {{type}}",
       invalidPhone: "숫자, 공백, + ( ) - . 만 사용하여 전화번호를 입력해주세요",
       invalidColor: "#1a2b3c 와 같은 16진수 색상을 입력해주세요",
+      jsonStoredAsText: "이 값은 JSON 객체가 아닌 텍스트로 저장되어 있습니다. 저장하면 객체로 저장됩니다. 페이지에서 저장하지 않은 변경 사항으로 표시했습니다.",
       clientAddressDirect: "서버가 판단한 사용자 주소: {{address}}. 이 주소가 포함되지 않은 목록은 여기에서 저장할 수 없습니다. 이 서버는 프록시 헤더를 신뢰하지 않으므로, 프록시 뒤에서는 프록시의 주소가 표시됩니다.",
       clientAddressViaProxy: "서버가 판단한 사용자 주소: {{address}} (이 서버가 신뢰하는 프록시의 전달 헤더에서 읽음). 이 주소가 포함되지 않은 목록은 여기에서 저장할 수 없습니다.",
       clientAddressUnknown: "서버가 사용자 주소를 확인할 수 없으므로, 비어 있지 않은 목록은 여기에서 저장할 수 없습니다.",
@@ -3789,6 +3786,8 @@ const ko = {
     noMessages: '이 대화에는 아직 메시지가 없습니다.',
     sharedObject: '공유된 {{object}}',
     redactedFields: '일부 필드는 소유자가 숨겼습니다: {{fields}}',
+    linkedRecord: '연결된 레코드',
+    linkedUser: '연결된 사용자',
   },
   publicForm: {
     submit: "제출",
@@ -3916,6 +3915,22 @@ const ko = {
       managedBody: '이 사람이 승인한 AI 어시스턴트입니다. 모두 이 사람의 권한으로 동작하며, 철회하면 즉시 액세스가 끝납니다.',
       managedEmpty: '이 사람은 아직 승인한 AI 어시스턴트가 없습니다.',
       managedTruncated: '최신 항목만 표시합니다. 이 사람이 승인한 어시스턴트가 더 있습니다.',
+    },
+  },
+  effectiveAccess: {
+    title: '유효한 권한 세트',
+    body: '현재 조직에서 이 사람에게 적용되는 모든 권한 세트와 각각의 출처입니다. 직접 부여는 아래에도 나열되며 거기서 제거할 수 있습니다.',
+    refused: '이 사람의 유효한 액세스를 볼 권한이 없습니다.',
+    unserved: '이 서버는 유효한 액세스를 제공하지 않습니다.',
+    loadFailed: '유효한 액세스를 불러오지 못했습니다: {{message}}',
+    empty: '이 조직에서 이 사람에게 적용되는 권한 세트가 없습니다.',
+    originsLabel: '출처',
+    origin: {
+      direct: '직접 부여',
+      position: '직책: {{position}}',
+      default: '기본 바인딩',
+      derivedPlatformAdmin: '구성된 플랫폼 관리자',
+      derivedAiAccess: 'AI 액세스 켜짐',
     },
   },
   excelImport: {

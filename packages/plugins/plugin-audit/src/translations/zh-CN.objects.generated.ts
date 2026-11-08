@@ -39,7 +39,8 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
           import: "导入",
           export: "导出",
           platform_admin_standing_change: "平台管理员权限变更",
-          action_invocation: "动作调用"
+          action_invocation: "动作调用",
+          package_uninstall: "卸载软件包"
         }
       },
       user_id: {

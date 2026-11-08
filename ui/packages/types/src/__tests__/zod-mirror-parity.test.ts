@@ -985,6 +985,7 @@ import { AppComponentSchema, AppSchemaRendererNodeSchema, MenuItemSchema as AppM
 import { BaseSchema, ComponentConfigSchema, ComponentInputSchema, ComponentMetaSchema, KeyedI18nLabelSchema, SchemaNodeSchema } from '../zod/base.zod.js';
 import { CloudWorkspaceTimezoneNoticeSchema } from '../zod/cloud.zod.js';
 import { McpAuthorizedAssistantsSchema } from '../zod/mcp-authorized-assistants.zod.js';
+import { SecurityEffectiveAccessSchema } from '../zod/security-effective-access.zod.js';
 import { ChecklistBlockItemSchema, ChecklistBlockSchema, HeroBlockSchema, StatBlockSchema, TileGridBlockAddTileSchema, TileGridBlockItemSchema, TileGridBlockSchema, UsageBarBlockSchema } from '../zod/product-blocks.zod.js';
 import { RecordApprovalDecisionBlockSchema } from '../zod/record-approval-decision.zod.js';
 import { RecordApprovalsBlockSchema, RecordAttachmentsBlockSchema } from '../zod/record-panels.zod.js';
@@ -1006,6 +1007,7 @@ import type { AppComponentSchema as Ts_AppComponentSchema, AppSchemaRendererNode
 import type { BaseSchema as Ts_BaseSchema, ComponentConfig as Ts_ComponentConfig, ComponentInput as Ts_ComponentInput, ComponentMeta as Ts_ComponentMeta, KeyedI18nLabel as Ts_KeyedI18nLabel } from '../base';
 import type { CloudWorkspaceTimezoneNoticeSchema as Ts_CloudWorkspaceTimezoneNoticeSchema } from '../cloud';
 import type { McpAuthorizedAssistantsSchema as Ts_McpAuthorizedAssistantsSchema } from '../mcp-authorized-assistants';
+import type { SecurityEffectiveAccessSchema as Ts_SecurityEffectiveAccessSchema } from '../security-effective-access';
 import type { ChecklistBlockItem as Ts_ChecklistBlockItem, ChecklistBlockSchema as Ts_ChecklistBlockSchema, HeroBlockSchema as Ts_HeroBlockSchema, StatBlockSchema as Ts_StatBlockSchema, TileGridBlockAddTile as Ts_TileGridBlockAddTile, TileGridBlockItem as Ts_TileGridBlockItem, TileGridBlockSchema as Ts_TileGridBlockSchema, UsageBarBlockSchema as Ts_UsageBarBlockSchema } from '../product-blocks';
 import type { RecordApprovalDecisionBlockSchema as Ts_RecordApprovalDecisionBlockSchema } from '../record-approval-decision';
 import type { RecordApprovalsBlockSchema as Ts_RecordApprovalsBlockSchema, RecordAttachmentsBlockSchema as Ts_RecordAttachmentsBlockSchema } from '../record-panels';
@@ -1856,6 +1858,8 @@ const MIRRORS = {
   'cloud.zod.ts#CloudWorkspaceTimezoneNoticeSchema': CloudWorkspaceTimezoneNoticeSchema,
   // The arm and its TS twin landed together with the widget's registration.
   'mcp-authorized-assistants.zod.ts#McpAuthorizedAssistantsSchema': McpAuthorizedAssistantsSchema,
+  // The arm and its TS twin landed together with the widget's registration.
+  'security-effective-access.zod.ts#SecurityEffectiveAccessSchema': SecurityEffectiveAccessSchema,
   // objectui#12197 — the product-page blocks' arms and their TS twins landed together.
   'product-blocks.zod.ts#ChecklistBlockItemSchema': ChecklistBlockItemSchema,
   'product-blocks.zod.ts#ChecklistBlockSchema': ChecklistBlockSchema,
@@ -2063,6 +2067,7 @@ interface Declared {
   'base.zod.ts#KeyedI18nLabelSchema': Ts_KeyedI18nLabel;
   'cloud.zod.ts#CloudWorkspaceTimezoneNoticeSchema': Ts_CloudWorkspaceTimezoneNoticeSchema;
   'mcp-authorized-assistants.zod.ts#McpAuthorizedAssistantsSchema': Ts_McpAuthorizedAssistantsSchema;
+  'security-effective-access.zod.ts#SecurityEffectiveAccessSchema': Ts_SecurityEffectiveAccessSchema;
   'product-blocks.zod.ts#ChecklistBlockItemSchema': Ts_ChecklistBlockItem;
   'product-blocks.zod.ts#ChecklistBlockSchema': Ts_ChecklistBlockSchema;
   'product-blocks.zod.ts#HeroBlockSchema': Ts_HeroBlockSchema;
@@ -5402,7 +5407,7 @@ const ZOD_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'zod');
  * MINUEND under it had moved. Nothing failed on any of those days, because nothing
  * compared the registry to a number. objectui#7433 is that absence, not the digits.
  */
-const EXPECTED_MIRROR_PAIRS = 198;
+const EXPECTED_MIRROR_PAIRS = 199;
 
 /**
  * A ledger this file can size from its own AST. `WiderThanDeclared` joined at

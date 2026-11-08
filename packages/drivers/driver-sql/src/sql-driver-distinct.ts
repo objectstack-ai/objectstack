@@ -46,12 +46,13 @@ export interface DistinctHost {
   getBuilder: SqlDriver['getBuilder'];
   presentReadValue: SqlDriver['presentReadValue'];
   readPresentationKind: SqlDriver['readPresentationKind'];
+  remoteColumn: SqlDriver['remoteColumn'];
 }
 
 /** The bodies of the "Distinct" section of `SqlDriver`: a stateless facet, called by the class's stubs. */
 export class DistinctFacet {
   /** The body of `SqlDriver#distinct`; the method's docblock there is its contract. */
-  static async distinct(this: Pick<DistinctHost, 'applyFilters' | 'applyTenantScope' | 'coercionKey' | 'distinctBackendFault' | 'getBuilder' | 'presentReadValue' | 'readPresentationKind'>, object: string, field: string, filters?: FilterCondition, options?: DriverOptions): Promise<any[]> {
+  static async distinct(this: Pick<DistinctHost, 'applyFilters' | 'applyTenantScope' | 'coercionKey' | 'distinctBackendFault' | 'getBuilder' | 'presentReadValue' | 'readPresentationKind' | 'remoteColumn'>, object: string, field: string, filters?: FilterCondition, options?: DriverOptions): Promise<any[]> {
     const builder = this.getBuilder(object, options);
     // The third read door that skipped the chokepoint, and the one #6792 does
     // NOT name — the card asserts the opposite ("called at 13 sites — …,
@@ -70,7 +71,12 @@ export class DistinctFacet {
       this.applyFilters(builder, filters, options);
     }
 
-    builder.distinct(field);
+    // The column the field names on this table — its `external.columnMap`
+    // remote column on a federated object (the mapping `find()` and the WHERE
+    // above already apply), the field itself otherwise. The values are read
+    // back under that column, and presented by the FIELD's registry entry.
+    const column = this.remoteColumn(object, field, field);
+    builder.distinct(column);
     // [commit 7c2c5aedd] The THIRD read door joins the other two. `find()` and `count()`
     // have carried the terminal envelope since #8931 and `aggregate()` since
     // #11455; this one still executed BARE, so any dialect refusal the
@@ -123,7 +129,7 @@ export class DistinctFacet {
     } catch (error) {
       throw this.distinctBackendFault(object, field, error, filters);
     }
-    const values = results.map((row: any) => row[field]);
+    const values = results.map((row: any) => row[column]);
 
     // Same presentation `find()` gives the column (#3797, #3849) — a caller
     // listing a datetime's values should not get epoch integers here and ISO

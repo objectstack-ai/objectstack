@@ -185,7 +185,18 @@ export {
   type DebugFlags,
 } from './utils/debug.js';
 export * from './utils/debug-collector.js';
-export * from './utils/freeze-schema.js';
+// Named, not `export *`: `deepFreeze` stays in the module for
+// `defineSystemView` and off the public entry (objectstack#25921: zero
+// consumers).
+export {
+  SYSTEM_VIEW_MARKER,
+  defineSystemView,
+  isSystemView,
+  cloneAsOverride,
+  type DeepReadonly,
+  type DeepMutable,
+  type SystemView,
+} from './utils/freeze-schema.js';
 // The shared key/value-bag check (objectui#13458); locals switch to it when touched.
 export * from './utils/is-plain-object.js';
 // `protocols/` retired whole in objectui#13453. Its three remaining bridges —

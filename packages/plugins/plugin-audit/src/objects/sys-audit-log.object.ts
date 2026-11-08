@@ -390,6 +390,18 @@ export const SysAuditLog = ObjectSchema.create({
     // above, as for `platform_admin_standing_change`. No new column: the
     // surface rides `metadata` beside `performed_by` / `on_behalf_of`.
     //
+    // [#31186] `package_uninstall` joins the enum WRITER-FIRST. Its writer is
+    // `package-lifecycle-audit.ts` (`createPackageLifecycleAuditWriter`, on the
+    // `audit` slot), called by the uninstall verb (`deletePackage` in
+    // `@objectstack/metadata-protocol`) once per package it uninstalled, from
+    // every door that reaches the verb: one row about the package itself, which
+    // `sys_packages`'s raw-SQL delete never produced. The row names no record
+    // (`sys_packages` is not an object) and no organization (an uninstall is
+    // environment-wide), so it is a deployment-level row; the package, its
+    // version and the environment ride `metadata`. Its shipped surfaces are the
+    // unfiltered `recent` and `all_events` views above, as for
+    // `platform_admin_standing_change`.
+    //
     // Each option carries a label (#27855): the list, the detail and the System
     // Overview "Audit Events by Action" chart (whose dimension resolves through
     // these options) read it, where the bare-array shorthand made the label the
@@ -410,6 +422,7 @@ export const SysAuditLog = ObjectSchema.create({
           { label: 'Export', value: 'export' },
           { label: 'Platform Admin Standing Change', value: 'platform_admin_standing_change' },
           { label: 'Action Invocation', value: 'action_invocation' },
+          { label: 'Package Uninstall', value: 'package_uninstall' },
         ],
         label: 'Action',
         required: true,

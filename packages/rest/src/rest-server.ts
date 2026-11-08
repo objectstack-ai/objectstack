@@ -6253,6 +6253,13 @@ export class RestServer {
      * oneself, and the anonymous `guest` posture is not this endpoint's
      * business) and returns 501 when no security service exposing `explain`
      * is mounted (a deployment without `@objectstack/plugin-security`).
+     *
+     * The same family serves the caller's delegable scope
+     * (`GET {basePath}/security/my-delegable-scope`) and one user's effective
+     * permission sets with their origins
+     * (`GET {basePath}/security/users/:id/effective-access`, the service's
+     * `describeEffectiveAccess`, gated by explain's caller gate in the
+     * SERVICE; an unknown id answers the same 403 as a forbidden one).
      */
     private registerSecurityExplainEndpoints(basePath: string): void {
         // [#23050 slice 6] The body moved to `security-routes.ts`. This literal

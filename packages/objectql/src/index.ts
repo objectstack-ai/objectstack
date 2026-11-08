@@ -633,11 +633,22 @@ export { parseLifecycleDuration } from './lifecycle/duration.js';
 // [#30237, ADR-0148 D3] What a host hands `ObjectQLPlugin`'s `recycleBinRetention`.
 export type { RecycleBinRetentionSettings } from './recycle-bin/retention.js';
 export type { RecycleBinRemovalOptions } from './recycle-bin/purge.js';
+export type { RecycleBinRestoreOptions, RecycleBinRestoreResult } from './recycle-bin/restore.js';
 // [ADR-0148 D3, ruling A recorded in 6691358077] The one refusal of an
 // app-authored permanent delete: the engine applies it to an app-authored
 // hook's api, and the runtime's sandbox to every body's.
 export { refuseAppAuthoredPermanentDelete } from './recycle-bin/app-authored-delete.js';
 export { lifecycleSettingsManifest } from './lifecycle/lifecycle-settings.js';
+// [#30208] The key columns of the three lifecycle map settings, served from the
+// running system; `ObjectQLPlugin` registers them with the settings service.
+export {
+  lifecycleObjectKeySource,
+  lifecycleClassKeySource,
+  type LifecycleKeySource,
+  type LifecycleKeyAnswer,
+  type LifecycleKeyOption,
+  type LifecycleKeyRegistryLike,
+} from './lifecycle/lifecycle-key-options.js';
 
 // [#4551] Read-only referential-integrity audit — the reporting half of the
 // `isSystem` exemption #4441 deliberately left in the write-path guard.

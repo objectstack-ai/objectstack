@@ -15,7 +15,8 @@
  * exactly like a rule that was never written. The rows about an organization
  * are written by the real CRUD mirror; the deployment-level rows as their
  * writers write them: as the system, about no organization (service-settings'
- * GLOBAL `config_change`, plugin-security's platform-admin standing roster).
+ * GLOBAL `config_change`, plugin-security's platform-admin standing roster,
+ * plugin-audit's `package_uninstall`).
  *
  * ⛔ No security plugin, on purpose. WHICH organization's rows an organization
  * reader is served under a wall is the platform row policy's answer
@@ -55,6 +56,9 @@ type Row = Record<string, any>;
 const DEPLOYMENT_LEVEL = [
   { action: 'config_change', object_name: 'sys_platform_setting', record_id: null },
   { action: 'platform_admin_standing_change', object_name: 'sys_user', record_id: null },
+  // [#31186] A package uninstall is environment-wide: its row names no record and no organization
+  // (`package-lifecycle-audit.ts`), so it is served to the platform administrator alone.
+  { action: 'package_uninstall', object_name: null, record_id: null },
 ];
 
 const noteObject = {

@@ -205,6 +205,12 @@ import {
   explainAccessForCaller,
   type ExplainAccessHost,
 } from './security-plugin-explain-access.js';
+// [ADR-0090 D6/D12] One user's effective permission sets with their origins;
+// the method of the same name below hands the body the members it reads.
+import {
+  describeEffectiveAccess,
+  type EffectiveAccessHost,
+} from './security-plugin-effective-access.js';
 // [#25223 cut 10] The record-sharing verdicts: the read filter, the edit gate,
 // the write-depth stash, the tri-state write verdict, the pre-image floor
 // decision and the delegator's own floor knobs; the methods of the same names
@@ -295,6 +301,7 @@ import {
   type ControlledByParentWriteOutcome,
   type PositionGrantSummary,
   type ExplainAccessRequest,
+  type EffectiveAccess,
 } from '@objectstack/spec/contracts';
 import {
   type MatchesFilterOptions,
@@ -2180,7 +2187,7 @@ export class SecurityPlugin implements Plugin {
       const readPermissionEvaluator = () => this.permissionEvaluator;
       const readQl = () => this.ql;
       const readTenancyPosture = () => this.tenancyPosture;
-      const host: Pick<SecurityServiceHost, 'acceptedDefaultPermissionSets' | 'canExport' | 'canReadObject' | 'checkAuthoredRowWrite' | 'checkControlledByParentWrite' | 'declareEveryone' | 'delegatedAdminGate' | 'describePositionGrants' | 'explainAccessForCaller' | 'getEffectiveObjectPermissions' | 'getMetadataReadableFields' | 'getObjectSecurityMeta' | 'getQueryableFields' | 'getReadFilter' | 'getReadableFields' | 'getRecordFieldAccess' | 'getWritableFields' | 'logger' | 'ownershipFloorAlternates' | 'permissionEvaluator' | 'ql' | 'resolvePermissionSetsForContext' | 'tenancyPosture'> = {
+      const host: Pick<SecurityServiceHost, 'acceptedDefaultPermissionSets' | 'canExport' | 'canReadObject' | 'checkAuthoredRowWrite' | 'checkControlledByParentWrite' | 'declareEveryone' | 'delegatedAdminGate' | 'describeEffectiveAccess' | 'describePositionGrants' | 'explainAccessForCaller' | 'getEffectiveObjectPermissions' | 'getMetadataReadableFields' | 'getObjectSecurityMeta' | 'getQueryableFields' | 'getReadFilter' | 'getReadableFields' | 'getRecordFieldAccess' | 'getWritableFields' | 'logger' | 'ownershipFloorAlternates' | 'permissionEvaluator' | 'ql' | 'resolvePermissionSetsForContext' | 'tenancyPosture'> = {
         acceptedDefaultPermissionSets: this.acceptedDefaultPermissionSets,
         canExport: (...a) => this.canExport(...a),
         canReadObject: (...a) => this.canReadObject(...a),
@@ -2188,6 +2195,7 @@ export class SecurityPlugin implements Plugin {
         checkControlledByParentWrite: (...a) => this.checkControlledByParentWrite(...a),
         declareEveryone: (...a) => this.declareEveryone(...a),
         get delegatedAdminGate() { return readDelegatedAdminGate(); },
+        describeEffectiveAccess: (...a) => this.describeEffectiveAccess(...a),
         describePositionGrants: (...a) => this.describePositionGrants(...a),
         explainAccessForCaller: (...a) => this.explainAccessForCaller(...a),
         getEffectiveObjectPermissions: (...a) => this.getEffectiveObjectPermissions(...a),
@@ -2473,6 +2481,32 @@ export class SecurityPlugin implements Plugin {
       get tenancyPosture() { return readTenancyPosture(); },
     };
     return explainAccessForCaller.call(host, request, callerContext);
+  }
+
+  /**
+   * [ADR-0090 D6/D12] `ISecurityService.describeEffectiveAccess` — `userId`'s
+   * effective permission sets in the caller's organization, each with every
+   * origin it arrives through (default binding, held position, direct grant,
+   * or a name derived from the user's standing). Gated by explain's caller
+   * gate; an id no user has is refused exactly as one the caller may not
+   * manage, for every caller, which is where it departs from explain's `404`.
+   * The spec member's docblock is the contract.
+   */
+  describeEffectiveAccess(userId: string, callerContext?: any): Promise<EffectiveAccess> {
+    // The body lives in `security-plugin-effective-access.ts` (see `EffectiveAccessHost`).
+    const readDelegatedAdminGate = () => this.delegatedAdminGate;
+    const readPermissionEvaluator = () => this.permissionEvaluator;
+    const readQl = () => this.ql;
+    const readTenancyPosture = () => this.tenancyPosture;
+    const host: EffectiveAccessHost = {
+      baselinePermissionSets: this.baselinePermissionSets,
+      get delegatedAdminGate() { return readDelegatedAdminGate(); },
+      get permissionEvaluator() { return readPermissionEvaluator(); },
+      get ql() { return readQl(); },
+      get tenancyPosture() { return readTenancyPosture(); },
+      resolvePermissionSetsForContext: (...a) => this.resolvePermissionSetsForContext(...a),
+    };
+    return describeEffectiveAccess.call(host, userId, callerContext);
   }
 
   /**

@@ -288,6 +288,13 @@ write them right the first time:
    } });
    ```
 
+4. **A `select` is compared and written by its option `value`, never its label.**
+   The request speaks the label ("Lost"); the row stores the `value` (`lost`).
+   `condition: "record.status == 'Lost'"` parses, matches no row: the flow
+   stages clean and never fires; `fields: { status: 'Lost' }` / a `filter`
+   fails the run (`invalid_option`). Read the field's `options`; write the
+   `value` in the `condition` AND every `fields` / `filter` entry.
+
 ---
 
 → State Machines & Approvals: [references/state-machines-and-approvals.md](./references/state-machines-and-approvals.md) — its state-introspection route is `GET /api/v1/meta/object/:name/state/:field?from=:state`.
@@ -342,11 +349,13 @@ token implies the other:
 |:--|:--|:--|
 | `automation` | the flow engine + node executors | flows never execute |
 | `triggers` + `automation` | `record-*` / schedule / `api` start bindings | auto-launched flow refused: `STACK_TRIGGER_CAPABILITY_REQUIRED` |
-| `job` | cron cadence + the `timeRelative` sweep | scheduled flows never launch |
-| `queue` | the inbound-webhook consumer | inbound POST answers **503** |
+| `job`° | cron cadence + the `timeRelative` sweep | scheduled flows never launch |
+| `queue`° | the inbound-webhook consumer | inbound POST answers **503** |
 | `approvals` | `approval` / `approval_revise` (`plugin-approvals`) | no executor for the node type |
-| `messaging` | `notify` delivery to inbox (`sys_inbox_message`) | **silent:** success with `skipped: true` |
+| `messaging`° | `notify` delivery to inbox (`sys_inbox_message`) | **silent:** success with `skipped: true` |
 | `webhooks` + `realtime` | `defineStack({ webhooks })` outbound dispatch | declared webhook refused: `STACK_WEBHOOK_CAPABILITY_REQUIRED` |
+
+° Always-on, so list it only under `--preset minimal` (**objectstack-platform** § `requires:`).
 
 ### Inbound webhook (`api`) triggers (ADR-0041 Tier 1)
 
@@ -399,9 +408,6 @@ owns `label`, `type`, `nodes` and the `edges` `FlowSchema` requires):
 > **guard** one that writes its own object, or it re-triggers itself. A
 > `record-before-*` flow that throws silently blocks the write — give it a
 > user-facing message.
-
-> `previous` (before the change) vs `record` (after) in an update trigger's
-> condition: see [objectstack-formula](../objectstack-formula/SKILL.md) §5.
 
 → [references/examples-flows.md](./references/examples-flows.md) § Time-relative triggers — scheduled per-record date sweep.
 

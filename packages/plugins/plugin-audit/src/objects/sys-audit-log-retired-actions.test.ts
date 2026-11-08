@@ -105,6 +105,12 @@ const ACTIONS_WITH_WRITERS: ReadonlyArray<readonly [action: string, writer: stri
       + 'slot; called by runtime/src/domains/actions.ts (REST door) and runtime/src/action-execution.ts + '
       + 'runtime/src/domains/mcp.ts (MCP run_action / resume_run) (#27908)',
   ],
+  [
+    'package_uninstall',
+    'plugin-audit/src/package-lifecycle-audit.ts — createPackageLifecycleAuditWriter on the `audit` slot; '
+      + 'called by metadata-protocol/src/protocol-package-uninstall.ts (deletePackage, the uninstall verb '
+      + 'every door reaches) once per package it uninstalled (#31186)',
+  ],
 ];
 
 /** Option values declared by the `action` select field. */

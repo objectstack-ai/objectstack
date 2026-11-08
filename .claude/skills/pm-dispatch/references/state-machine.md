@@ -4,7 +4,6 @@
 
 ## 跨状态通则
 
-- 六态 = `pm:{queue,dispatched,blocked,on-hold,awaiting-maintainer}` 加 `needs-user-decision`,皆 issue 态。
 - 六态 ONE-OF 的成因恒是半写的转换;判定以 `check-half-states.mjs` 的 H29/H30 为权威。
 - 生成物不分叉:`skills/**` 生成器产物跑 `check-governed-merges.mjs --test`,⛔ 不按路径手判。
 - 交接即标签:只写交接评论而不同笔挂标 = 空交接,收件箱只认标签。
@@ -14,6 +13,7 @@
 - 合法性:正文或评论带 `Restart-when: closed <owner/repo>#N`,由 `Blocked-by:` 同遍解锁扫描点火。
 - 或带 `Restart-when: <一行可执行判据>`;两种拼写之外的 hold ⛔ 不合法。
 - hold 评论写明日期、理由与出处(维护者裁或座位定级),⛔ 不设第二个标签区分两者。
+- 冻结(freeze)裁决与 `pm:on-hold`+`Restart-when:` 同笔落地;只写评论不挂标 = 半状态。
 - 机会主义重启的触发文件走 `Restart-touch: <仓内相对路径>`,一行一路径,值须为 tracked 文件。
 - 该行大小写敏感、行锚定,与另两行同双通道,喂 H17 触发文件索引;存量 hold ⛔ 不迁移。
 - 放行双查皆机械:只放最近一次 hold/blocked 转换评论的条件;其后卡上有新 merged PR 即拒。

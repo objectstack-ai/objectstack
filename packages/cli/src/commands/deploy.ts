@@ -61,8 +61,12 @@
  *      version against this build, printed; nothing is installed. A runtime
  *      that refuses it, or does not serve install-local, stops the deploy here
  *      with its sentence and exit 1;
- *   3. the install, with `--confirm-access-upgrade` passed through; the door's
- *      refusals (an access upgrade to confirm, …) stop the deploy with exit 1;
+ *   3. the install, with `--confirm-global-uniques`, `--confirm-access-upgrade`
+ *      and `--confirm-upgrade` passed through; the door's refusals
+ *      (installation-wide uniques, an access upgrade or a schema upgrade to
+ *      confirm, …) stop the deploy with exit 1, and their retry names
+ *      `os deploy`, so every confirmation the install prints is one this
+ *      command declares;
  *   4. the answer — install-local registers the package in the live kernel
  *      before it answers, so the answer IS "live": `hotLoaded` ⇒ 0; a package
  *      the running kernel could not load ⇒ 1, naming the restart it waits for.
@@ -92,6 +96,18 @@ export const DEPLOY_ARTIFACT = 'dist/objectstack.json';
 /** How often the wait asks the control plane. */
 export const DEPLOY_POLL_INTERVAL_MS = 3_000;
 
+/** The install confirmations this command passes through to a self-hosted runtime's install. */
+const CONFIRMATION_FLAGS = ['confirm-global-uniques', 'confirm-access-upgrade', 'confirm-upgrade'] as const;
+
+/** The given confirmations as `os package install` argv: a switch as itself, a token after its flag. */
+function confirmationArgv(flags: { [K in (typeof CONFIRMATION_FLAGS)[number]]?: string | boolean }): string[] {
+  return CONFIRMATION_FLAGS.flatMap((flag) => {
+    const value = flags[flag];
+    if (value === undefined || value === false) return [];
+    return value === true ? [`--${flag}`] : [`--${flag}`, value];
+  });
+}
+
 export default class Deploy extends Command {
   static override description =
     'Deploy this app to your ObjectOS Cloud environment (build it, publish a dev version, install it, and wait until '
@@ -101,7 +117,9 @@ export default class Deploy extends Command {
     '$ os deploy',
     '$ os deploy --env env_abc123    # your account reaches several environments',
     '$ os deploy --no-wait           # return once the install is recorded',
+    '$ os deploy --confirm-global-uniques                 # self-hosted: confirm installation-wide uniques',
     '$ os deploy --confirm-access-upgrade <finding-set>   # self-hosted: confirm the findings the runtime printed',
+    '$ os deploy --confirm-upgrade <finding-set>          # self-hosted: confirm the schema findings the runtime printed',
   ];
 
   static override flags = {
@@ -135,10 +153,29 @@ export default class Deploy extends Command {
       description: 'API key for ObjectOS Cloud (bearer token; defaults to OS_CLOUD_API_KEY / OS_TOKEN, then `os cloud login`)',
       env: 'OS_CLOUD_API_KEY',
     }),
+    // The installation-wide uniques' confirmation, passed through like the
+    // two upgrade confirmations below: the embedded install's
+    // UNIQUE_SCOPE_CONFIRMATION_REQUIRED stop prints
+    // `os deploy --confirm-global-uniques` as its retry.
+    'confirm-global-uniques': Flags.boolean({
+      description:
+        "Self-hosted runtime target: confirm this app's installation-wide (`unique: 'global'`) constraints are "
+        + "genuinely platform-wide when the runtime's refusal asks (as `os package install --confirm-global-uniques`)",
+    }),
     'confirm-access-upgrade': Flags.string({
       description:
         'Self-hosted runtime target: confirm the access findings of this upgrade with the finding-set token the '
         + "runtime's refusal printed (as `os package install --confirm-access-upgrade`)",
+    }),
+    // [epic cloud#3652 Q3, #30884] The schema findings' confirmation, passed
+    // through to the install as `--confirm-access-upgrade` is: the embedded
+    // install's refusal prints `os deploy --confirm-upgrade <token>` as its
+    // retry, so this command must take it.
+    'confirm-upgrade': Flags.string({
+      description:
+        'Self-hosted runtime target: confirm the schema findings of this upgrade (a suspected rename, a type change '
+        + "that is not safe) with the finding-set token the runtime's refusal printed (as `os package install "
+        + '--confirm-upgrade`)',
     }),
   };
 
@@ -151,12 +188,13 @@ export default class Deploy extends Command {
       // cloud environment was named.
       const runtime = flags.env ? undefined : await activeRuntimeTarget();
       if (runtime) {
-        await this.deployToRuntime(runtime, flags['confirm-access-upgrade']);
+        await this.deployToRuntime(runtime, confirmationArgv(flags));
         return;
       }
-      if (flags['confirm-access-upgrade'] !== undefined) {
+      for (const flag of CONFIRMATION_FLAGS) {
+        if (flags[flag] === undefined || flags[flag] === false) continue;
         printError(
-          '`--confirm-access-upgrade` confirms a self-hosted runtime\'s refusal; the deploy target is ObjectOS Cloud. '
+          `\`--${flag}\` confirms a self-hosted runtime's refusal; the deploy target is ObjectOS Cloud. `
           + 'Drop the flag, or record the runtime with `os environments use-runtime <url> --token <key>`.',
         );
         this.exit(1);
@@ -285,7 +323,7 @@ export default class Deploy extends Command {
    * The self-hosted half (the header's "A self-hosted runtime target"):
    * build → dry run (plan printed) → install → the `hotLoaded` answer.
    */
-  private async deployToRuntime(runtime: RuntimeTarget, confirmAccessUpgrade: string | undefined): Promise<void> {
+  private async deployToRuntime(runtime: RuntimeTarget, confirmations: string[]): Promise<void> {
     printStep(`Deploying to the self-hosted runtime ${runtime.url} (os environments use-runtime)`);
 
     printStep('Building...');
@@ -317,7 +355,7 @@ export default class Deploy extends Command {
     }
 
     printStep(`Installing ${plan.manifestId} ${plan.version} into ${runtime.url}...`);
-    const outcome = await install(confirmAccessUpgrade !== undefined ? ['--confirm-access-upgrade', confirmAccessUpgrade] : []);
+    const outcome = await install(confirmations);
     if (outcome?.kind !== 'installed') {
       printError(`${runtime.url} did not answer the install as a managed package install, so this cannot say ${plan.manifestId} is live (see above).`);
       this.exit(1);

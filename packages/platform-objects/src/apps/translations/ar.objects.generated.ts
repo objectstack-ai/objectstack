@@ -369,7 +369,7 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
       },
       revoke_reason: {
         label: "سبب الإلغاء",
-        help: "سبب إلغاء الجلسة (idle_timeout، absolute_max، concurrent_cap، user_revoked، admin، organization_membership_ended، admin_password_reset، password_reset، …)."
+        help: "سبب إلغاء الجلسة (idle_timeout، absolute_max، concurrent_cap، ip_not_allowed، user_revoked، admin، organization_membership_ended، admin_password_reset، password_reset، …)."
       },
       active_organization_id: {
         label: "المؤسسة النشطة"

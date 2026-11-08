@@ -109,7 +109,7 @@ command for this move; it is four steps you run yourself.
    ```bash
    npx skills remove objectstack-ai objectstack-api objectstack-automation \
      objectstack-data objectstack-formula objectstack-i18n objectstack-platform \
-     objectstack-pm-dispatch objectstack-query objectstack-ui objectstack-upgrade -y
+     objectstack-pm-dispatch objectstack-query objectstack-ui objectstack-upgrade objectui -y
    pnpm add -D "@objectstack/skills@$(node -p "require('@objectstack/spec/package.json').version")"
    #   npm: npm install --save-dev "@objectstack/skills@…"   ·   yarn: yarn add -D "@objectstack/skills@…"
    npx skills@1.7.2 experimental_sync --agent claude-code --copy -y
@@ -118,7 +118,8 @@ command for this move; it is four steps you run yourself.
    Add the package with the manager that installed the project: in a pnpm
    project, `npm install --save-dev` exits `1` with
    `npm error Cannot read properties of null (reading 'edgesOut')`.
-   The list names every skill the catalog carried during 17.x, and a name that
+   The list names every skill the catalog carried during 17.x, plus `objectui`,
+   which a 17.x project installed from the objectui repository, and a name that
    is not installed is skipped; `npx skills remove --all` does the same when
    these are the only skills the project has. Run `npx skills list` first:
    `--all` removes every installed skill without asking, so use it only when

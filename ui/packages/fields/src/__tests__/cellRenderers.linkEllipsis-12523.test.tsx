@@ -36,7 +36,11 @@
 import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import * as React from 'react';
-import { EmailCellRenderer, PhoneCellRenderer, UrlCellRenderer } from '../index';
+import { EmailCellRenderer, PhoneCellRenderer, getCellRenderer } from '../index';
+
+// The url renderer is not exported by name; read it through the registry face
+// every list and detail view uses.
+const UrlCellRenderer = getCellRenderer('url');
 
 const EMAIL = 'mira.costa@atlasconstruction.example.com';
 const PHONE = '+1-555-0117-1119';

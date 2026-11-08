@@ -40,7 +40,7 @@
  */
 
 import type { LoadedScenario } from '../loader.js';
-import { scenarioNamespace, type ScenarioCard, type ScenarioExpect } from '../schema.js';
+import { PERSON_USER_FIELD, scenarioNamespace, type ScenarioCard, type ScenarioExpect } from '../schema.js';
 import { permissionSetName } from './namespace.js';
 import { cycleText, referenceCycles } from './seed.js';
 
@@ -105,15 +105,73 @@ export function changeContract(card: Card): string {
   return ['The change is checked for these, by the exact names shown:', ...lines].join('\n');
 }
 
-/** A direct (non-path) row-scope rule names the user handle that persona signs in as, e.g. `u_sam`. */
+/**
+ * The handle map: a direct (non-path) row-scope rule on a declared user-handle
+ * field ({@link userHandleFields}) names the user handle that persona signs in
+ * as (`account.owner` = `u_sam` → `sdr`). A rule on any other field names a
+ * row (`e06`, `dep_sales`) or an option (`public`), never a handle, so it is
+ * not in the map: a persona named through a row is bound by its `record`
+ * ({@link personaRecords}). The first persona in `run.personas` order holds a
+ * handle two of them name.
+ */
 export function personaHandles(card: Card): Map<string, string> {
+  const fields = userHandleFields(card);
   const out = new Map<string, string>();
   for (const p of card.run.personas) {
     for (const sc of p.scope ?? []) {
-      if (!sc.field.includes('.') && typeof sc.value === 'string') out.set(sc.value, p.id);
+      if (sc.field.includes('.') || typeof sc.value !== 'string' || !fields.has(`${sc.object}.${sc.field}`)) continue;
+      if (!out.has(sc.value)) out.set(sc.value, p.id);
     }
   }
   return out;
+}
+
+/**
+ * The record binding: each persona's person row (`personas[].record`, the
+ * seed row that IS this person), keyed `object/id`, to the persona id. The
+ * first persona in `run.personas` order holds a row two of them name.
+ */
+export function personaRecords(card: Card): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const p of card.run.personas) {
+    if (p.record === undefined) continue;
+    const key = `${p.record.object}/${p.record.id}`;
+    if (!out.has(key)) out.set(key, p.id);
+  }
+  return out;
+}
+
+/** The declared lookups (`expect.lookups`) that point at a person object, the object of some persona's `record` (`ticket.assignee` → `agent`). */
+function personLookups(card: Card): Array<{ object: string; field: string; to: string }> {
+  const people = new Set(card.run.personas.flatMap((p) => (p.record ? [p.record.object] : [])));
+  return (card.expect.lookups ?? []).filter((l) => people.has(l.to)).map(({ object, field, to }) => ({ object, field, to }));
+}
+
+/**
+ * The persona a seed row is loaded as owned by (`owner_id`), or undefined
+ * when it names no person and the inserter (the admin) keeps it. A row names a
+ * persona when it IS that persona's record, when a declared direct lookup on
+ * it holds that record's id (`ticket.assignee` = `a02`), or when a declared
+ * user-handle field on it holds that persona's handle (`account.owner` =
+ * `u_sam`). The first persona in `run.personas` order the row names owns it.
+ * An option value (`ticket_comment.visibility` = `public`), a row id scope
+ * (`department.id` = `dep_sales`) and a lookup to a row no persona is (a
+ * department, a group) name nobody.
+ */
+export function rowOwner(card: Card, object: string, row: Readonly<Record<string, unknown>>): string | undefined {
+  const lookups = personLookups(card).filter((l) => l.object === object);
+  const handles = userHandleFields(card);
+  for (const p of card.run.personas) {
+    const rec = p.record;
+    if (rec !== undefined) {
+      if (rec.object === object && row.id === rec.id) return p.id;
+      if (lookups.some((l) => l.to === rec.object && row[l.field] === rec.id)) return p.id;
+    }
+    for (const sc of p.scope ?? []) {
+      if (sc.object === object && !sc.field.includes('.') && handles.has(`${object}.${sc.field}`) && row[sc.field] === sc.value) return p.id;
+    }
+  }
+  return undefined;
 }
 
 /**
@@ -164,6 +222,57 @@ function personaLine(card: Card, p: Persona): string {
   );
 }
 
+/**
+ * The build prompt's Row ownership section: which seed rows the runner loads
+ * as owned (`owner_id`) by which person's user ({@link rowOwner}), the person
+ * rows whose `user` field it fills, the order that settles a row naming two
+ * people, and the platform boundary for a person who must see rows another
+ * person owns. Empty when no persona is bound to a person (no `record`, no
+ * handle).
+ */
+function rowOwnership(card: Card): string[] {
+  const records = card.run.personas.flatMap((p) => (p.record ? [{ persona: p.id, ...p.record }] : []));
+  const handleFields = userHandleFields(card);
+  const handlePersonas = new Set(personaHandles(card).values());
+  const owners = card.run.personas.filter((p) => p.record !== undefined || handlePersonas.has(p.id)).map((p) => p.id);
+  if (owners.length === 0) return [];
+  const lines: string[] = ['', 'Row ownership: the runner signs each person in as their own user, and loads a seed row as owned (`owner_id`, the record owner) by a person’s user only when the row names that person:'];
+  if (records.length) {
+    const objects = [...new Set(records.map((r) => r.object))];
+    const lookups = personLookups(card);
+    lines.push(
+      `- Each of these rows is a person: ${records.map((r) => `\`${r.object}\` \`${r.id}\` is \`${r.persona}\``).join(', ')}. ` +
+        `The runner loads each one’s \`${PERSON_USER_FIELD}\` field with that person’s user id, so give ${objects.map((o) => `\`${o}\``).join(' and ')} a field named exactly \`${PERSON_USER_FIELD}\` of type \`user\` (a lookup to the platform’s users), and leave it optional: no other row is a person who signs in. ` +
+        `A row names a person when it is that person’s row, or when one of its lookups to that person’s object holds that row’s id` +
+        (lookups.length ? ` (${lookups.map((l) => `\`${l.object}.${l.field}\``).join(', ')})` : '') +
+        '.',
+    );
+  }
+  if (handleFields.size) {
+    const unheld = unheldHandles(card);
+    const held = [
+      ...new Set(card.run.personas.flatMap((p) => (p.scope ?? []).filter((sc) => handleFields.has(`${sc.object}.${sc.field}`)).map((sc) => `\`${String(sc.value)}\` → the \`${p.id}\` user`))),
+    ];
+    lines.push(
+      `- In ${[...handleFields].map((k) => `\`${k}\``).join(' / ')} the value is a handle that stands for a user, and the handle text is never stored: ` +
+        `the runner loads that field, and the row’s owner (\`owner_id\`), with that user’s id (${[
+          ...held,
+          ...(unheld.length ? [`${unheld.map((h) => `\`${h}\``).join(', ')}, which no person below holds → the admin user the runner signs in as`] : []),
+        ].join('; ')}). Make that field accept a user id; a rule on it matches that user.`,
+    );
+  }
+  lines.push(
+    (owners.length > 1 ? `- A row that names more than one person is owned by the first of them in this order: ${owners.map((o) => `\`${o}\``).join(', ')}. ` : '- ') +
+      'Every other row is owned by the admin user the runner loads the seed as: a row whose scope value is an option or names a row that is no person (a department, a group) names nobody.',
+  );
+  lines.push(
+    '- Platform boundary: the open-source server has no hierarchy resolver (a hierarchy read scope, a unit or a unit and below, falls back to the user’s own rows), and one owner per row serves one person. ' +
+      'So a person who must see rows another person owns (a manager over their team’s, a lead over their group’s, a customer over the comments on their tickets) gets them through what you build: ' +
+      'a read policy on their permission set matching a field that names them or their group, a child object whose access is controlled by its parent, or a field you add that names them.',
+  );
+  return lines;
+}
+
 /** The runner's contract, appended to every build prompt. */
 export function dataContract(card: Card): string {
   const lines: string[] = [];
@@ -192,30 +301,7 @@ export function dataContract(card: Card): string {
       'on the app’s objects and nothing it must not see. The runner signs each person in as a user holding only that set.',
   );
   for (const p of card.run.personas) lines.push(personaLine(card, p));
-  const handles = personaHandles(card);
-  if (handles.size) {
-    lines.push('');
-    lines.push(
-      `Row ownership: a row whose ${[...new Set(card.run.personas.flatMap((p) => (p.scope ?? []).filter((s) => !s.field.includes('.')).map((s) => `\`${s.field}\``)))].join(' / ')} names a handle ` +
-        `(${[...handles].map(([h, id]) => `\`${h}\` = \`${id}\``).join(', ')}) is loaded as owned by that person’s user.`,
-    );
-    const userFields = [...userHandleFields(card)];
-    if (userFields.length) {
-      const unheld = unheldHandles(card);
-      const held = [
-        ...new Set(
-          card.run.personas.flatMap((p) => (p.scope ?? []).filter((sc) => userHandleFields(card).has(`${sc.object}.${sc.field}`)).map((sc) => `\`${String(sc.value)}\` → the \`${p.id}\` user`)),
-        ),
-      ];
-      lines.push(
-        `In ${userFields.map((k) => `\`${k}\``).join(' / ')} the value is a handle that stands for a user, and the handle text is never stored: ` +
-          `the runner loads that field, and the row’s owner (\`owner_id\`), with that user’s id (${[
-            ...held,
-            ...(unheld.length ? [`${unheld.map((h) => `\`${h}\``).join(', ')}, which no person below holds → the admin user the runner signs in as`] : []),
-          ].join('; ')}). Make that field accept a user id; a rule on it matches that user.`,
-      );
-    }
-  }
+  lines.push(...rowOwnership(card));
   const cycles = referenceCycles(card);
   if (cycles.length) {
     lines.push('');

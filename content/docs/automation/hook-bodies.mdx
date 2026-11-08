@@ -71,7 +71,7 @@ Pure formula. No IO, no mutation. This is the `body.language: 'expression'` shap
 { "language": "expression", "source": "input.amount > 1000 && input.status == 'open'" }
 ```
 
-Hook `condition` is a **separate field with a different envelope** — a bare CEL string, or `{ dialect: 'cel', source }` (`ExpressionInputSchema` in `packages/spec/src/shared/expression.zod.ts`), not a `{ language, source }` body. e.g. `condition: 'record.status == "open" && record.amount > 1000'`.
+Hook `condition` is a **separate field with a different envelope** — a bare CEL string, or `{ dialect: 'cel', source }` (`ExpressionInputSchema` in `packages/spec/src/shared/expression.zod.ts`), not a `{ language, source }` body. e.g. `condition: 'record.status == "open" && record.amount != null && record.amount > 1000'`.
 
 Both forms are evaluated by the same formula engine that powers field formulas — see [Formula Reference](/docs/data-modeling/formulas).
 

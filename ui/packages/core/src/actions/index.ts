@@ -7,7 +7,15 @@
  */
 
 export * from './ActionRunner.js';
-export * from './ActionEngine.js';
+// Named, not `export *`: `RegisteredAction` stays in the module as the type of
+// `ActionEngine`'s private registry and off the public entry
+// (objectstack#25921: zero consumers).
+export {
+  ActionEngine,
+  ACTION_LOCATIONS,
+  type ActionLocation,
+  type ShortcutBinding,
+} from './ActionEngine.js';
 export {
   ACTION_DEF_KEYS,
   SPEC_ACTION_KEYS,

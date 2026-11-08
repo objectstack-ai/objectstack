@@ -31,6 +31,7 @@ import { installReadAuditWriter, type ReadAuditWriterHandle } from './read-audit
 import { createAuthEventAuditSink } from './auth-event-audit.js';
 import { createActionInvocationAuditWriter } from './action-invocation-audit.js';
 import { createDataExportAuditWriter } from './data-export-audit.js';
+import { createPackageLifecycleAuditWriter } from './package-lifecycle-audit.js';
 import { installCommentAccessHooks, installCommentReadVisibility } from './comment-access-hooks.js';
 import {
   COMMENT_REACTION_REMOVE_ROUTE,
@@ -326,6 +327,12 @@ export class AuditPlugin implements Plugin {
     // export door resolves it per request and hands it one event per export
     // it streamed, so every export of every object, this ledger included,
     // leaves a run-level `export` row (`data-export-audit.ts`).
+    //
+    // [#31186] And the package lifecycle writer (`recordPackageLifecycleEvent`):
+    // the uninstall verb (`deletePackage` in `@objectstack/metadata-protocol`)
+    // resolves it per call and hands it one event per package it uninstalled,
+    // so the package itself leaves a `package_uninstall` row
+    // (`package-lifecycle-audit.ts`).
     const getLedgerEngine = (): IDataEngine | undefined => {
       try {
         return ctx.getService<IDataEngine>('objectql');
@@ -343,6 +350,7 @@ export class AuditPlugin implements Plugin {
       ...createAuthEventAuditSink({ getEngine: getLedgerEngine, logger: ctx.logger }),
       ...createActionInvocationAuditWriter({ getEngine: getLedgerEngine, logger: ctx.logger }),
       ...createDataExportAuditWriter({ getEngine: getLedgerEngine, logger: ctx.logger }),
+      ...createPackageLifecycleAuditWriter({ getEngine: getLedgerEngine, logger: ctx.logger }),
     });
 
     // ADR-0029 D8 — contribute this plugin's object translations to the i18n

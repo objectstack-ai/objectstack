@@ -1868,10 +1868,6 @@ const es = {
     },
   },
   console: {
-    organizationMfa: {
-      needsTwoFactor: "Exigir autenticación multifactor necesita la autenticación de dos factores, que está desactivada en esta implementación, así que guardar con la casilla marcada se rechaza. Activa primero los dos factores: enciende Requerir autenticación multifactor en Configuración → Autenticación (se aplica a todas las organizaciones) o define OS_AUTH_TWO_FACTOR=true en la implementación.",
-      nowRequired: "Todos los miembros de esta organización que no hayan configurado una app de autenticación deben hacerlo ahora. A cada uno se le bloquea el acceso a los datos cuando termina el periodo de gracia de MFA (7 días salvo que se cambie en Configuración → Autenticación), contado desde la primera vez que usa la app después de este cambio. Los miembros que ya usan un autenticador no se ven afectados.",
-    },
     studio: {
       title: "Studio",
       accessRequired: "Necesita acceso a Studio para abrir Studio. Un administrador puede concedérselo con un conjunto de permisos en Configuración → Asignación de conjuntos de permisos.",
@@ -2278,6 +2274,7 @@ const es = {
       unsupportedSpecifierType: "Tipo de ajuste no admitido: {{type}}",
       invalidPhone: "Introduzca un número de teléfono solo con dígitos, espacios y + ( ) - .",
       invalidColor: "Introduzca un color hexadecimal, como #1a2b3c",
+      jsonStoredAsText: "Este valor está guardado como texto, no como objeto JSON. Guarde para almacenarlo como objeto; la página lo ha marcado como cambio sin guardar.",
       clientAddressDirect: "Su dirección, tal como la juzga el servidor: {{address}}. Una lista que no la incluya no se puede guardar desde aquí. Este servidor no confía en los encabezados de proxy, así que detrás de un proxy esta es la dirección del proxy.",
       clientAddressViaProxy: "Su dirección, tal como la juzga el servidor: {{address}}, leída de los encabezados reenviados por el proxy en el que confía este servidor. Una lista que no la incluya no se puede guardar desde aquí.",
       clientAddressUnknown: "El servidor no puede determinar su dirección, así que desde aquí no se puede guardar una lista que no esté vacía.",
@@ -3867,6 +3864,8 @@ const es = {
     noMessages: 'Esta conversación aún no tiene mensajes.',
     sharedObject: '{{object}} compartido',
     redactedFields: 'El propietario ocultó algunos campos: {{fields}}',
+    linkedRecord: 'Registro vinculado',
+    linkedUser: 'Usuario vinculado',
   },
   publicForm: {
     submit: "Enviar",
@@ -3994,6 +3993,22 @@ const es = {
       managedBody: 'Los asistentes de IA que esta persona ha autorizado. Cada uno actúa con sus permisos, y Revocar pone fin a su acceso de inmediato.',
       managedEmpty: 'Esta persona todavía no ha autorizado ningún asistente de IA.',
       managedTruncated: 'Solo se muestran los más recientes; esta persona ha autorizado más.',
+    },
+  },
+  effectiveAccess: {
+    title: 'Conjuntos de permisos efectivos',
+    body: 'Cada conjunto de permisos vigente para esta persona en tu organización actual, y de dónde viene cada uno. Las asignaciones directas también aparecen abajo, donde se pueden quitar.',
+    refused: 'No tienes permiso para ver el acceso efectivo de esta persona.',
+    unserved: 'Este servidor no informa del acceso efectivo.',
+    loadFailed: 'No se pudo cargar el acceso efectivo: {{message}}',
+    empty: 'Esta persona no tiene ningún conjunto de permisos vigente en esta organización.',
+    originsLabel: 'Procede de',
+    origin: {
+      direct: 'Asignación directa',
+      position: 'Puesto: {{position}}',
+      default: 'Vinculación predeterminada',
+      derivedPlatformAdmin: 'Administrador de plataforma configurado',
+      derivedAiAccess: 'Acceso a IA activado',
     },
   },
   excelImport: {

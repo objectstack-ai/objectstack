@@ -411,6 +411,10 @@ const DURABILITY_CRITICAL_CALLEES = new Map([
         'The compliance audit row for a data export was never written — the export itself was served and the caller holds the file, so the API, the download and every counter read clean, while the `sys_audit_log` row recording WHO exported WHICH object, how many rows and under which filter is simply absent and nothing retries it. The shipped `config_changes` list view and the Enterprise audit export read exactly those rows, so an auditor asking who took the data out finds no answer (#30955, the #5226 shape on the export seam).',
     ],
     [
+        'persistPackageLifecycleAuditRow',
+        'The compliance audit row for a package uninstall was never written — the uninstall itself completed and was answered, so the API, the registry and every counter read clean, while the `sys_audit_log` row recording WHO uninstalled WHICH package, and when, is simply absent and nothing retries it. The package\'s own `sys_packages` row is deleted with raw SQL, so this row is the only ledger trace of the package itself (#31186, the #5226 shape on the package seam).',
+    ],
+    [
         'deleteMetaItemFromLoader',
         'The metadata definition was never deleted from the authoritative store — `unregister()` still resolves and still announces `deleted`, the in-memory registry entry is gone, and the surviving row is read straight back out of storage by the very next `list()`/`get()`, so the "deleted" item reappears and survives every restart. Nothing retries it (#5259).',
     ],

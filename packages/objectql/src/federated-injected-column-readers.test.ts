@@ -314,6 +314,11 @@ const READERS: Record<string, Row> = {
     disposition: 'row-value',
     why: "reads the tenant column off the snapshotted root row; a federated row has none, so the entry takes the deleting context's organization",
   },
+  // [#30237] A restore's unique probe scopes a per-organization value to the snapshotted row's own organization.
+  'recycle-bin/restore.ts#judgeRestore :: resolveTenantFieldName()': {
+    disposition: 'row-value',
+    why: 'reads the tenant column off the snapshotted row to scope the unique probe; a federated row has none, so the probe matches the value alone',
+  },
   'relation-filter-lowering.ts#admitRelationCondition :: referenceTargetOf()': {
     disposition: 'caller-predicate',
     why: "lowers a relation condition the caller wrote; it names an injected column only when the caller did",

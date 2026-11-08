@@ -68,34 +68,6 @@
     },
     {
       "file": "packages/objectql/src/engine.ts",
-      "class": "ObjectQL",
-      "member": "homeAmountServing",
-      "card": "#30975",
-      "reason": "codemod limit: field-call, it calls a field or accessor as a function (#29986 report)"
-    },
-    {
-      "file": "packages/objectql/src/engine.ts",
-      "class": "ObjectQL",
-      "member": "projectHomeAmountsOntoPatch",
-      "card": "#30975",
-      "reason": "codemod limit: gate reading, a parameter default computes (calls this.homeAmountServing)"
-    },
-    {
-      "file": "packages/objectql/src/engine.ts",
-      "class": "ScopedContext",
-      "member": "derive",
-      "card": "#30975",
-      "reason": "codemod limit: foreign-private, it writes `appAuthored` on another instance, which a module function cannot (#30052 report)"
-    },
-    {
-      "file": "packages/objectql/src/engine.ts",
-      "class": "ScopedContext",
-      "member": "[APP_AUTHORED_HOOK_API]",
-      "card": "#30975",
-      "reason": "codemod limit: not-identifier-name, a symbol-keyed method; it also writes `appAuthored` on another instance (#30052 report)"
-    },
-    {
-      "file": "packages/objectql/src/engine.ts",
       "class": "ScopedContext",
       "member": "[SEED_USER_GRANTS]",
       "card": "#30020",

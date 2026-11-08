@@ -1881,10 +1881,6 @@ const zh = {
     },
   },
   console: {
-    organizationMfa: {
-      needsTwoFactor: '“强制多因素认证”需要双重验证，而本部署未开启双重验证，因此勾选后保存会被拒绝。请先开启双重验证：在“设置 → 认证”中打开“要求多因素认证”（对所有组织生效），或在部署上设置 OS_AUTH_TWO_FACTOR=true。',
-      nowRequired: '本组织所有尚未绑定身份验证器的成员现在都必须绑定。每位成员从此次变更后第一次使用起开始计算 MFA 宽限期（默认 7 天，可在“设置 → 认证”中修改），宽限期结束后将无法访问数据，直到完成绑定。已使用身份验证器的成员不受影响。',
-    },
     studio: {
       title: 'Studio',
       accessRequired: '你需要 Studio 访问权限才能打开 Studio。管理员可以在“设置 → 权限集分配”中通过权限集授予。',
@@ -1990,6 +1986,7 @@ const zh = {
       unsupportedSpecifierType: '不支持的设置项类型:{{type}}',
       invalidPhone: '请输入仅由数字、空格和 + ( ) - . 组成的电话号码',
       invalidColor: '请输入十六进制颜色，例如 #1a2b3c',
+      jsonStoredAsText: '该值以文本形式保存，而不是 JSON 对象。保存后将改存为对象；页面已将其标记为未保存的更改。',
       clientAddressDirect: '服务器判定的你的地址：{{address}}。不包含该地址的列表无法在此保存。此服务器不信任代理转发头，若部署在代理之后，这里显示的是代理的地址。',
       clientAddressViaProxy: '服务器判定的你的地址：{{address}}，取自此服务器所信任代理的转发头。不包含该地址的列表无法在此保存。',
       clientAddressUnknown: '服务器无法确定你的地址，因此无法在此保存非空的列表。',
@@ -4000,6 +3997,8 @@ const zh = {
     noMessages: '此对话暂无消息。',
     sharedObject: '分享的 {{object}}',
     redactedFields: '部分字段已被所有者隐藏：{{fields}}',
+    linkedRecord: '已关联记录',
+    linkedUser: '已关联用户',
   },
   publicForm: {
     submit: '提交',
@@ -4127,6 +4126,22 @@ const zh = {
       managedBody: '此人授权的 AI 助手。它们都以此人的权限操作，撤销会立即终止其访问。',
       managedEmpty: '此人还没有授权任何 AI 助手。',
       managedTruncated: '仅显示最新的部分，此人授权的助手还有更多。',
+    },
+  },
+  effectiveAccess: {
+    title: '实际生效的权限集',
+    body: '此人在你当前组织中实际生效的每个权限集，以及各自的来源。直接分配的权限集也列在下方，可以在那里移除。',
+    refused: '你无权查看此人实际生效的权限。',
+    unserved: '此服务器不提供实际生效权限的查询。',
+    loadFailed: '无法加载实际生效的权限：{{message}}',
+    empty: '此人在此组织中没有生效的权限集。',
+    originsLabel: '来源',
+    origin: {
+      direct: '直接分配',
+      position: '岗位：{{position}}',
+      default: '默认绑定',
+      derivedPlatformAdmin: '配置的平台管理员',
+      derivedAiAccess: '已开启 AI 访问',
     },
   },
   excelImport: {

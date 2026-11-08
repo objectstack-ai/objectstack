@@ -189,7 +189,10 @@ one failed start reports *all* the misconfigured ones.
 in an explicitly degraded state announced by a `DEGRADED BOOT` banner. The
 datasource stays unconnected for the process lifetime: nothing re-runs the
 connect, so queries against its objects keep failing until the server is
-restarted. Do not set it in production.
+restarted. The one exception is a plugin-driver datasource whose connector
+instance could not lend, which recovers on its own once the instance does
+([Borrowing a connector instance's credential](#borrowing-a-connector-instances-credential)).
+Do not set it in production.
 </Callout>
 
 <Callout type="info">
@@ -418,6 +421,19 @@ its header or query parameter. The rules:
   automation service (`@objectstack/service-automation` is what lends the credential),
   leaves the datasource unconnected with the reason, the same connect failure as an
   unresolvable `credentialsRef`.
+- **Recovery without a restart.** The connect judges the instance once, but the plugin
+  driver stays registered and borrows again on each request. So when that failure did not
+  stop the boot (no gate in [When auto-connect fails](#when-auto-connect-fails) refuses it,
+  or `OS_ALLOW_DRIVER_CONNECT_FAILURE` is set), the datasource shows `error` in
+  Setup → Datasources and its requests answer `503` only until the instance is repaired.
+  The first borrow the lender grants for **that** instance after the repair, which the next
+  request makes, clears the failure, and the datasource reads `ok` again with no restart.
+  A grant for a different instance leaves it standing. A datasource reconnected or edited
+  in between records a result of its own instead. This needs a lender that reports its
+  grants, as `@objectstack/service-automation` does; with a lender that does not, or none,
+  the failure stands until a restart. The `DEGRADED BOOT` banner says which applies: it
+  names the instance whose next granted borrow clears the failure, or says the server has
+  to be restarted.
 - **A credential not set yet does not fail the connect.** Each request is answered
   `503 ERR_DATASOURCE_UNAVAILABLE`, with the reference named in the server log, until
   an administrator sets it; the next request after that reads with it, with no restart.

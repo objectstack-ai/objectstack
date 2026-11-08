@@ -6,6 +6,10 @@
  * `sudo`, `withRunAs`, `releaseJoinedHandle`, `txDriver`, `beginTransaction`,
  * `commitTransaction`, `rollbackTransaction`, `serveFormulaField` moved out of
  * `engine.ts` whole by `scripts/codemod-split-engine.mjs` (its second pass).
+ * The bodies of `derive` and `[APP_AUTHORED_HOOK_API]` moved by hand
+ * (#30975): each writes the private `appAuthored` of the instance it builds,
+ * which the codemod refuses to move (`foreign-private`), so each writes it
+ * through that instance's own host setter.
  *
  * A MOVE, not a redesign. {@link ScopedContextFacet} is a stateless facet of
  * `ScopedContext`: each static method of it is the body of the `ScopedContext`
@@ -32,12 +36,14 @@
 
 import { driverSupportsTransactions } from '@objectstack/spec/data';
 import type { IScopedContext } from '@objectstack/spec/contracts';
+import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { appAutomationElevationOf, markAppAutomationElevation } from '@objectstack/core';
 import { UnscopedHookApi } from './hook-run-as.js';
 import { refuseAppAuthoredPermanentDelete } from './recycle-bin/app-authored-delete.js';
 import type { HookRunAs, HookRunAsRef } from './hook-run-as.js';
-import { ObjectRepository } from './engine.js';
-import type { ObjectQL, ScopedContext } from './engine.js';
+import { scopedContextHost } from './engine-scoped-hosts.js';
+import { ObjectRepository, ScopedContext } from './engine.js';
+import type { ObjectQL } from './engine.js';
 
 /**
  * The `ScopedContext` members the bodies of {@link ScopedContextFacet} read —
@@ -47,7 +53,7 @@ import type { ObjectQL, ScopedContext } from './engine.js';
  * are fields a body assigns.
  */
 export interface ScopedContextHost {
-  readonly appAuthored: ScopedContext['appAuthored'];
+  appAuthored: ScopedContext['appAuthored'];
   derive: ScopedContext['derive'];
   readonly engine: ScopedContext['engine'];
   readonly executionContext: ScopedContext['executionContext'];
@@ -58,6 +64,32 @@ export interface ScopedContextHost {
 
 /** The bodies of `ScopedContext`'s methods: a stateless facet, called by the class's stubs. */
 export class ScopedContextFacet {
+  /**
+   * A child over `executionContext` that keeps this api's provenance.
+   *
+   * The child's private `appAuthored` is written through the child's own host
+   * (`scopedContextHost.of(child)`), the port its class's static block fills:
+   * a module function cannot write another instance's private field directly.
+   */
+  static derive(this: Pick<ScopedContextHost, 'appAuthored' | 'engine'>, executionContext: ExecutionContext): ScopedContext {
+    const child = new ScopedContext(executionContext, this.engine);
+    scopedContextHost.of(child).appAuthored = this.appAuthored;
+    return child;
+  }
+
+  /**
+   * The body of `ScopedContext#[APP_AUTHORED_HOOK_API]`; the method's docblock
+   * there is its contract. The new api's private `appAuthored` is written
+   * through its own host, as in {@link ScopedContextFacet.derive}.
+   */
+  static appAuthoredHookApi(this: Pick<ScopedContextHost, 'engine' | 'executionContext'>): ScopedContext {
+    const ctx = this.executionContext;
+    const inheritsElevation = ctx.isSystem && !ctx.flowRunId && !appAutomationElevationOf(ctx);
+    const api = new ScopedContext(inheritsElevation ? markAppAutomationElevation(ctx, 'hook') : ctx, this.engine);
+    scopedContextHost.of(api).appAuthored = true;
+    return api;
+  }
+
   /** The body of `ScopedContext#object`; the method's docblock there is its contract. */
   static object(this: Pick<ScopedContextHost, 'appAuthored' | 'engine' | 'executionContext'>, name: string): ObjectRepository {
     const repo = new ObjectRepository(name, this.executionContext, this.engine as any);

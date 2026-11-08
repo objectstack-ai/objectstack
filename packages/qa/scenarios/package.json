@@ -66,7 +66,8 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "run-scenarios": "tsx src/runner/cli.ts",
-    "export-gallery": "tsx src/export/cli.ts"
+    "export-gallery": "tsx src/export/cli.ts",
+    "gallery-refresh": "tsx src/export/refresh-cli.ts"
   },
   "dependencies": {
     "@objectstack/core": "workspace:*",

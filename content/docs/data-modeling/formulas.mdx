@@ -116,7 +116,7 @@ export const Invoice = ObjectSchema.create({
       expression: F`record.subtotal + record.subtotal * record.tax_rate`,
     }),
     po_number: Field.text({
-      requiredWhen: P`record.amount > 10000`,
+      requiredWhen: P`record.amount != null && record.amount > 10000`,
     }),
     // M9.9b — declarative default, evaluated at insert time
     issued_date: Field.date({
@@ -353,7 +353,7 @@ ObjectSchema.create({
 Field.text({
   visibleWhen: P`record.type == 'business'`,
   readonlyWhen: P`record.status == 'approved'`,
-  requiredWhen: P`record.amount > 10000`,
+  requiredWhen: P`record.amount != null && record.amount > 10000`,
 })
 ```
 
@@ -391,14 +391,16 @@ clock at install time.
 {
   name: 'amount_positive',
   type: 'script',
-  condition: P`record.amount <= 0`,
+  condition: P`record.amount != null && record.amount <= 0`,
   message: 'Amount must be positive.',
 }
 ```
 
 The generic CEL rule is `type: 'script'`. For `script` rules, the `condition`
 is the **failure** predicate — when it evaluates TRUE the validation fails, so
-invert the test (here `amount <= 0` rejects non-positive amounts).
+invert the test (here `amount <= 0` rejects non-positive amounts). An optional
+field needs the `!= null` test first: the publish gate refuses `<`, `<=`, `>`, `>=`
+or arithmetic on a nullable field unless a null test guards it.
 
 ### Hook condition
 

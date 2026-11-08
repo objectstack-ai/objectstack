@@ -176,6 +176,7 @@ import type {
   AudienceBindingSuggestionSync,
   AutomationResult,
   DelegableScope,
+  EffectiveAccess,
   FlowRuntimeState,
   ImportObjectResult,
   ObjectDraft,
@@ -6624,6 +6625,24 @@ export class ObjectStackClient {
       describeDelegableScope: async (): Promise<DelegableScope> => {
           const res = await this.fetch(`${this.baseUrl}/api/v1/security/my-delegable-scope`);
           return this.unwrapResponse<DelegableScope>(res);
+      },
+
+      /**
+       * ADR-0090 D6/D12 — one user's effective permission sets, each with
+       * every origin it arrives through: a default binding, a held position,
+       * a direct grant, or a name derived from the user's standing. Resolved
+       * in the caller's organization by the resolver enforcement uses.
+       *
+       * Gated as `explain` is: reading someone else needs `manage_users`,
+       * organization administration covering them, or a delegated
+       * `adminScope` covering them. An unknown id is refused with the same
+       * `403` as one the caller may not manage.
+       */
+      describeEffectiveAccess: async (userId: string): Promise<EffectiveAccess> => {
+          const res = await this.fetch(
+              `${this.baseUrl}/api/v1/security/users/${encodeURIComponent(userId)}/effective-access`,
+          );
+          return this.unwrapResponse<EffectiveAccess>(res);
       },
 
       suggestedBindings: {

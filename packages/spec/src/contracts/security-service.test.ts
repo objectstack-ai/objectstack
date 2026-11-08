@@ -10,7 +10,11 @@ import type {
   ControlledByParentWriteOutcome,
   ControlledByParentWriteDenialLeg,
   ControlledByParentWriteUnresolvedReason,
+  EffectiveAccess,
+  EffectivePermissionSet,
+  EffectivePermissionSetOrigin,
   ExplainAccessRequest,
+  SecurityContext,
 } from './security-service';
 import type { ExplainRequestSchema } from '../security/explain.zod';
 
@@ -792,6 +796,109 @@ describe('Security Service Contract', () => {
       checkControlledByParentWrite: async () => ({ outcome: 'unresolvable', reason: 'record_not_found' }),
     });
     await expect(gate(missingRow)).resolves.toBe('refuse');
+  });
+
+  it('describeEffectiveAccess is OPTIONAL — absence is typed, and it means the read is not served (compile-time)', async () => {
+    // A security service that predates the read still satisfies the contract;
+    // a caller feature-detects and answers "not served", never an empty list:
+    // "no permission sets" is a claim about the user, absence is not.
+    const withoutIt: ISecurityService = makeService();
+    expect(typeof withoutIt.describeEffectiveAccess).toBe('undefined');
+    const mustNotCompileWithoutAGuard = () =>
+      // @ts-expect-error possibly undefined — a caller must feature-detect first
+      withoutIt.describeEffectiveAccess('u2', { userId: 'u1' });
+    expect(typeof mustNotCompileWithoutAGuard).toBe('function');
+    // @ts-expect-error `describeEffectiveAccess` is OPTIONAL — not a required member
+    const notRequired: RequiredMember = 'describeEffectiveAccess';
+    expect(notRequired).toBe('describeEffectiveAccess');
+
+    const answer: EffectiveAccess = {
+      userId: 'u2',
+      organizationId: 'org_1',
+      positions: ['org_member', 'sales_rep', 'everyone'],
+      // The resolver's order: grant rows, position-bound sets, derived names, the human baseline.
+      // `member_default` is bound to `everyone`, a held position, so it sits in the
+      // position-bound slot (origin `default`), before any derived name.
+      permissionSets: [
+        { name: 'sales_user', origins: [{ kind: 'direct' }, { kind: 'position', position: 'sales_rep' }] },
+        { name: 'member_default', origins: [{ kind: 'default' }] },
+        { name: 'ai_seat', origins: [{ kind: 'derived', source: 'ai_access' }] },
+      ],
+    };
+    const withIt = makeService({ describeEffectiveAccess: async () => answer });
+    await expect(withIt.describeEffectiveAccess?.('u2', { userId: 'u1' })).resolves.toEqual(answer);
+  });
+
+  it('EffectiveAccess: four closed origins, a position names its position, a derived origin its closed source (compile-time)', () => {
+    const everyOrigin: EffectivePermissionSetOrigin[] = [
+      { kind: 'direct' },
+      { kind: 'position', position: 'sales_rep' },
+      { kind: 'default' },
+      { kind: 'derived', source: 'platform_admin_config' },
+      { kind: 'derived', source: 'ai_access' },
+    ];
+    expect(everyOrigin).toHaveLength(5);
+    // @ts-expect-error a `position` origin must name the position
+    const positionWithoutName: EffectivePermissionSetOrigin = { kind: 'position' };
+    // @ts-expect-error the vocabulary is closed: direct, position, default or derived
+    const notAnOrigin: EffectivePermissionSetOrigin = { kind: 'inherited' };
+    // @ts-expect-error a `derived` origin must name the standing that confers it
+    const derivedWithoutSource: EffectivePermissionSetOrigin = { kind: 'derived' };
+    // @ts-expect-error the derived sources are closed: the configured platform administrators or `sys_user.ai_access`
+    const notASource: EffectivePermissionSetOrigin = { kind: 'derived', source: 'api_key_scope' };
+    expect([positionWithoutName, notAnOrigin, derivedWithoutSource, notASource]).toHaveLength(4);
+
+    expectTypeOf<EffectivePermissionSet>().toEqualTypeOf<{
+      name: string;
+      origins: EffectivePermissionSetOrigin[];
+    }>();
+    expectTypeOf<EffectiveAccess>().toEqualTypeOf<{
+      userId: string;
+      organizationId: string | null;
+      positions: string[];
+      permissionSets: EffectivePermissionSet[];
+    }>();
+    expectTypeOf<NonNullable<ISecurityService['describeEffectiveAccess']>>().toEqualTypeOf<
+      (userId: string, callerContext?: SecurityContext) => Promise<EffectiveAccess>
+    >();
+
+    // An exhaustive consumer: a fifth origin kind, or a third derived source,
+    // added to the union would stop this switch compiling at a `never` line.
+    const sourceLabel = (source: Extract<EffectivePermissionSetOrigin, { kind: 'derived' }>['source']): string => {
+      switch (source) {
+        case 'platform_admin_config':
+          return 'configured platform administrator';
+        case 'ai_access':
+          return 'AI seat';
+        default: {
+          const unhandled: never = source;
+          return unhandled;
+        }
+      }
+    };
+    const label = (o: EffectivePermissionSetOrigin): string => {
+      switch (o.kind) {
+        case 'direct':
+          return 'direct';
+        case 'position':
+          return `position:${o.position}`;
+        case 'default':
+          return 'default';
+        case 'derived':
+          return `derived:${sourceLabel(o.source)}`;
+        default: {
+          const unhandled: never = o;
+          return unhandled;
+        }
+      }
+    };
+    expect(everyOrigin.map(label)).toEqual([
+      'direct',
+      'position:sales_rep',
+      'default',
+      'derived:configured platform administrator',
+      'derived:AI seat',
+    ]);
   });
 
   it('reopenAudienceBindingSuggestion is OPTIONAL — absence leaves every dismissal standing (compile-time)', async () => {

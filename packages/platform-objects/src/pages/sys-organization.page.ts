@@ -80,7 +80,7 @@ export const SysOrganizationDetailPage: Page = {
             position: 'top',
             items: [
               {
-                label: { en: 'Members', 'zh-CN': '成员', 'ja-JP': 'メンバー', 'es-ES': 'Miembros', 'zh-Hant': '成員', ar: 'الأعضاء' },
+                label: { en: 'Members', 'zh-CN': '成员', 'ja-JP': 'メンバー', 'es-ES': 'Miembros', 'zh-Hant': '成員', ar: 'الأعضاء', fr: 'Membres' },
                 icon: 'users',
                 children: [
                   {
@@ -92,13 +92,13 @@ export const SysOrganizationDetailPage: Page = {
                       sort: [{ field: 'created_at', order: 'desc' }],
                       limit: 25,
                       showViewAll: true,
-                      title: { en: 'Members', 'zh-CN': '成员', 'ja-JP': 'メンバー', 'es-ES': 'Miembros', 'zh-Hant': '成員', ar: 'الأعضاء' },
+                      title: { en: 'Members', 'zh-CN': '成员', 'ja-JP': 'メンバー', 'es-ES': 'Miembros', 'zh-Hant': '成員', ar: 'الأعضاء', fr: 'Membres' },
                     },
                   },
                 ],
               },
               {
-                label: { en: 'Invitations', 'zh-CN': '邀请', 'ja-JP': '招待', 'es-ES': 'Invitaciones', 'zh-Hant': '邀請', ar: 'الدعوات' },
+                label: { en: 'Invitations', 'zh-CN': '邀请', 'ja-JP': '招待', 'es-ES': 'Invitaciones', 'zh-Hant': '邀請', ar: 'الدعوات', fr: 'Invitations' },
                 icon: 'mail',
                 children: [
                   {
@@ -110,13 +110,13 @@ export const SysOrganizationDetailPage: Page = {
                       sort: [{ field: 'created_at', order: 'desc' }],
                       limit: 25,
                       showViewAll: true,
-                      title: { en: 'Invitations', 'zh-CN': '邀请', 'ja-JP': '招待', 'es-ES': 'Invitaciones', 'zh-Hant': '邀請', ar: 'الدعوات' },
+                      title: { en: 'Invitations', 'zh-CN': '邀请', 'ja-JP': '招待', 'es-ES': 'Invitaciones', 'zh-Hant': '邀請', ar: 'الدعوات', fr: 'Invitations' },
                     },
                   },
                 ],
               },
               {
-                label: { en: 'Teams', 'zh-CN': '团队', 'ja-JP': 'チーム', 'es-ES': 'Equipos', 'zh-Hant': '團隊', ar: 'الفرق' },
+                label: { en: 'Teams', 'zh-CN': '团队', 'ja-JP': 'チーム', 'es-ES': 'Equipos', 'zh-Hant': '團隊', ar: 'الفرق', fr: 'Équipes' },
                 icon: 'users-round',
                 children: [
                   {
@@ -128,7 +128,7 @@ export const SysOrganizationDetailPage: Page = {
                       sort: [{ field: 'name', order: 'asc' }],
                       limit: 25,
                       showViewAll: true,
-                      title: { en: 'Teams', 'zh-CN': '团队', 'ja-JP': 'チーム', 'es-ES': 'Equipos', 'zh-Hant': '團隊', ar: 'الفرق' },
+                      title: { en: 'Teams', 'zh-CN': '团队', 'ja-JP': 'チーム', 'es-ES': 'Equipos', 'zh-Hant': '團隊', ar: 'الفرق', fr: 'Équipes' },
                     },
                   },
                 ],

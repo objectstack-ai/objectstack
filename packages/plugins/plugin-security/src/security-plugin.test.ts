@@ -1139,6 +1139,37 @@ describe('SecurityPlugin', () => {
       expect(harness.findOne).toHaveBeenCalledTimes(0);
     });
 
+    it("[#30237] DENIES the engine's object-level `restore` dispatch fail-closed, whatever the caller holds, until the verb is mapped", async () => {
+      // `ObjectQL.restore(entryId)` dispatches `restore` on the business object
+      // with no AST and no id (`recycle-bin/restore.ts`). Until the recycle-bin
+      // grants are read (`allowRestoreOwnDeleted` / `manageRecycleBin`,
+      // ADR-0148 D5), the DESTRUCTIVE_OPERATIONS backstop refuses it for every
+      // caller that is not the system: holding every CRUD bit, the
+      // super-user bypass and both new keys grants nothing yet, and no row is
+      // read.
+      const everythingSet: PermissionSet = {
+        name: 'everything', label: 'Everything',
+        objects: {
+          '*': {
+            allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true,
+            viewAllRecords: true, modifyAllRecords: true,
+            allowRestoreOwnDeleted: true, manageRecycleBin: true,
+          },
+        },
+      } as any;
+      const plugin = new SecurityPlugin({ fallbackPermissionSet: 'everything' });
+      const harness = makeMiddlewareCtx({
+        permissionSets: [everythingSet],
+        objectFields: ownerFields,
+        findOneImpl: () => ({ id: 'r1', created_by: 'u1', name: 'x' }),
+      });
+      await plugin.init(harness.ctx);
+      await plugin.start(harness.ctx);
+      const opCtx: any = { object: 'task', operation: 'restore', options: { context: memberCtx }, context: memberCtx };
+      await expect(harness.run(opCtx)).rejects.toMatchObject({ name: 'PermissionDeniedError' });
+      expect(harness.findOne).toHaveBeenCalledTimes(0);
+    });
+
     it('SKIPS the write-class re-read when no RLS policy applies (e.g. modifyAllRecords / admin) — the read question only', async () => {
       const adminSet: PermissionSet = {
         name: 'admin_full_access', label: 'Admin',

@@ -25,6 +25,7 @@
 - 规则 2:跨层功能点或 `ui/` 消费的 `Seam:` 卡恒由分诊立父单 + 逐层子单,spec/后端先行。
 - `main` 有 `ui/` 起,新 spec 键不再先行、取代上句次序:与首个读者同 PR,hotcrm 读者同合并批。
 - 下游带 `Blocked-by: <owner/repo>#<n>`;`Blocked-by` 未关闭/未合并的不派发,对 GitHub 现验。
+- cloud 探针 `git merge-base --is-ancestor <修复sha> <.objectstack-sha>`;不过 `Blocked-by:` 改指 pin-bump 卡。
 - 被链接或同父的两单永不同批;`ui/` 起的新键与首个读者除外,⛔ `planned` 行不单独进 main。
 - 规则 3:联动杂事立单,不靠记忆。
 - 已验收 PR 的产物流向另一仓,接受该 PR 的执行席立即在消费仓立后续单,带 `Blocked-by:`。
@@ -35,7 +36,6 @@
 - 维护者直派通道:当面指挥的 PM 会话直接路由,只对明示指挥的卡成立。
 - 直派的审计评论逐字引用授权指令。
 - 多车道仓分诊空缺时,会话型执行 PM 可代扫:只做分诊动作,不跨车道认领,贴上注明。
-- 代扫在分诊座位有主时立即停止。
 - 规则 5:一块板不设第二跟踪器:pm 标签就是状态机,看板(org Project)只是维护者的聚合视图。
 - 认领即跟到 MERGED:派发后发现跨车道面(含 spec)不移卡,复核按面定档,未达档借隔离复核。
 - 复核记录带 `Implemented-by:`/`Reviewed-by:`;改路由(`pm:retriage` 或席改标)只对未派发卡。

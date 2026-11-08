@@ -309,7 +309,8 @@ Define a multi-step approval flow for records.
     sharingModel: 'private',
     fields: {
       title: { label: 'Title', type: 'text', required: true },
-      amount: { label: 'Amount', type: 'currency' },
+      // Required: the approval flow below branches on it.
+      amount: { label: 'Amount', type: 'currency', required: true },
       status: { label: 'Status', type: 'select', options: [
         { label: 'Draft', value: 'draft', default: true },
         { label: 'Submitted', value: 'submitted' },

@@ -521,9 +521,9 @@ export const HookSchema = lazySchema(() => strictObject(
    * If provided and evaluates to FALSE, the hook is skipped entirely.
    * Useful for filtering by record data without writing handler code.
    * 
-   * @example "record.status == 'closed' && record.amount > 1000"
+   * @example "record.status == 'closed' && record.amount != null && record.amount > 1000"
    */
-  condition: EvaluatedExpressionInputSchema.optional().describe('Predicate (CEL); hook runs only when TRUE. e.g. P`record.status == "closed" && record.amount > 1000`'),
+  condition: EvaluatedExpressionInputSchema.optional().describe('Predicate (CEL); hook runs only when TRUE. e.g. P`record.status == "closed" && record.amount != null && record.amount > 1000`'),
 
   /**
    * Human-readable description

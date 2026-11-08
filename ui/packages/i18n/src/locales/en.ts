@@ -2209,12 +2209,6 @@ const en = {
     },
   },
   console: {
-    // What the organization record form says around `require_mfa`: before
-    // saving while two-factor is off, and after a save that turned it on.
-    organizationMfa: {
-      needsTwoFactor: 'Require Multi-Factor Auth needs two-factor authentication, which is off on this deployment, so saving with it ticked is refused. Turn two-factor on first: switch on Require multi-factor authentication in Setup → Authentication (it applies to every organization), or set OS_AUTH_TWO_FACTOR=true on the deployment.',
-      nowRequired: 'Every member of this organization who has not set up an authenticator app must now do so. Each one is blocked from data once the MFA grace period ends (7 days unless changed in Setup → Authentication), counted from the first time they use the app after this change. Members who already use an authenticator are not affected.',
-    },
     // The fixed crumb `AppHeader`'s `studio` variant draws on the Studio front
     // door (objectui#11863), as `organizations.title` is the `orgs` variant's.
     // A product name, which every pack writes as is.
@@ -2378,6 +2372,9 @@ const en = {
       // `validation.url`; these two name what a phone number and a colour take.
       invalidPhone: 'Enter a phone number using only digits, spaces and + ( ) - .',
       invalidColor: 'Enter a hex color, such as #1a2b3c',
+      // A `json` setting stored as text by the console before objectstack#31241:
+      // the page puts that text in the draft so one Save stores it as an object.
+      jsonStoredAsText: 'This value is stored as text, not as a JSON object. Save to store it as an object; the page has marked it as an unsaved change.',
       // The address the server judges beside Allowed IP ranges (objectstack#30313),
       // one whole sentence per state of `GET /api/v1/auth/admin/client-address`:
       // `trustProxy` off, on, and no address the server can establish.
@@ -4595,6 +4592,8 @@ const en = {
     noMessages: 'This conversation has no messages yet.',
     sharedObject: 'Shared {{object}}',
     redactedFields: 'Some fields are hidden by the owner: {{fields}}',
+    linkedRecord: 'Linked record',
+    linkedUser: 'Linked user',
   },
   publicForm: {
     submit: 'Submit',
@@ -4728,6 +4727,22 @@ const en = {
       managedBody: 'The AI assistants this person authorized. Each one acts with their permissions, and Revoke ends its access at once.',
       managedEmpty: 'This person has not authorized any AI assistant.',
       managedTruncated: 'Only the newest are shown; this person has authorized more.',
+    },
+  },
+  effectiveAccess: {
+    title: 'Effective permission sets',
+    body: 'Every permission set in force for this person in your current organization, and where each one comes from. Direct grants are also listed below, where they can be removed.',
+    refused: 'You are not allowed to view this person’s effective access.',
+    unserved: 'This server does not report effective access.',
+    loadFailed: 'Could not load effective access: {{message}}',
+    empty: 'No permission set is in force for this person in this organization.',
+    originsLabel: 'Comes from',
+    origin: {
+      direct: 'Direct grant',
+      position: 'Position: {{position}}',
+      default: 'Default binding',
+      derivedPlatformAdmin: 'Configured platform administrator',
+      derivedAiAccess: 'AI access turned on',
     },
   },
   excelImport: {

@@ -235,10 +235,11 @@ export const RecycleBinEntrySchema = z.object({
 export type RecycleBinEntry = z.input<typeof RecycleBinEntrySchema>;
 
 /**
- * The three reasons a restore refuses (ADR-0148 D2), each a code in the
+ * The four reasons a restore refuses (ADR-0148 D2), each a code in the
  * ADR-0112 envelope, registered under `@objectstack/objectql` in the
  * error-code ledger. A restore refuses with the reason and never forces a
- * write; each reason is permanent for that entry.
+ * write. The first three are permanent for that entry; the fourth clears once
+ * the parent's own entry is restored.
  *
  * - `RESTORE_UNIQUE_VALUE_TAKEN`: a unique value of a snapshotted row is held
  *   by a live row now.
@@ -246,35 +247,41 @@ export type RecycleBinEntry = z.input<typeof RecycleBinEntrySchema>;
  *   in the bin.
  * - `RESTORE_PACKAGE_UNINSTALLED`: an object of the entry no longer exists in
  *   the registry; its package was uninstalled.
+ * - `RESTORE_PARENT_IN_RECYCLE_BIN`: a row's master-detail parent is not live
+ *   but is the record of another bin entry; the refusal names that entry
+ *   (`parentEntryId`, beside `parentObject` and `parentId`), and restoring it
+ *   first lets this one through.
  *
- * All three answer HTTP 409: the entry is intact, and the live state conflicts
+ * All four answer HTTP 409: the entry is intact, and the live state conflicts
  * with writing it back.
  */
 export const RECYCLE_BIN_RESTORE_REFUSAL_CODES = Object.freeze({
   uniqueValueTaken: 'RESTORE_UNIQUE_VALUE_TAKEN',
   parentPurged: 'RESTORE_PARENT_PURGED',
   packageUninstalled: 'RESTORE_PACKAGE_UNINSTALLED',
+  parentInRecycleBin: 'RESTORE_PARENT_IN_RECYCLE_BIN',
 } as const);
 
-/** One of the three restore refusal codes. */
+/** One of the four restore refusal codes. */
 export type RecycleBinRestoreRefusalCode =
   (typeof RECYCLE_BIN_RESTORE_REFUSAL_CODES)[keyof typeof RECYCLE_BIN_RESTORE_REFUSAL_CODES];
 
 /** The HTTP status every restore refusal answers. */
 export const RECYCLE_BIN_RESTORE_REFUSAL_STATUS = 409 as const;
 
-// [#30235] named here; [#30237] the engine's restore emits it, and adds it to
-// `DataEventType` and `RealtimeEventType` in the change that emits it, spelled
-// through this constant.
+// [#30235] named here; [#30237] the engine's restore emits it, and it is a
+// member of `DataEventType` and `RealtimeEventType` since that change, spelled
+// there as this constant's value (`recycle-bin.zod.test.ts` pins both enums to
+// hold it).
 /**
  * The event a restore emits (ADR-0148 D2). A restore is never a create: a
  * flow triggered on record creation does not fire, flow enrollments are not
  * restored, audit records a restore as a restore, and rollups recompute from
  * the rows that are back.
  *
- * NAMED, NOT YET EMITTED. `DataEventType` and `RealtimeEventType` list only
- * the events the engine emits, so a subscription can never wait on a name
- * that does not fire; this name joins both in the change that emits it.
+ * EMITTED by the engine's restore (`ObjectQL.restore`), once per row it writes
+ * back, and listed in `DataEventType` and `RealtimeEventType`, which name only
+ * the events the engine emits.
  */
 export const RECORD_RESTORED_EVENT = 'data.record.restored' as const;
 

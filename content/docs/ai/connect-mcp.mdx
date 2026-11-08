@@ -22,7 +22,23 @@ disappears with it, along with both its Setup and Account navigation entries. Se
 
 Interactive clients use OAuth — each deployment is its own OAuth 2.1
 authorization server, so there are no admin-minted credentials to pass around.
-The first tool call opens a browser login and you connect **as yourself**:
+The first tool call opens a browser login and you connect **as yourself**.
+
+With the ObjectStack CLI, [`os mcp connect`](/docs/deployment/cli#os-mcp-connect)
+runs the `claude mcp add` line for you. With no flags it registers your
+ObjectOS Cloud environment, picked as `os deploy` picks it, under that
+environment's name; `--url` takes
+a self-hosted or local server's base URL and registers it as `objectstack`. Claude
+Code is the only client it runs (`--client claude-code`); `--print` prints the
+endpoint and the line and runs nothing, for any other client. It stores no token:
+the client runs the server's own sign-in.
+
+```bash
+os mcp connect                              # your ObjectOS Cloud environment
+os mcp connect --url http://localhost:3000  # a self-hosted or local server
+```
+
+Or type the line yourself:
 
 ```bash
 # local dev server

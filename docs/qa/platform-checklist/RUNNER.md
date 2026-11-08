@@ -772,20 +772,14 @@ contradicts it, and correct it here when it does.
   no test is not a pass, and here it is not a stale ref either — re-run it under the other
   setting before fixing the item.
 
-- **`scripts/qa/qa-rollup.mjs` has two blind spots a runner meets at close-out.** (1) Only a
+- **`scripts/qa/qa-rollup.mjs` has a blind spot a runner meets at close-out.** Only a
   BARE area name classifies as an area: `classifySelector('platform-core')` answers `area`,
   while `area:platform-core` — the selector spelling `checklist-select.mjs` takes — answers
   `other`, so a record titled with it rolls up outside its area (16 records of 2026-10-16,
   #23926 among them, do). Title an area run with the bare name, `QA run · platform-core (…)`,
-  as this sweep's records do. (2) Behind this container's egress proxy the roll-up dies on
-  its second page: it follows GitHub's `Link: rel="next"`, which names
-  `https://api.github.com/repositories/<id>/issues?…`, the proxy refuses numeric-id paths
-  **403** ("Numeric-ID repository paths … are not supported through this proxy"), and
-  `fetchRunRecords` throws on any non-OK page — measured at `bfc1539fe0` with 130 `qa-run`
-  records, so page 1 (100) is all it reads. The same page asked for by number on the named
-  path, `repos/objectstack-ai/objectstack/issues?labels=qa-run&state=all&per_page=100&page=2`,
-  answers 200 (#24579 §6). ⛔ That 403 says nothing about access to the repository: run the
-  roll-up where the proxy is not in the path, or read the pages by number.
+  as this sweep's records do. Its second page is read on the named `repos/OWNER/REPO` path
+  (`onPathOf`), never the numeric `repositories/<id>` path GitHub's next link names, which
+  this container's egress proxy refuses 403 — a 403 there says nothing about repository access.
 
 - **A map view shows its records as a list under a "Map failed to load" banner here, because
   the default base style is unreachable — an environment fact, not a product defect.** The

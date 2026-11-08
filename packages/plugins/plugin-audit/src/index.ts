@@ -41,6 +41,19 @@ export type {
   ExportFilterSummary,
   ExportFilterTerm,
 } from './data-export-audit.js';
+// [#31186] The `package_uninstall` row writer the uninstall verb reaches
+// through the `audit` slot.
+export {
+  buildPackageLifecycleAuditRow,
+  createPackageLifecycleAuditWriter,
+  PACKAGE_UNINSTALL_AUDIT_ACTION,
+} from './package-lifecycle-audit.js';
+export type {
+  PackageLifecycleAuditAction,
+  PackageLifecycleAuditEvent,
+  PackageLifecycleAuditWriter,
+  PackageLifecycleAuditWriterOptions,
+} from './package-lifecycle-audit.js';
 export {
   createReadAuditBatcher,
   extractDetailReadId,

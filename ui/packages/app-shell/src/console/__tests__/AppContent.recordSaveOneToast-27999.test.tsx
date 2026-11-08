@@ -31,6 +31,9 @@
  */
 
 import '@testing-library/jest-dom/vitest';
+// The console's preview and authoring code loads `@objectstack/lint` lazily;
+// warmed here so its first load is paid at import, not inside a test's clock.
+import '@objectstack/lint';
 import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest';
 import React from 'react';
 import { render, cleanup, waitFor } from '@testing-library/react';
@@ -97,8 +100,6 @@ const dataSourceStub = {
   onConnectionStateChange: () => () => {},
   getConnectionState: () => 'connected',
   getObjectSchema: async () => ({ fields: {} as Record<string, { label?: string }> }),
-  // The organization form reads the row's stored `require_mfa` (objectstack#30295): stored off.
-  findOne: vi.fn(async (_objectName: string, id: string) => ({ id, require_mfa: false })),
 };
 vi.mock('../../providers/AdapterProvider', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -115,13 +116,6 @@ const OBJECTS = [
   },
   // The parent the child-form task opens over.
   { name: 'showcase_project', label: 'Project', fields: { name: { type: 'text', label: 'Name' } } },
-  // The organization whose `require_mfa` a save turns on (objectstack#30565).
-  {
-    name: 'sys_organization',
-    label: 'Organization',
-    nameField: 'name',
-    fields: { name: { type: 'text', label: 'Name' }, require_mfa: { type: 'boolean', label: 'Require MFA' } },
-  },
 ];
 
 const APPS = [{ name: 'crm', label: 'CRM', isDefault: true, navigation: [] }];
@@ -334,59 +328,5 @@ describe('AppContent — the overlay save toast carries the hook notice (objects
 
     expect(toastSuccess.mock.calls).toEqual([['Task "Quarterly review" updated']]);
     expect(toastInfo.mock.calls).toEqual([[NOTICE]]);
-  });
-});
-
-// objectstack#30565 — an organization save that turns `require_mfa` on (stored
-// off): the server answers a `notice` naming the grace period in force, so the
-// save toast carries it alone, without the console's own
-// `console.organizationMfa.nowRequired` line, which names the default 7 days.
-// With no notice, or another hook's notice, the console line stays.
-describe('AppContent — turning on Require MFA toasts the server notice once (objectstack#30565)', () => {
-  const ORG_EDIT = '/apps/crm/sys_organization?form=org_1';
-  const ORG_SAVED = { id: 'org_1', name: 'Acme', require_mfa: true };
-  // The server's English notice for a 3-day grace period, verbatim (the same
-  // fixture as `organizationMfaNotices-30295.test.tsx`).
-  const SERVER_NOTICE =
-    'Multi-factor authentication is now required for this organization. Every member who has not set up an ' +
-    'authenticator app has 3 days to enroll one, counted from the first time they use the app while it is ' +
-    'required; after that they are blocked from data until they do. Members who already use an authenticator ' +
-    'app are not affected. The MFA grace period is set in Setup → Authentication.';
-  const OTHER_NOTICE = 'Sent to your manager for approval';
-  const CONSOLE_LINE = createI18n({ defaultLanguage: 'en', detectBrowserLanguage: false }).t(
-    'console.organizationMfa.nowRequired',
-  );
-  const orgUpdate = (notice: string | undefined): WriteWarningEvent => ({
-    operation: 'update',
-    resource: 'sys_organization',
-    id: 'org_1',
-    droppedFields: [],
-    notice,
-  });
-
-  it('the answer carries the server notice: one toast, the server notice alone', async () => {
-    await saveFrom(ORG_EDIT, orgUpdate(SERVER_NOTICE), ORG_SAVED);
-
-    expect(dataSourceStub.findOne).toHaveBeenCalledWith('sys_organization', 'org_1');
-    expect(toastSuccess.mock.calls).toEqual([['Organization "Acme" updated', { description: SERVER_NOTICE }]]);
-    expect(toastWarning).not.toHaveBeenCalled();
-    expect(toastInfo).not.toHaveBeenCalled();
-  });
-
-  it('CONTROL: no notice on the answer: the console line', async () => {
-    expect(CONSOLE_LINE).toContain('7 days');
-    await saveFrom(ORG_EDIT, orgUpdate(undefined), ORG_SAVED);
-
-    expect(toastSuccess.mock.calls).toEqual([['Organization "Acme" updated', { description: CONSOLE_LINE }]]);
-    expect(toastInfo).not.toHaveBeenCalled();
-  });
-
-  it("CONTROL: another hook's notice on the answer: both lines", async () => {
-    await saveFrom(ORG_EDIT, orgUpdate(OTHER_NOTICE), ORG_SAVED);
-
-    expect(toastSuccess.mock.calls).toEqual([
-      ['Organization "Acme" updated', { description: `${OTHER_NOTICE}\n${CONSOLE_LINE}` }],
-    ]);
-    expect(toastInfo).not.toHaveBeenCalled();
   });
 });

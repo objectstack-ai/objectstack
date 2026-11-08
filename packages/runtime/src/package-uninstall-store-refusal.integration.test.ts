@@ -108,8 +108,12 @@ let warnSpy: ReturnType<typeof vi.spyOn>;
 beforeEach(() => { warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {}); });
 afterEach(() => { warnSpy.mockRestore(); });
 
-/** One process over the database in `dir`. */
-async function boot(dir: string) {
+/**
+ * One process over the database in `dir`. [#31186] `opts.audit` composes an
+ * `audit` service slot, and `opts.protocolEnvironmentId` binds the protocol to
+ * an environment, as a per-environment kernel does.
+ */
+async function boot(dir: string, opts: { audit?: unknown; protocolEnvironmentId?: string } = {}) {
   const driver = new SqlDriver({
     client: 'better-sqlite3',
     connection: { filename: join(dir, 'data.sqlite') },
@@ -126,6 +130,7 @@ async function boot(dir: string) {
   engine.registry.setInitialDisabledPackageIds(loadDisabledPackageIds(ENV));
 
   const services = new Map<string, unknown>([['objectql', engine]]);
+  if (opts.audit !== undefined) services.set('audit', opts.audit);
   const ctx: any = {
     logger: quiet,
     getService: (name: string) => services.get(name),
@@ -135,7 +140,7 @@ async function boot(dir: string) {
   await plugin.init(ctx);
   await plugin.start(ctx);
 
-  const protocol = new ObjectStackProtocolImplementation(engine as any, () => services as any, undefined, 'package-author');
+  const protocol = new ObjectStackProtocolImplementation(engine as any, () => services as any, opts.protocolEnvironmentId, 'package-author');
   services.set('protocol', protocol);
   const get = (name: string) => services.get(name) ?? null;
   const dispatcher = new HttpDispatcher({ context: { getService: get }, getService: get, getServiceAsync: async (n: string) => get(n) } as any);
@@ -372,5 +377,70 @@ describe('[#31023] DELETE /packages/:id credits its metadata deletes to the sign
 
     expect(credited).toEqual([null]);
     expect(recordedBy).toEqual([null]);
+  });
+});
+
+/**
+ * [#31186] Every uninstall leaves ONE `package_uninstall` event on the `audit`
+ * slot, about the package itself — the `sys_packages` delete is raw SQL, so no
+ * hook ever saw it. The event is handed over by the uninstall verb, so the
+ * HTTP door and an in-process caller of the verb produce the same one; a
+ * refused uninstall produces none. plugin-audit turns the event into the row
+ * (`package-lifecycle-audit.test.ts` there); this pins the composed doors.
+ */
+describe('[#31186] an uninstall hands the audit slot one event about the package itself', () => {
+  function recordingAudit() {
+    const events: any[] = [];
+    return { events, slot: { recordPackageLifecycleEvent: async (event: unknown) => { events.push(event); } } };
+  }
+
+  it('DELETE /packages/:id: one event naming the signed-in user, the package, its version and the environment', async () => {
+    const audit = recordingAudit();
+    const p = await boot(newDir(), { audit: audit.slot, protocolEnvironmentId: 'env_31186' });
+    await seed(p);
+
+    const answer = await p.call('DELETE', `/${PKG}`);
+
+    expect(answer.status, JSON.stringify(answer.body)).toBe(200);
+    expect(audit.events).toEqual([{
+      action: 'package_uninstall',
+      packageId: PKG,
+      version: '1.0.0',
+      environmentId: 'env_31186',
+      actor: 'u_admin',
+      itemsRemoved: 1,
+      itemsFailed: 0,
+    }]);
+  });
+
+  it('an in-process caller of the verb: the same one event, naming the actor it passed', async () => {
+    const audit = recordingAudit();
+    const p = await boot(newDir(), { audit: audit.slot, protocolEnvironmentId: 'env_31186' });
+    await seed(p);
+
+    const res = await p.protocol.deletePackage({ packageId: PKG, actor: 'u_cloud_tool', keepData: true });
+
+    expect(res).toMatchObject({ success: true });
+    expect(audit.events).toEqual([expect.objectContaining({
+      action: 'package_uninstall', packageId: PKG, version: '1.0.0', actor: 'u_cloud_tool', keepData: true,
+    })]);
+  });
+
+  it('CONTROL: a refused uninstall (the store refuses the sys_packages delete) hands the slot nothing', async () => {
+    const audit = recordingAudit();
+    const p = await boot(newDir(), { audit: audit.slot });
+    await seed(p);
+    await refuseStoreDelete(p);
+
+    expect((await p.call('DELETE', `/${PKG}`)).status).toBe(500);
+    expect(audit.events).toEqual([]);
+  });
+
+  it('CONTROL: a package that is not installed answers 404 and hands the slot nothing', async () => {
+    const audit = recordingAudit();
+    const p = await boot(newDir(), { audit: audit.slot });
+
+    expect((await p.call('DELETE', '/com.acme.absent')).status).toBe(404);
+    expect(audit.events).toEqual([]);
   });
 });

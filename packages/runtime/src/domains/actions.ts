@@ -61,11 +61,11 @@
 import {
     shouldDenyAnonymous, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE,
 } from '@objectstack/core';
-// [#17273] The ONE reader of the native-error name list (#17681) and the ONE
-// generic replacement text — the same two `@objectstack/rest` composes into
-// `isScriptFaultMessage` / `UNCLASSIFIED_FAULT`, so this door's crash reading
-// cannot drift from the `/data` door's. ⛔ Never re-inline either.
-import { isNativeErrorName, INTERNAL_ERROR_MESSAGE, sandboxBusinessMessage, driverNotNullRefusalAnswer, earnedAnswerOf, staleSummaryAnswerLines, type SummaryRecomputeRefusal } from '@objectstack/types';
+// [#31271] The door's ONE reader of a thrown value (`actionsDoorAnswerOf`),
+// which composes the native-error name list (#17681, #17273), the generic
+// replacement text and the `/data` door's shared reads, so this door's crash
+// reading cannot drift from the `/data` door's. ⛔ Never re-inline its arms.
+import { actionsDoorAnswerOf, earnedAnswerOf, staleSummaryAnswerLines, type SummaryRecomputeRefusal } from '@objectstack/types';
 // [ADR-0029 D9.6] The ONE "does a code package ship this?" reading, which the
 // activation write below asks to name the ledger row's package.
 import { isCodeArtifactBody, isTenantAuthored } from '@objectstack/metadata-core';
@@ -1119,222 +1119,31 @@ async function dispatchAdmittedRestAction(
             for (const line of staleSummaryAnswerLines(err as SummaryRecomputeRefusal, objectName)) log(line);
             return { handled: true, response: deps.success(earned) };
         }
-        const full = err?.message ?? String(err);
-        // The sandbox wraps a user throw as `<kind> '<name>' threw: <msg>` for
-        // server logs; surface only the business `<msg>` to the client so an
-        // action's error toast reads as plain text instead of leaking the debug
-        // prefix. Keep the full wrapper in the log for debugging.
-        //
-        // [#22588] Read through `sandboxBusinessMessage` — the ONE read `/data`,
-        // the bulk doors and `/analytics/dataset/query` make — rather than a
-        // local `innerMessage` read. The local copy differed in one case only:
-        // a CRASH, whose native-error text it rewrote onto `err.message` before
-        // the crash terminal below answered the sanitised 500 anyway; the shared
-        // read declines a crash, so the wire answer is unchanged and the log
-        // keeps the full wrapper. `inner` stays the raw field: the crash and
-        // unexpected-fault predicates below ask about its presence, not its
-        // classification.
-        const inner: unknown = err?.innerMessage;
-        const clientMsg = sandboxBusinessMessage(err) ?? full;
-        if (clientMsg !== full) {
-            console.error(`[action ${objectName}/${actionName}] ${full}`);
-            // Every exit below reads `.message`; hand it the client-safe text so
-            // the debug wrapper stays in the log and off the wire.
-            try { err.message = clientMsg; } catch { /* frozen error */ }
-        }
-        const code: unknown = err?.code;
-        const fields: unknown = err?.fields;
-
-        // [#17273] A sandboxed body that CRASHED is a fault before it is
-        // anything else — asked FIRST, above every branch that reads a
-        // producer declaration as intent.
-        //
-        // Two of those branches used to answer a crash, and neither was
-        // reading a statement the author made about a failure they handled:
-        //
-        //   - the declared-status branch below serves `err.status`, which the
-        //     sandbox lifts off whatever error crossed out of the VM (#7867,
-        //     `SandboxError.status`), so a crash could be served at a 4xx;
-        //   - `unexpectedFault` further down requires `!inner`, i.e. it reads
-        //     the PRESENCE of `innerMessage` as "user code threw this
-        //     deliberately". For a crash the runner sets `innerMessage` to the
-        //     native error text (`sandbox/quickjs-runner.ts`), so the mark that
-        //     means "deliberate" is set by the very case that is not — and the
-        //     crash fell to the 400 terminal at the bottom carrying
-        //     `TypeError: …` as its client-facing message, `err.message`
-        //     having been rewritten to the inner text above.
-        //
-        // That answer contradicted this route's own published catalog row
-        // (`content/docs/api/error-catalog.mdx`, Action Errors: a `TypeError` /
-        // `ReferenceError` / a driver's own class "is a crash (500)") and the
-        // header of this very file (`did it reject or crash? … crash → 500`).
-        //
-        // The rule is commit cf6e0a193's, ruled on the `/data` door and quoted there
-        // rather than restated: *"A declared code is the author's statement
-        // about the failure mode they **handled**. A crash … is not that mode,
-        // so it is classified as a fault"*. This is the same terminal at the
-        // door `mapDataError` does not decide, which is what #17273 is.
-        //
-        // The wire answer is the sanitised one, not `errorFromThrown`: that
-        // helper relays `err.message`, and `looksLikeInternalErrorLeak` reads
-        // FALSE for `TypeError: x is not a function` (it recognises driver
-        // dumps, not stack-shaped prose), so routing a crash through it would
-        // have moved the status and left the leak. The full wrapper still
-        // reaches the operator on the line below — the same "the client does
-        // not read it, the log keeps it" split #5437 draws in `rest`.
-        //
-        // ⛔ The predicate is a READ of the field the sandbox populated plus
-        // the shared name list, never a pattern-strip of the wrapper off
-        // `.message`.
-        const sandboxCrash = typeof inner === 'string' && inner.length > 0 && isNativeErrorName(inner.trim());
-        if (sandboxCrash) {
-            console.error(`[action ${objectName}/${actionName}] sandboxed body crashed: ${full}`);
-            return { handled: true, response: deps.error(INTERNAL_ERROR_MESSAGE, 500) };
-        }
-
-        // An error that NAMES its own HTTP status is asking to be served with
-        // it — a plugin's `FORBIDDEN` (status 403), a domain error from the
-        // protocol layer. Honour that first: burying an explicit 403 in a 200
-        // payload discards the one thing the thrower was unambiguous about.
-        // Safe against #3937's cases by construction — a record
-        // `ValidationError` deliberately carries no `.status` (see
-        // `validation-failure.ts`), so it never reaches this branch.
-        if (typeof err?.status === 'number' || typeof err?.statusCode === 'number') {
-            return { handled: true, response: deps.errorFromThrown(err, 500) };
-        }
-
-        // [#26031] A driver's NOT NULL refusal that the engine let out (a
-        // column no field declares, i.e. drift) is the caller's write refused,
-        // and `RestServer` answers it `400 VALIDATION_FAILED` with the column's
-        // `required` entry and the drift hint. This door relayed it through the
-        // terminal below instead: the driver's text as the message (the
-        // physical table and column), the status-derived `VALIDATION_ERROR`,
-        // and the driver's code as `declaredCode`. The body is now the
-        // classification's own NOT NULL arm (`driverNotNullRefusalAnswer`),
-        // the one the dispatcher's `/data` exit answers too, in this
-        // transport's envelope; nothing here reads the driver's text. Asked
-        // before the fault predicate so a driver class with no string `code`
-        // is still the refusal it is, never the sanitised 500.
-        const notNullRefusal = driverNotNullRefusalAnswer(err, objectName);
-        if (notNullRefusal) {
-            const { error: refusal, ...details } = notNullRefusal.body;
-            return { handled: true, response: deps.error(String(refusal), notNullRefusal.status, details) };
-        }
-
-        // [#3913 follow-up] …and it does not cover an UNEXPECTED FAULT either.
-        // "A failed action is a normal outcome" is a statement about the action
-        // REJECTING — a business rule saying no. A `TypeError` in a handler, a
-        // driver that blew up: those are not outcomes the action chose to
-        // report, they are the server failing to produce one. Reporting them as
-        // 200 makes them invisible to every layer that exists to catch server
-        // faults — gateway error rates, retry/circuit-breaker policy, APM
-        // auto-capture, alerting — so "customer action bodies are throwing" has
-        // no signal short of body-parsing at every hop.
-        //
-        // Told apart by the error's NAME, the same signal `@objectstack/rest`
-        // uses on this exact distinction. [#7543] That citation used to quote
-        // rest's comment for the EVIDENCE while the two exits drew opposite
-        // conclusions from it: rest read a non-default name as "a genuine script
-        // bug" and then shipped it to the client as a 400 anyway. It no longer
-        // does — `mapDataError`'s `isScriptFaultMessage` now answers the
-        // sanitised `500 INTERNAL_ERROR` this branch has answered since #3913,
-        // so the two exits agree on the reading as well as the signal:
-        //
-        //   name === 'Error'        a deliberate `throw new Error(msg)` — the
-        //                           shape a registered handler uses to reject.
-        //   innerMessage present    the sandbox's mark for "user code threw
-        //                           this deliberately" (SandboxError). [#17273]
-        //                           True only of a REFUSAL now: a crash sets
-        //                           the same mark and is taken by the terminal
-        //                           above before this predicate is reached.
-        //   code / fields present   a structured domain failure — the
-        //                           ValidationError shape #3937 carries out.
-        //   a ValidationError       matched by `validationFailureDetails`, the
-        //                           same predicate the dispatcher's error exits
-        //                           use, so one whose `fields` were stripped in
-        //                           transit is still recognised by NAME alone.
-        //   name absent             an unrecognisable throw; treated as a
-        //                           rejection (the caller-fault reading), not
-        //                           a server fault.
-        //   any other name          TypeError / ReferenceError / SqliteError /
-        //                           a driver's own class ⇒ a fault.
-        //
-        // `errorFromThrown` is the same exit every other domain catch has used
-        // since #3925, and an error carrying its own `.status` still wins there
-        // so a hand-thrown 4xx keeps it.
-        const name: unknown = err?.name;
-        const unexpectedFault =
-            typeof name === 'string'
-            && name !== 'Error'
-            && !(typeof inner === 'string' && inner)
-            && !(typeof code === 'string' && code)
-            && !Array.isArray(fields)
-            && !validationFailureDetails(err);
-        if (unexpectedFault) {
-            console.error(`[action ${objectName}/${actionName}] unexpected fault (${name}): ${full}`);
-            // [#18540] This branch is this door's UNCLASSIFIED-FAULT TERMINAL, so
-            // it answers the terminal's envelope — `INTERNAL_ERROR_MESSAGE`, the
-            // same sentence `/data` answers — instead of relaying `err.message`.
-            //
-            // The status was already right; what leaked was the SENTENCE. A
-            // non-sandboxed crash — a plain `TypeError` from an in-process
-            // registered handler — reached the wire as `500 INTERNAL_ERROR`
-            // carrying `Cannot read properties of undefined (reading 'id')`
-            // verbatim, while the IDENTICAL throw through the `/data` door
-            // answered `Internal server error`.
-            //
-            // Why neither existing guard caught it, both measured on this tree:
-            //
-            //   - #17273's crash terminal above is keyed on the SANDBOX
-            //     (`isNativeErrorName` over the `innerMessage` the QuickJS runner
-            //     fills). This face never crosses a VM boundary, so nothing sets
-            //     `innerMessage` and that terminal never fires. A predicate that
-            //     classifies by HOW a crash arrived is structurally blind to
-            //     crashes that did not arrive that way — while looking exhaustive.
-            //   - `errorFromThrown` relays `err.message` through the dispatcher's
-            //     5xx withhold, which is gated on `looksLikeInternalErrorLeak` —
-            //     a DRIVER-DUMP heuristic that reads FALSE for stack-shaped prose
-            //     (#17273's changeset records the same reading). So that relay is
-            //     DEFAULT-ALLOW: prose ships unless the heuristic recognises it.
-            //
-            // `/data` is default-DENY by construction: `classifyDataError` ends
-            // in an unconditional `UNCLASSIFIED_FAULT()`, and its
-            // `looksLikeInternalErrorLeak` limb only chooses `DATABASE_ERROR`
-            // over `INTERNAL_ERROR` — that limb is not what sanitises. Aligning
-            // therefore means answering the terminal here too, ⛔ never teaching
-            // the heuristic a new phrasing: re-pointing `looksLikeInternalErrorLeak`
-            // at stack-shaped prose would change what every OTHER boundary
-            // withholds, and it guards a different question.
-            //
-            // Nothing about the ANSWER moves but the sentence. Reaching here
-            // already proves `.status`/`.statusCode` are absent (the branch above
-            // serves them) and that this is not a `ValidationError`, so
-            // `resolveThrownHttpError` had no declared status either: its `status`
-            // was the 500 fallback and its `code` was
-            // `standardErrorCodeForHttpStatus(500)` — `INTERNAL_ERROR`, the code
-            // this exit emits. Same status, same code, same envelope shape.
-            //
-            // ⛔ Deliberately the SAME `deps.error` seam #17273's terminal uses,
-            // never a widened one: a fault's `userMessage` and its non-string
-            // `details.code` (a driver errno — the backend-naming disclosure
-            // `demotedDeclaredCode` already withholds on an undeclared 5xx) do not
-            // ride this exit, exactly as they do not ride `/data`'s.
-            //
-            // The words are not lost: the `console.error` above keeps the full
-            // text — the same "the client does not read it, the log keeps it"
-            // split #5437 draws in `rest`.
-            return { handled: true, response: deps.error(INTERNAL_ERROR_MESSAGE, 500) };
-        }
-
-        // [#3962] A deliberate REJECTION is a 400. The 200-with-inner-envelope
-        // wire this used to emit was never a designed contract — no ADR or doc
-        // specified it, it was the catch block reusing `deps.success()`, and
-        // /actions was the only route of 12 that double-wrapped. The platform
-        // decision in #3962 classifies it as a bug: failures speak HTTP, same
-        // as /data has always done. `errorFromThrown` carries the structured
-        // payload #3937 fought for — `VALIDATION_FAILED` + `fields[]` land in
-        // `details`, the exact shape @objectstack/client normalizes to
-        // `err.code` / `err.fields` (#3927).
-        return { handled: true, response: deps.errorFromThrown(err, 400) };
+        // [#31271] Every other throw is answered by this door's ONE reader,
+        // `actionsDoorAnswerOf` (`@objectstack/types`), beside the `/data`
+        // door's `mapDataError`: the arms this catch used to spell inline
+        // (the sandbox wrapper kept off the wire, a sandboxed crash, a
+        // declared status, a driver's NOT NULL refusal, an unexpected fault,
+        // the 400 rejection), moved there in the same order with their
+        // reasons, so the MCP `run_action` / `resume_run` tools answer a throw
+        // as this door does instead of re-deriving it. The body is the one
+        // this catch built through the dispatcher's `error` / `errorFromThrown`
+        // exits, byte for byte; the operator lines are the ones it printed.
+        const answer = actionsDoorAnswerOf(err, objectName);
+        for (const line of answer.operatorLines) console.error(`[action ${objectName}/${actionName}] ${line}`);
+        const extra = {
+            ...(answer.declaredCode !== undefined ? { declaredCode: answer.declaredCode } : {}),
+            ...(answer.userMessage !== undefined ? { userMessage: answer.userMessage } : {}),
+        };
+        return {
+            handled: true,
+            response: apiErrorResponse({
+                message: answer.message,
+                httpStatus: answer.status,
+                code: answer.code,
+                details: answer.details,
+                ...(Object.keys(extra).length > 0 ? { extra } : {}),
+            }),
+        };
     }
 }

@@ -85,6 +85,12 @@ export function renderSummary(s: ExportSummary): string[] {
   return lines;
 }
 
+/** The real screenshot step: boot the project, sign in as the dev admin, drive Chromium (`--chromium PATH`, or Playwright's own). */
+export function liveScreenshots(chromium?: string): CaptureScreenshots {
+  const browser = playwrightBrowser(chromium ? { executablePath: chromium } : {});
+  return (input) => captureScreenshots(input, { boot: (dir) => bootDev(dir), harness: (url) => new HttpApp({ baseUrl: url, adminEmail: ADMIN.email, adminPassword: ADMIN.password }), browser, admin: ADMIN });
+}
+
 /** Test seam: replace the screenshot step (the CLI's is the real browser). */
 export interface ExportCliDeps {
   screenshots?: CaptureScreenshots;
@@ -102,11 +108,7 @@ export async function main(argv: readonly string[], deps: ExportCliDeps = {}): P
   });
   for (const r of refusals) console.error(formatRefusal(r));
   const recordings = args.recordings.map((f) => JSON.parse(readFileSync(resolve(f), 'utf8')) as Recording);
-  const browser = playwrightBrowser(args.chromium ? { executablePath: args.chromium } : {});
-  const screenshots: CaptureScreenshots | false = !args.screenshots
-    ? false
-    : (deps.screenshots ??
-      ((input) => captureScreenshots(input, { boot: (dir) => bootDev(dir), harness: (url) => new HttpApp({ baseUrl: url, adminEmail: ADMIN.email, adminPassword: ADMIN.password }), browser, admin: ADMIN })));
+  const screenshots: CaptureScreenshots | false = !args.screenshots ? false : (deps.screenshots ?? liveScreenshots(args.chromium));
   const summary = await exportGallery({
     runsDir,
     outDir: resolve(args.out!),

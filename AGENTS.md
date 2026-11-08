@@ -400,7 +400,7 @@ a PM dispatch sets the assignee (step 1) and posts the `Claim:` naming the dev's
 both on the dev's behalf. A dispatched executor inherits both records: it verifies that the
 newest `Claim:` names its branch (on a mismatch it stops and reports), posts no second claim —
 the dispatch's `Claim:` is its identity and its own record is the report comment — and it ⛔ never
-writes the card's assignee (nor the PR's: `pr_create` carries none; the seat sets it at hand-over,
+writes the card's assignee (the PR's is the claim's `Account:`, carried by `pr_create`; hand-over is the seat's,
 `.claude/agents/os-dev.md` rule 2) and ⛔ never yields a card it was dispatched to. Before writing code, re-read
 the comments — the comments decide, not the field: a `Claim:` from another session or branch
 (other than the dispatch that sent you) means taken whatever the field says — pick another or

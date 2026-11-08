@@ -12,7 +12,8 @@
  * `onMetadataMutation`, `emitMetadataMutation`, `attachMetadataMutationPubSub`,
  * `detachMetadataMutationPubSub`, `applyRemoteMetadataMutation`,
  * `onMetaItemPublished`, `getOverlayRepo` moved out of `protocol.ts` whole by
- * `scripts/codemod-split-protocol.mjs`.
+ * `scripts/codemod-split-protocol.mjs`; `registerUninstallGuard` (#31232) was
+ * written here in the same shape, beside `registerUninstallCleanup`.
  *
  * A MOVE, not a redesign. `ProtocolClassHeadFacet` is a stateless facet over the host
  * (ruling 6624345766): each static method below is the body of the class
@@ -52,6 +53,7 @@ import type {
     UninstallCleanup,
     UninstallCleanupOutcome,
     UninstallDeclared,
+    UninstallGuard,
 } from './protocol-package-lifecycle-types.js';
 import { METADATA_MUTATION_CLUSTER_CHANNEL } from './protocol-mutation-events.js';
 import type {
@@ -102,6 +104,11 @@ export class ProtocolClassHeadFacet {
     /** The body of `ObjectStackProtocolImplementation#registerUninstallCleanup`; the method's docblock there is its contract. */
     static registerUninstallCleanup(host: Pick<ProtocolHost, 'uninstallCleanups'>, name: string, cleanup: UninstallCleanup): void {
         host.uninstallCleanups.set(name, cleanup);
+    }
+
+    /** The body of `ObjectStackProtocolImplementation#registerUninstallGuard`; the method's docblock there is its contract. */
+    static registerUninstallGuard(host: Pick<ProtocolHost, 'uninstallGuards'>, name: string, guard: UninstallGuard): void {
+        host.uninstallGuards.set(name, guard);
     }
 
     /** The body of `ObjectStackProtocolImplementation#runUninstallCleanups`; the method's docblock there is its contract. */

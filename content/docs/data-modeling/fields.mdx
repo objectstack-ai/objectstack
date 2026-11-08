@@ -478,7 +478,7 @@ Database indexes are declared at the object level in the object's `indexes[]` ar
 
 | Property | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `renamedFrom` | `string[]` | — | Earlier keys of this field (snake_case), e.g. `renamedFrom: ['company']` on a field now keyed `account_name`: on a package upgrade from a version that has the old key and not this one, the platform carries the old column's data to this field instead of adding an empty column. Each entry once; never the field's own key, a key another field of the object still declares, or an old key another field also claims — each refused at parse. Read only at package upgrade, and declared ahead of the upgrade step that carries the data: until that step ships, no upgrade carries a column on this declaration |
+| `renamedFrom` | `string[]` | — | Earlier keys of this field (snake_case), e.g. `renamedFrom: ['company']` on a field now keyed `account_name`: on a package upgrade from a version that has the old key and not this one, the platform carries the old column's data to this field instead of adding an empty column. Each entry once; never the field's own key, a key another field of the object still declares, or an old key another field also claims — each refused at parse. Read only at package upgrade, and declared ahead of the upgrade step that carries the data: until that step ships, a managed upgrade that declares a rename is refused `501 NOT_IMPLEMENTED`, naming it, so it never installs as a silent empty column |
 
 ### Security
 

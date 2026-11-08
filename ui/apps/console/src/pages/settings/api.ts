@@ -214,9 +214,10 @@ export async function runSettingsAction(
 
 /**
  * The caller's address as the server judges it (objectstack#30313), read from
- * `GET /api/v1/auth/admin/client-address` (objectstack#30398).
+ * one of two routes that answer it alike ({@link JudgedClientAddressRoute}).
  *
- * `clientAddress` is the address the `auth.allowed_ip_ranges` save check and
+ * `clientAddress` is the address the `allowed_ip_ranges` save checks (the
+ * deployment's `auth` list and an organization's `access_policy` list) and
  * the sign-in gate judge this connection by (the save check's own call), or
  * `null` when the server cannot establish one. `trustProxy` says whether
  * forwarded headers counted (`server.trustProxy`). ⛔ The console never works
@@ -231,13 +232,22 @@ export interface JudgedClientAddress {
 const AUTH_BASE = `${SERVER_URL}/api/v1/auth`;
 
 /**
- * Read {@link JudgedClientAddress}. The route is platform-admin gated, so a
- * caller who is not one is refused (`401`/`403`) and this throws like any other
+ * The route under `/api/v1/auth` a page reads the judged address from, each
+ * gated to whoever may save the list it informs: `/admin/client-address` to a
+ * platform administrator (the `auth` namespace), `/client-address` to a caller
+ * holding `setup.write` in their current organization (the `access_policy`
+ * namespace).
+ */
+export type JudgedClientAddressRoute = '/admin/client-address' | '/client-address';
+
+/**
+ * Read {@link JudgedClientAddress} from `route`. A caller the route's gate
+ * refuses (`401`/`403`), or a server without the route, throws like any other
  * failed read; so does a body that is not the declared shape. The caller
  * decides what a failure shows.
  */
-export async function getJudgedClientAddress(): Promise<JudgedClientAddress> {
-  const res = await fetch(`${AUTH_BASE}/admin/client-address`, {
+export async function getJudgedClientAddress(route: JudgedClientAddressRoute): Promise<JudgedClientAddress> {
+  const res = await fetch(`${AUTH_BASE}${route}`, {
     credentials: 'include',
     headers: { Accept: 'application/json' },
   });
@@ -250,7 +260,7 @@ export async function getJudgedClientAddress(): Promise<JudgedClientAddress> {
     !(address === null || (typeof address === 'string' && address.length > 0))
   ) {
     throw new Error(
-      'Malformed response from GET /api/v1/auth/admin/client-address: expected an object carrying `clientAddress` (a string or null) and `trustProxy` (a boolean).',
+      `Malformed response from GET /api/v1/auth${route}: expected an object carrying \`clientAddress\` (a string or null) and \`trustProxy\` (a boolean).`,
     );
   }
   return { clientAddress: address, trustProxy: body.trustProxy };
