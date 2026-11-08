@@ -407,6 +407,7 @@ export const KNOWN_SCHEMA_TYPES: readonly string[] = [
   'resizable',
   'scroll-area',
   'section',
+  'security:effective-access',
   'select',
   'separator',
   'sheet',

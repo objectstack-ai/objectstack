@@ -3918,6 +3918,22 @@ const de = {
       managedTruncated: 'Nur die neuesten werden angezeigt; diese Person hat weitere autorisiert.',
     },
   },
+  effectiveAccess: {
+    title: 'Wirksame Berechtigungssätze',
+    body: 'Jeder Berechtigungssatz, der für diese Person in deiner aktuellen Organisation gilt, und woher er stammt. Direkte Zuweisungen stehen auch unten, wo sie entfernt werden können.',
+    refused: 'Du darfst den wirksamen Zugriff dieser Person nicht ansehen.',
+    unserved: 'Dieser Server meldet keinen wirksamen Zugriff.',
+    loadFailed: 'Wirksamer Zugriff konnte nicht geladen werden: {{message}}',
+    empty: 'Für diese Person gilt in dieser Organisation kein Berechtigungssatz.',
+    originsLabel: 'Stammt aus',
+    origin: {
+      direct: 'Direkte Zuweisung',
+      position: 'Position: {{position}}',
+      default: 'Standardbindung',
+      derivedPlatformAdmin: 'Konfigurierter Plattformadministrator',
+      derivedAiAccess: 'KI-Zugriff aktiviert',
+    },
+  },
   excelImport: {
     noImportableFields: "Dieses Objekt hat keine importierbaren Felder.",
     schemaReadFailed: "Das Objektschema konnte nicht gelesen werden.",

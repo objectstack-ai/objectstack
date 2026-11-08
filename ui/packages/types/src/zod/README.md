@@ -328,6 +328,7 @@ The last six arrived with `@objectstack/spec` 17.5.0, whose rows for them were m
 
 ### Cloud Widgets (1)
 `@object-ui/app-shell`'s `cloud:` SDUI widgets. `@objectstack/spec` has no `ComponentPropsMap` row for them, so each arm is declared here from the keys its widget reads.
+- `SecurityEffectiveAccessSchema` — `security:effective-access`, one person's effective permission sets, each with every origin it reaches them through, for a `sys_user` record page: the widget reads no prop, so `properties` may only be `{}`. The person comes from the record the page is bound to.
 - `McpAuthorizedAssistantsSchema` — `mcp:authorized-assistants`, an administrator's view of the AI assistants one person authorized, for a `sys_user` record page: the widget reads no prop, so `properties` may only be `{}`. The person comes from the record the page is bound to.
 - `CloudWorkspaceTimezoneNoticeSchema` — `cloud:workspace-timezone-notice`, the welcome page's line naming the workspace's seeded timezone: the widget reads no prop, so `properties` may only be `{}`. The zone comes from the organization's entitlements summary.
 
