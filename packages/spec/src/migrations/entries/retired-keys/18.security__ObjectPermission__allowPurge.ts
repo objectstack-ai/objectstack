@@ -2,19 +2,19 @@
 
 // #12497 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-26, decision-
 // inbox batch 5, accepting #1883's recommendation B). `allowPurge` claimed to
-// gate a `purge` (hard-delete / GDPR erase) ObjectQL operation that has never
-// existed: no destructive lifecycle verb is in the engine's dispatch
-// vocabulary (pinned by objectql's
-// `engine-middleware-operation-vocabulary.test.ts`, #8106). This was ADR-0049's
+// gate a `purge` (hard-delete / GDPR erase) ObjectQL operation that did not
+// exist then: no destructive lifecycle verb was in the engine's dispatch
+// vocabulary (#8106). This was ADR-0049's
 // worst false-compliance shape — an admin who set `allowPurge: false` believed
 // a lock on permanent deletion existed, when the operation itself did not.
 // The permission evaluator's pre-mapping row (`OPERATION_TO_PERMISSION`
 // purge→allowPurge) retired in the same batch: with the bit unwritable, a
 // mapping onto it was a claim about a surface that rejects authoring. A
-// dispatched `purge` stays denied fail-closed via the evaluator's
-// `DESTRUCTIVE_OPERATIONS` backstop — there is no ungated window in either
-// direction. THE KEY RETURNS with the M2 lifecycle initiative (feature + RBAC
-// in one batch, maintainer 2026-08-03); anchor card #1883 stays open.
+// dispatched `purge` then stayed denied fail-closed via the evaluator's
+// `DESTRUCTIVE_OPERATIONS` backstop — there was no ungated window in either
+// direction. THE KEY DOES NOT RETURN: the `purge` operation now exists with
+// the recycle bin (ADR-0148), and its grant is the NEW key `manageRecycleBin`
+// (ADR-0148 D5).
 //
 // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
 // removal ships on the 17.x line (launch-window convention: accept-set
