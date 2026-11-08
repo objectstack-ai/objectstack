@@ -467,7 +467,7 @@ describe('[#10009] the two doors onto SSO registration now answer the same org o
 // ---------------------------------------------------------------------------
 
 describe('the per-provider sign-in toggles are written by the provider writer, default off', () => {
-  async function providerOwnedBy(engine: ObjectQL, manager: AuthManager, userId: string): Promise<void> {
+  async function providerOwnedBy(manager: AuthManager, userId: string): Promise<void> {
     const auth: any = await manager.getAuthInstance();
     const ctx = await auth.$context;
     await ctx.adapter.create({
@@ -499,7 +499,7 @@ describe('the per-provider sign-in toggles are written by the provider writer, d
     const cookie = await signUp(send, email, engine);
     const userId = await userIdOf(engine, email);
     await grantPlatformAdmin(engine, userId);
-    await providerOwnedBy(engine, manager, userId);
+    await providerOwnedBy(manager, userId);
 
     const reader = withSystemReadContext(engine as never) as never;
     expect(await readSsoProviderSignInOptions(reader, 'acme-okta')).toEqual({ allowIdpInitiated: false, allowJit: false });
@@ -521,7 +521,7 @@ describe('the per-provider sign-in toggles are written by the provider writer, d
     const cookie = await signUp(send, email, engine);
     const userId = await userIdOf(engine, email);
     await grantPlatformAdmin(engine, userId);
-    await providerOwnedBy(engine, manager, userId);
+    await providerOwnedBy(manager, userId);
 
     const res = await postUpdate(send, cookie, { allowJit: 'yes' });
     const body = (await res.clone().json()) as Record<string, any>;
@@ -540,7 +540,7 @@ describe('the per-provider sign-in toggles are written by the provider writer, d
     const adminCookie = await signUp(send, 'platformadmin@example.com', engine);
     const adminId = await userIdOf(engine, 'platformadmin@example.com');
     await grantPlatformAdmin(engine, adminId);
-    await providerOwnedBy(engine, manager, adminId);
+    await providerOwnedBy(manager, adminId);
     expect(adminCookie).toBeTruthy();
 
     const memberCookie = await signUp(send, 'member@example.com', engine);
