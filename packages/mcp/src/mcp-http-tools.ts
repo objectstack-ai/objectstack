@@ -50,7 +50,7 @@ import { StandardErrorCode, type ErrorCode } from '@objectstack/spec/api';
 // [#23701] The one key every door that translates the engine's unique-violation
 // envelope asks (the registered code AND the class name, never message text),
 // and the one classification whose arm states the wire code for it.
-import { earnedAnswerOf, isEngineDuplicateRecordEnvelope, isSandboxCrash, isServerFault, logServerFault, mapDataError, resolveQueryReadLimits, sandboxBusinessMessage, staleSummaryAnswerLines, structuredCodeAnswer, type SummaryRecomputeRefusal } from '@objectstack/types';
+import { actionsDoorAnswerOf, earnedAnswerOf, isEngineDuplicateRecordEnvelope, isSandboxCrash, isServerFault, logServerFault, mapDataError, resolveQueryReadLimits, sandboxBusinessMessage, staleSummaryAnswerLines, structuredCodeAnswer, type SummaryRecomputeRefusal } from '@objectstack/types';
 import {
   MCP_OAUTH_SCOPE_DATA_READ,
   MCP_OAUTH_SCOPE_DATA_WRITE,
@@ -441,8 +441,6 @@ function errorResult(message: string) {
  * nobody and the agent is back to guessing the member's spelling from
  * documentation.
  *
- * Uncoded throws fall through to `errorResult` unchanged.
- *
  * `run_action` and `resume_run` only. The other catches render through
  * {@link errorResultWithCode}, which serves the same envelope WITHOUT `details`;
  * that function says why.
@@ -465,12 +463,36 @@ function errorResult(message: string) {
  * reaches the `details` read at all. Every other coded refusal keeps its
  * `details` as before, so #15942's confirmation contract and `resume_run`'s
  * REST-built `details` are unchanged.
+ *
+ * [#31271] The answer is the `/api/v1/actions` door's, read off that door's own
+ * reader, `actionsDoorAnswerOf` (`@objectstack/types`), never a copy of its
+ * arms: a code-less sandboxed body abort answers `400 HOOK_ABORTED` with the
+ * body's sentence (it answered the runner's `KIND 'NAME' threw: …` wrapper
+ * naming the body), a plain `Error` the door's `400 VALIDATION_ERROR`
+ * rejection, a sandboxed or in-process crash the door's `500` fault with no
+ * body name and no native text, and an unregistered code is demoted to
+ * `declaredCode` beside the closed `code`, as the door serves it. The lines
+ * the door prints for the operator (the full wrapper, the fault line) are
+ * printed here under `request`. A thrown `details` still rides as before; a
+ * throw without one carries the door's (`fields`, `issues`).
+ *
+ * ⚠️ A driver string code (`SQLITE_BUSY`) answers what `/actions` answers,
+ * `400 VALIDATION_ERROR` with `declaredCode`, where `/api/v1/data` answers
+ * `500 DATABASE_ERROR`. That difference is between the two REST doors.
  */
-function errorResultFromThrown(err: unknown) {
-  const envelope = thrownRefusalEnvelope(err);
-  if (!envelope) return errorResult(messageOf(err));
-  if (envelope.code === StandardErrorCode.enum.PERMISSION_DENIED) return errorResultWithCode(err);
-  const details = (err as { details?: unknown }).details;
+function errorResultFromThrown(err: unknown, request: string, objectName?: string) {
+  const answer = actionsDoorAnswerOf(err, objectName);
+  for (const line of answer.operatorLines) console.error(`[MCP] ${request}: ${line}`);
+  const envelope = {
+    code: answer.code,
+    message: answer.message,
+    status: answer.status,
+    ...(answer.declaredCode !== undefined ? { declaredCode: answer.declaredCode } : {}),
+    ...(answer.userMessage !== undefined ? { userMessage: answer.userMessage } : {}),
+  };
+  if (answer.code === StandardErrorCode.enum.PERMISSION_DENIED) return codedErrorResult(envelope);
+  const thrownDetails = (err as { details?: unknown } | null | undefined)?.details;
+  const details = thrownDetails !== undefined ? thrownDetails : answer.details;
   return codedErrorResult({ ...envelope, ...(details !== undefined ? { details } : {}) });
 }
 
@@ -613,7 +635,14 @@ function landedWriteResultOrError(
   return textResult(earned);
 }
 
-function codedErrorResult(error: { code?: string; message: string; status?: number; details?: unknown }) {
+function codedErrorResult(error: {
+  code?: string;
+  message: string;
+  status?: number;
+  declaredCode?: string;
+  userMessage?: string;
+  details?: unknown;
+}) {
   return {
     content: [{ type: 'text' as const, text: jsonText({ error }) }],
     isError: true as const,
@@ -2483,7 +2512,11 @@ export function registerActionTools(
         });
         return textResult(result);
       } catch (err) {
-        return landedWriteResultOrError(err, objectName, errorResultFromThrown);
+        return landedWriteResultOrError(
+          err,
+          objectName,
+          (thrown) => errorResultFromThrown(thrown, `run_action ${actionName}`, objectName),
+        );
       }
     },
   );
@@ -2577,7 +2610,7 @@ export function registerActionTools(
           });
           return textResult(result);
         } catch (err) {
-          return errorResultFromThrown(err);
+          return errorResultFromThrown(err, `resume_run ${runId}`);
         }
       },
     );
