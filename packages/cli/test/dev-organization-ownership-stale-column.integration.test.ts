@@ -30,7 +30,11 @@
  *   6446501014: the plan's column-drop fate accounts for the column, so the
  *   upgrade proceeds, loudly);
  * - the two columns are gone, and the marker the guard reads is verified;
- * - the copy taken before the upgrade is kept, with the columns still in it.
+ * - the copy taken before the upgrade is kept, with the columns still in it;
+ * - ⭐ #31547: the guard's refusal the refused boot printed names the database
+ *   `-d` chose in both `--dev` commands (`--database-url file:A.db`): run by
+ *   hand, as a database os dev does not upgrade in place needs them, they
+ *   plan that database and not the project's default.
  *
  * The card's reported stop (「The upgrade did not run to a report」 with no
  * cause) did not reproduce on this fixture, nor on an authentic HotCRM
@@ -246,6 +250,17 @@ describe('#26615 — `os dev` starts a development database with a stale organiz
     expect(output).toContain('Upgraded the development database to the v18 organization ownership.');
     expect(output).not.toContain('The upgrade did not run to a report');
     expect(output).toMatch(UPGRADED_READY);
+  });
+
+  it('⭐ #31547: the refusal the refused boot printed names the database `-d` chose, in both --dev commands', () => {
+    const output = upgraded();
+    const named = 'os migrate organization-ownership --dev --database-url file:A.db';
+    expect(output, output.slice(-6000)).toContain(
+      `Run '${named} --out PLAN' to write and review its plan, take a backup, then run ` +
+        `'${named} --apply --plan-file PLAN --backup-taken'`,
+    );
+    // No driver or token flag was given: nothing is set in front of the command.
+    expect(output).not.toContain('OS_DATABASE_DRIVER=');
   });
 
   it('the stamped value the drop discards is said, with its count, before the apply runs', () => {
