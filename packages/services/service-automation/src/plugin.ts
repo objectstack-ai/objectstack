@@ -21,7 +21,10 @@ import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/secu
 import type { MetadataMutationEvent, SysMetadataEngine } from '@objectstack/metadata-protocol';
 import { SysMetadataRepository, shadowedStoredRowsOf } from '@objectstack/metadata-protocol';
 import { AutomationEngine } from './engine.js';
-import type { AutomationEngineOptions, FlowHistorySource, RefusalI18nService, RunSummaryLogLevel } from './engine.js';
+import type { AutomationEngineOptions, FlowHistorySource, FlowNameResolver, RefusalI18nService, RunSummaryLogLevel } from './engine.js';
+// [ADR-0150 D3] The ONE package-scoped resolver, read through its exports only
+// — never a second implementation of the rule in this package.
+import { resolvePackageScopedName, type PackageScopedRegistry } from '@objectstack/objectql';
 import { describeThrownForLog, thrownMessageText } from './thrown-cause-diagnostics.js';
 import { defaultEnvCredentialResolver, type CredentialResolver } from './credential-resolver.js';
 import { registerFlowCredentialRedactor } from './flow-credential-projection.js';
@@ -1142,6 +1145,42 @@ export function packagedFlowReader(ctx: Pick<PluginContext, 'getService'>): (nam
     };
 }
 
+/** The registry members the package-scoped resolver reads ({@link PackageScopedRegistry}). */
+const PACKAGE_SCOPED_REGISTRY_MEMBERS = [
+    'getPackage',
+    'getAllPackages',
+    'packageScopedHoldersOf',
+    'getPackageScopedItem',
+    'getEnvironmentScopedItem',
+] as const;
+
+/**
+ * [ADR-0150 D3] The engine's reader over the one package-scoped resolver:
+ * `resolvePackageScopedName` from `@objectstack/objectql`, asked of the
+ * registry ObjectQL serves, for the `flow` type. See
+ * `AutomationEngine.setFlowNameResolver` for the two seams that read it.
+ *
+ * Resolved at QUESTION time, never at boot, for {@link packagedFlowReader}'s
+ * reason. A composition with no ObjectQL — or whose registry offers none of
+ * the package-scoped reads — has no registry to ask, so the answer is
+ * `undefined` and the engine's own flow map answers as before: no item is
+ * named that the engine does not hold, and nothing is guessed.
+ */
+export function flowNameResolver(ctx: Pick<PluginContext, 'getService'>): FlowNameResolver {
+    return (name, callerPackageId) => {
+        let registry: Partial<Record<(typeof PACKAGE_SCOPED_REGISTRY_MEMBERS)[number], unknown>> | undefined;
+        try {
+            registry = ctx.getService<{ registry?: typeof registry }>('objectql')?.registry;
+        } catch {
+            return undefined;
+        }
+        if (!registry || PACKAGE_SCOPED_REGISTRY_MEMBERS.some((member) => typeof registry![member] !== 'function')) {
+            return undefined;
+        }
+        return resolvePackageScopedName(registry as unknown as PackageScopedRegistry, { type: 'flow', name, callerPackageId });
+    };
+}
+
 /**
  * [#28405, ADR-0009 §2.1] The engine's reader of a flow's stored versions by
  * content identity: the metadata repository's `getByHash` over
@@ -1760,6 +1799,11 @@ export class AutomationServicePlugin implements Plugin {
         // its locked-base verdict reads — never the stamps on a definition.
         // See `packagedFlowReader`.
         this.engine.setPackagedFlowSource(packagedFlowReader(ctx));
+
+        // [ADR-0150 D3] Which item a bare flow name means, for a caller of a
+        // package or of none, is the one package-scoped resolver's answer over
+        // the ObjectQL registry, read at question time. See `flowNameResolver`.
+        this.engine.setFlowNameResolver(flowNameResolver(ctx));
 
         // [#28405] A waiting run resumes on the flow body it started on, read
         // back from the metadata history once the flow was republished. See

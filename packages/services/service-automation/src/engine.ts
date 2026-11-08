@@ -224,6 +224,11 @@ import {
     refuseCustomerAuthoredToggle,
 } from './subflow-guards.js';
 import { describeSubflowNoticeTrap, subflowNoticeTrap } from './subflow-notice-guard.js';
+// [ADR-0150 D3/D4] The one package-scoped resolver's answer, read through the
+// reader the host attaches (`setFlowNameResolver`), and the activation
+// projection keyed by `(package, name)`.
+import type { PackageScopedRefusal, PackageScopedResolution } from '@objectstack/objectql';
+import { FlowActivationProjection } from './flow-activation-projection.js';
 import { describeRegionSuspendingCall, regionSuspendingCall } from './subflow-region-guard.js';
 // [#25222] The consumed-suspension restore's bodies: journaling a consumed
 // suspension, resolving its witnesses, and restoring, peeking at or inspecting
@@ -2568,6 +2573,17 @@ export interface FlowContender {
 export type PackagedFlowSource = (name: string) => string | undefined;
 
 /**
+ * [ADR-0150 D3] A reader over the ONE package-scoped resolver: which item the
+ * bare flow name `name` means for a caller of package `callerPackageId`
+ * (`null` for a caller with no package). The automation plugin attaches
+ * `resolvePackageScopedName` from `@objectstack/objectql` over the ObjectQL
+ * registry ({@link AutomationEngine.setFlowNameResolver}); `undefined` means
+ * the host serves no registry to ask, and the engine's own flow map answers as
+ * before. ⛔ Never a second implementation of the rule.
+ */
+export type FlowNameResolver = (name: string, callerPackageId: string | null) => PackageScopedResolution | undefined;
+
+/**
  * [#28405] The stored body of flow `name` whose content identity is
  * `checksum` ({@link SuspendedRun.flowChecksum}), as the metadata history
  * keeps it — `null` when no version with that identity is stored. A host
@@ -2759,7 +2775,10 @@ export class AutomationEngine implements IAutomationService {
      * boot read is required anyway, `execute()` consults its result rather
      * than issuing a datasource read on every single flow run.
      */
-    private flowLedgerDisabled = new Set<string>();
+    // [ADR-0150 D4] Keyed by `(package, name)`: a row switches off the flow of
+    // the package it names, read against the package that ships the name
+    // today — see {@link FlowActivationProjection}.
+    private flowLedgerDisabled = new FlowActivationProjection((name) => this.packagedFlowOwner(name));
     /**
      * The durable ledger behind {@link flowLedgerDisabled}. `null` until a host
      * attaches one via {@link setFlowActivationStore} — an engine with no
@@ -2774,6 +2793,13 @@ export class AutomationEngine implements IAutomationService {
      * no flow a managed package loaded.
      */
     private packagedFlowSource?: PackagedFlowSource;
+    /**
+     * [ADR-0150 D3] The reader that answers which item a bare flow name means
+     * for a caller — see {@link setFlowNameResolver}. `undefined` until a host
+     * attaches one; with none, the engine's own flow map is the only holder it
+     * knows, as before.
+     */
+    private flowNameResolver?: FlowNameResolver;
     /** [#20790] The write-only flow credential channel — see {@link setFlowCredentialSource}. */
     private flowCredentialSource?: FlowCredentialSource;
     /** [#20281 stage ③] The connector sync executor — see {@link setConnectorPullSource}. */
@@ -4531,6 +4557,13 @@ export class AutomationEngine implements IAutomationService {
             if (refusal) throw new Error(refusal.message);
         }
 
+        // [ADR-0150 D3/D4] The engine arms one flow per bare name, so a name
+        // the resolver cannot answer for a caller with no package — two
+        // packages hold it — is refused here, naming every holder, before
+        // anything is armed. ⛔ Never an arming by package id or by arrival.
+        const nameRefusal = this.flowNameRefusal(name, null);
+        if (nameRefusal) throw new Error(nameRefusal.message);
+
         // Version history management
         const history = this.flowVersionHistory.get(name) ?? [];
         history.push({
@@ -4924,6 +4957,58 @@ export class AutomationEngine implements IAutomationService {
     /** [#20761] Is `name` a packaged flow — {@link packagedFlowOwner}, as a verdict. */
     private isPackagedFlow(name: string): boolean {
         return this.packagedFlowOwner(name) !== undefined;
+    }
+
+    /**
+     * [ADR-0150 D3] Attach the reader over the one package-scoped resolver
+     * ({@link FlowNameResolver}). The automation plugin calls this at `init()`
+     * with a reader that asks the ObjectQL registry at question time, never at
+     * boot, for {@link setPackagedFlowSource}'s reason.
+     *
+     * Two seams read it, and only these two:
+     *
+     *  - {@link registerFlow} asks it for a caller with no package before it
+     *    arms a name, so a name two packages hold is refused, naming both,
+     *    instead of arming one of them. The engine keeps one armed slot per
+     *    bare name, and nothing picks between two holders.
+     *  - {@link execute} asks it for the caller's package: the package that
+     *    ships the flow whose run names the child (a `subflow` or `map` node's
+     *    `flowName`, carried on the run's context as `flowName`), or no
+     *    package for a door, a trigger or any caller outside a run. A refusal
+     *    is the answer, naming every candidate; nothing is executed.
+     *
+     * A name the registry holds nothing under (a flow registered straight into
+     * the engine) has one holder, the engine's own flow map, and resolves to
+     * it as before.
+     */
+    setFlowNameResolver(resolver: FlowNameResolver | undefined): void {
+        this.flowNameResolver = resolver;
+    }
+
+    /**
+     * [ADR-0150 D3] The resolver's refusal of the bare flow name `name` for a
+     * caller of package `callerPackageId` (`null`: no package), or `undefined`
+     * when the name resolves, names nothing in the registry, or no resolver is
+     * attached. Read-only; records nothing.
+     */
+    private flowNameRefusal(name: string, callerPackageId: string | null): PackageScopedRefusal | undefined {
+        const resolution = this.flowNameResolver?.(name, callerPackageId);
+        return resolution?.status === 'refused' ? resolution : undefined;
+    }
+
+    /**
+     * [ADR-0150 D3] The package a call of {@link execute} comes from: the
+     * package that ships the flow whose run made the call — `context.flowName`,
+     * which the engine stamps on every run's context
+     * (`resolveRunContext`), so a `subflow` or `map` child carries its parent's
+     * name — or `null` for a caller outside a run, and for a run of a flow no
+     * package ships (an environment-authored flow resolves as a caller with no
+     * package, ADR-0150 D3).
+     */
+    private flowCallerPackage(context: AutomationContext | undefined): string | null {
+        const caller = context?.flowName;
+        if (typeof caller !== 'string' || caller === '') return null;
+        return this.packagedFlowOwner(caller) ?? null;
     }
 
     /**
@@ -6130,6 +6215,13 @@ export class AutomationEngine implements IAutomationService {
 
     async execute(flowName: string, context?: AutomationContext): Promise<AutomationResult> {
         const startTime = Date.now();
+        // [ADR-0150 D3] The bare name resolves for the caller's package first:
+        // a run of package P's flow reaches P's own flow, else the one holder
+        // in P's declared dependency closure; anything else is refused with
+        // every candidate named, and nothing runs. Never dispatched, so no
+        // `status`, for the reason the disabled exit below states.
+        const nameRefusal = this.flowNameRefusal(flowName, this.flowCallerPackage(context));
+        if (nameRefusal) return { success: false, error: nameRefusal.message };
         const flow = this.flows.get(flowName);
 
         if (!flow) {
