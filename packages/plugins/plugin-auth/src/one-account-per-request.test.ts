@@ -158,8 +158,8 @@ async function deployment(): Promise<Deployment> {
     plugins: { admin: true },
   } as never);
   const signUp = async (email: string, password: string, name: string): Promise<Account> => {
-    await inviteForAudienceGate(engine, email);
-    const res = await send(manager, 'POST', '/sign-up/email', {}, { email, password, name });
+    const invitationId = await inviteForAudienceGate(engine, email);
+    const res = await send(manager, 'POST', '/sign-up/email', {}, { email, password, name, invitationId });
     expect(res.status, await res.clone().text()).toBe(200);
     const id = String(((await res.clone().json()) as { user: { id: string } }).user.id);
     const bearer = res.headers.get('set-auth-token') ?? '';

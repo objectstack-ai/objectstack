@@ -137,8 +137,8 @@ function rowsOf(body: any): any[] {
 
 /**
  * The organization `@objectstack/verify`'s `signUp` files its audience-gate
- * invitations under — one per fixture identity, so the `invite_only` gate
- * admits it (harness.ts, `inviteForAudienceGate`).
+ * invitations under — one per fixture identity, whose id the sign-up presents,
+ * so the `invite_only` gate admits it (harness.ts, `inviteForAudienceGate`).
  *
  * [ADR-0131 D8] Those rows used to be kept out of this ledger by the driver
  * alone: under `single` it still narrowed a read to the session's active

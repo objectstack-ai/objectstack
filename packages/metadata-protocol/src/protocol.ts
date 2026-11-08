@@ -3443,6 +3443,7 @@ export class ObjectStackProtocolImplementation implements
             get engine() { return readEngine(); },
             findEnvironmentRows: (...a) => this.findEnvironmentRows(...a),
             declinesStoredRow: (...a) => this.declinesStoredRow(...a),
+            shippedArtifactsOf: (...a) => this.shippedArtifactsOf(...a),
             rethrowUnlessMetadataStoreUnprovisioned: (...a) => this.rethrowUnlessMetadataStoreUnprovisioned(...a),
         };
         return listServedOverrides.call(host, request);
