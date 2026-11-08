@@ -22,7 +22,7 @@
 - finding 归分诊首触,自分诊见 `triage-duties.md`;可附证据与「Instruments serve the fleet」答案。
 - 「Instruments serve the fleet」答不出的 finding ⇒ 建议 p3 或不做,⛔ 不自入队;定级归分诊。
 - 内部指令面中文,机器判据恒英文;认领前重读全线程;标签写 read-modify-write 加回读。
-- QA 波次由维护者手动触发,⛔ 不自启;checklist-test §6 两条例行按期由 `qa#1` 跑,不是波次。
+- QA 波次由维护者手动触发,⛔ 不自启;`qa#1` 的 §6 例行与场景半边逐开发波跑,不是波次。
 
 ## 席内判断
 
