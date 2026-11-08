@@ -104,12 +104,12 @@ ADR-0118 refused a seeded "system" pseudo-user for two reasons: seeding writes t
 | Register | An administrator of the organization, or a platform administrator | One act: the `sys_user` row (kind `agent`, owner, placeholder address) and its `sys_member` row (`member`) | It exists, holds no key and no grant, and its floor is the restricted set |
 | Grant, revoke grants | An administrator, under D12's boundary | `sys_user_permission_set` / `sys_user_position` rows | Read on the next request |
 | Mint a key | The owner or an administrator, signed in | A `sys_api_key` row for the account | The secret is shown once, to that person |
-| Revoke a key | The owner or an administrator | That key's `revoked` and `revoked_reason` | That key is dead for good; the account and its other keys are untouched |
+| Revoke, restore a key | The owner or an administrator | That key's `revoked`, through the existing revoke and restore doors (`revoke_api_key`, `restore_api_key`) acting for the account | That key alone stops, or works again; the account and its other keys are untouched. Restore follows the key's existing `revoked_reason` rules, so a key revoked because a membership ended is never restored. Suspending one key on an administrator's word is O5's |
 | Suspend | The owner or an administrator | The account's ban state (`banned`, `ban_reason`), the state `ban_user` writes | Every key is refused on its next call: key admission already reads the owner's row on every resolution and asks `packages/core/src/security/user-ban.ts#isUserBanInForce`. Nothing is revoked |
 | Resume | An administrator only | Lifts the ban | The same keys work again. The owner cannot resume, so an owner cannot undo an administrator's stop |
 | Change owner | An administrator | `accountable_user_id` | — |
 | The owner leaves | Automatic | When the owner's membership in the account's organization ends, the account is suspended | It stays suspended until an administrator names a new owner, so no agent is left with nobody accountable |
-| Retire | An administrator | Revokes every key and ends the membership; keeps the row | Terminal: the mint door refuses an account with no membership, so it never gets a key again, and its id keeps joining every row it wrote |
+| Retire | An administrator | Ends the membership and revokes every key with `revoked_reason` `organization_membership_ended`; keeps the row | Terminal: no one restores a key revoked for that reason, the mint door refuses an account with no membership, and its id keeps joining every row it wrote |
 | Last used | Derived | Nothing: the latest `last_used_at` over its keys | `sys_user.last_login_at` stays empty for ever, because it never signs in |
 
 **Suspension is the ban.** One state, one predicate, already read on every path an account can authenticate through. ⛔ No second suspension column, and no second refusal path.
