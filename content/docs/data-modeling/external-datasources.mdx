@@ -548,7 +548,7 @@ object whose `remoteName` is `OWNER.TABLE`.
 | `DATE` | `datetime` | An Oracle `DATE` carries a time of day. A `date` field over it is judged lossy: the time is dropped. |
 | `TIMESTAMP WITH TIME ZONE` | `datetime` | Compared and returned as UTC instants. |
 | `CLOB` | `textarea` | |
-| `RAW(16)` | `text` | Read as a lower-case UUID string. |
+| `RAW(16)` | `text` | Read as a lower-case UUID string. Every field pairing over it is judged lossy, so a draft marks it for review: it cannot be filtered or written by that string yet (see below). |
 
 The driver pins every session to UTC. Thin mode decodes `DATE` and `TIMESTAMP`
 values with the server process's local clock, and the driver repairs that on read.
@@ -568,7 +568,9 @@ the process's own time zone. Run the server with `TZ=UTC` and there is no such h
   no Oracle construct modelled for it.
 - **Filtering or writing a `RAW(16)` column by its UUID string is not supported.**
   The driver presents the value as a string on read, but it does not convert the
-  string back to `RAW` for a comparison or a write.
+  string back to `RAW` for a comparison or a write. This includes a `lookup` keyed
+  by a `SYS_GUID()` column. Binding through `HEXTORAW` is tracked in
+  [#31390](https://github.com/objectstack-ai/objectstack/issues/31390).
 - A `NUMBER` beyond 2^53 is read as a JavaScript number and loses precision.
 - **Paged reads are stable when the object's `columnMap` maps a column to `id`.**
   That column breaks ties after the caller's own sort. Without a mapped key, a paged

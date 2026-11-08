@@ -185,7 +185,9 @@ const DIALECT_ALIASES: Partial<Record<SqlDialect, Record<string, CanonicalSqlTyp
  * ## `RAW(n)` — sixteen bytes is a UUID
  *
  * `RAW(16)` is the conventional Oracle column for a UUID / GUID (`SYS_GUID()`
- * returns one), so it maps to `uuid`; every other width is `binary`.
+ * returns one), so it maps to `uuid`; every other width is `binary`. The
+ * field pairings over it are `'lossy'` on oracle, not exact: see
+ * {@link DIALECT_DEMOTED_TO_LOSSY}.
  *
  * `undefined` for any other spelling — the caller then strips parameters and
  * reads the alias tables as for every dialect.
@@ -397,6 +399,20 @@ export function suggestFieldTypeForSqlType(rawType: string, dialect?: SqlDialect
 }
 
 /**
+ * Canonical types whose EXACT pairings one dialect can only half-serve, so the
+ * matrix answers them `'lossy'` there and a draft carries a `// REVIEW:` marker.
+ *
+ * - `oracle` / `uuid`: a `RAW(16)` column reads back as a UUID string, but the
+ *   driver binds a string comparand or write value as text, and Oracle refuses
+ *   text against RAW. A field over it (a `lookup` keyed by a `SYS_GUID()`
+ *   column included) displays correctly and cannot yet be filtered or written
+ *   by its value. Binding through `HEXTORAW` is #31390.
+ */
+const DIALECT_DEMOTED_TO_LOSSY: Partial<Record<SqlDialect, Partial<Record<CanonicalSqlType, true>>>> = {
+  oracle: { uuid: true },
+};
+
+/**
  * Whether a remote SQL column type can back the given ObjectStack field type.
  *
  * @returns `true` (exact), `'lossy'` (usable with possible loss), or `false`.
@@ -408,7 +424,9 @@ export function isCompatible(
 ): Compatibility {
   const canonical = canonicalizeSqlType(rawType, dialect);
   const entry = CANONICAL_TO_FIELD[canonical];
-  if (entry.exact.includes(fieldType)) return true;
+  if (entry.exact.includes(fieldType)) {
+    return dialect && DIALECT_DEMOTED_TO_LOSSY[dialect]?.[canonical] ? 'lossy' : true;
+  }
   if (entry.lossy.includes(fieldType)) return 'lossy';
   // Unknown remote types are permissive-but-lossy against text/json only,
   // already encoded in CANONICAL_TO_FIELD.unknown.

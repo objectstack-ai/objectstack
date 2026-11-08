@@ -428,7 +428,9 @@ read before the matrix strips them. A `NUMBER` with scale > 0 is `decimal`; an
 integral `NUMBER(p)` / `NUMBER(p,0)` (a negative scale counts its `p − s`
 digits) is `integer` up to nine digits and `bigint` beyond, `NUMBER(*,0)` —
 Oracle's `INTEGER` — included; a bare `NUMBER` is `decimal`. `RAW(16)` is
-`uuid`, any other `RAW` `binary`. `DATE` carries a time of day, so it is
+`uuid`, any other `RAW` `binary`; on `oracle` every pairing over that `uuid` is
+judged `'lossy'`, not exact, because the driver reads it as a UUID string but
+cannot yet bind that string back to `RAW` for a filter or a write (#31390). `DATE` carries a time of day, so it is
 `datetime`. A pre-23ai flag column (`NUMBER(1)` / `CHAR(1)`) is judged as the
 integer or text it is, never coerced to `boolean`. The `oracle` driver id serves
 federation only: a datasource naming it with `schemaMode: 'managed'` is refused

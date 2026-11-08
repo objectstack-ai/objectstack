@@ -392,7 +392,14 @@ describe('the oracle dialect (ADR-0015 §4.6)', () => {
 
   it('reads RAW(16) as a UUID and every other RAW width as binary', () => {
     expect(canonicalizeSqlType('RAW(16)', 'oracle')).toBe('uuid');
-    expect(isCompatible('RAW(16)', 'lookup', 'oracle')).toBe(true);
+    // Read as a UUID string, but the driver cannot yet filter or write it by
+    // that string, so every pairing over it is flagged for review on oracle.
+    for (const field of ['text', 'lookup', 'master_detail', 'user'] as const) {
+      expect(isCompatible('RAW(16)', field, 'oracle'), field).toBe('lossy');
+    }
+    expect(suggestFieldTypeForSqlType('RAW(16)', 'oracle')).toBe('text');
+    // Other dialects' uuid columns keep their exact pairings.
+    expect(isCompatible('uuid', 'lookup', 'postgres')).toBe(true);
     expect(canonicalizeSqlType('RAW(32)', 'oracle')).toBe('binary');
     expect(canonicalizeSqlType('RAW', 'oracle')).toBe('binary');
   });
