@@ -8,7 +8,7 @@
 - 含 schema 形状、`contracts/**`、退役行为半边、strictness 台账。
 - 含 describe/JSDoc、墓碑散文、错误 guidance、alias 表;其重生成的 references 产物归源 PR。
 - 含 `packages/spec/scripts/**`、`packages/spec/docs/**`。
-- 同含围着 spec 契约转的工具链:门禁、生成器、lint 规则、报错散文、references 管线。
+- 同含围着 spec 契约转的工具链:门禁、生成器、lint 规则、报错散文。
 - 一般开发工具面留 devx;`packages/spec` 文件归本席,唯下列搭车改动可随产品 PR。
 - 元数据协议改动归本席,走 spec 子卡:首触即立,产品卡带 `Blocked-by:` 该子卡。
 - 元数据协议 = 可编写元数据的形状:对象、字段、flow、视图、权限、设置清单等。
