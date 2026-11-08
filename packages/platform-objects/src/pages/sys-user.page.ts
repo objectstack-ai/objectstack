@@ -143,6 +143,7 @@ export const SysUserDetailPage: Page = {
               'es-ES': 'Correo no verificado',
               'zh-Hant': '電子郵件尚未驗證',
               ar: 'البريد الإلكتروني غير موثَّق',
+              fr: 'E-mail non vérifié',
             },
             body: {
               en: 'Verify your email to receive password resets and important system notifications.',
@@ -151,6 +152,7 @@ export const SysUserDetailPage: Page = {
               'es-ES': 'Verifica tu correo para recibir restablecimientos de contraseña y notificaciones importantes del sistema.',
               'zh-Hant': '驗證你的電子郵件，以接收密碼重設和重要的系統通知。',
               ar: 'وثّق بريدك الإلكتروني لتتلقى رسائل إعادة تعيين كلمة المرور وإشعارات النظام المهمة.',
+              fr: 'Vérifiez votre e-mail pour recevoir les réinitialisations de mot de passe et les notifications système importantes.',
             },
             dismissible: false,
             action: {
@@ -162,6 +164,7 @@ export const SysUserDetailPage: Page = {
                 'es-ES': 'Reenviar correo de verificación',
                 'zh-Hant': '重新寄送驗證郵件',
                 ar: 'إعادة إرسال رسالة التوثيق',
+                fr: 'Renvoyer l’e-mail de vérification',
               },
             },
           },
@@ -204,7 +207,7 @@ export const SysUserDetailPage: Page = {
                 // authored sections, so a field none of them names is not on
                 // the page: `locale` rides Identity, and the ban state has its
                 // own section, so a banned user does not read as active.
-                label: { en: 'Details', 'zh-CN': '详情', 'ja-JP': '詳細', 'es-ES': 'Detalles', 'zh-Hant': '詳細資料', ar: 'التفاصيل' },
+                label: { en: 'Details', 'zh-CN': '详情', 'ja-JP': '詳細', 'es-ES': 'Detalles', 'zh-Hant': '詳細資料', ar: 'التفاصيل', fr: 'Détails' },
                 icon: 'file-text',
                 children: [
                   {
@@ -221,15 +224,15 @@ export const SysUserDetailPage: Page = {
                       ],
                       sections: [
                         {
-                          label: { en: 'Identity', 'zh-CN': '身份', 'ja-JP': 'アイデンティティ', 'es-ES': 'Identidad', 'zh-Hant': '身分', ar: 'الهوية' },
+                          label: { en: 'Identity', 'zh-CN': '身份', 'ja-JP': 'アイデンティティ', 'es-ES': 'Identidad', 'zh-Hant': '身分', ar: 'الهوية', fr: 'Identité' },
                           fields: ['name', 'image', 'locale'],
                         },
                         {
-                          label: { en: 'Account Status', 'zh-CN': '账号状态', 'ja-JP': 'アカウントの状態', 'es-ES': 'Estado de la cuenta', 'zh-Hant': '帳號狀態', ar: 'حالة الحساب' },
+                          label: { en: 'Account Status', 'zh-CN': '账号状态', 'ja-JP': 'アカウントの状態', 'es-ES': 'Estado de la cuenta', 'zh-Hant': '帳號狀態', ar: 'حالة الحساب', fr: 'État du compte' },
                           fields: ['banned', 'ban_reason', 'ban_expires'],
                         },
                         {
-                          label: { en: 'Audit', 'zh-CN': '审计', 'ja-JP': '監査', 'es-ES': 'Auditoría', 'zh-Hant': '稽核', ar: 'التدقيق' },
+                          label: { en: 'Audit', 'zh-CN': '审计', 'ja-JP': '監査', 'es-ES': 'Auditoría', 'zh-Hant': '稽核', ar: 'التدقيق', fr: 'Audit' },
                           fields: ['created_at', 'updated_at'],
                         },
                       ],
@@ -238,7 +241,7 @@ export const SysUserDetailPage: Page = {
                 ],
               },
               {
-                label: { en: 'Positions', 'zh-CN': '岗位', 'ja-JP': 'ポジション', 'es-ES': 'Puestos', 'zh-Hant': '職位', ar: 'المناصب' },
+                label: { en: 'Positions', 'zh-CN': '岗位', 'ja-JP': 'ポジション', 'es-ES': 'Puestos', 'zh-Hant': '職位', ar: 'المناصب', fr: 'Postes' },
                 icon: 'shield-check',
                 children: [
                   {
@@ -258,7 +261,7 @@ export const SysUserDetailPage: Page = {
                       sort: [{ field: 'created_at', order: 'desc' }],
                       limit: 25,
                       showViewAll: true,
-                      title: { en: 'Positions', 'zh-CN': '岗位', 'ja-JP': 'ポジション', 'es-ES': 'Puestos', 'zh-Hant': '職位', ar: 'المناصب' },
+                      title: { en: 'Positions', 'zh-CN': '岗位', 'ja-JP': 'ポジション', 'es-ES': 'Puestos', 'zh-Hant': '職位', ar: 'المناصب', fr: 'Postes' },
                     },
                   },
                 ],
@@ -281,7 +284,7 @@ export const SysUserDetailPage: Page = {
                 // a row showing only the set would read as a live grant when it is
                 // not. The same form sets the window, and the object refuses a
                 // window whose end is not after its start.
-                label: { en: 'Permission Sets', 'zh-CN': '权限集', 'ja-JP': '権限セット', 'es-ES': 'Conjuntos de permisos', 'zh-Hant': '權限集', ar: 'مجموعات الأذونات' },
+                label: { en: 'Permission Sets', 'zh-CN': '权限集', 'ja-JP': '権限セット', 'es-ES': 'Conjuntos de permisos', 'zh-Hant': '權限集', ar: 'مجموعات الأذونات', fr: 'Ensembles d’autorisations' },
                 icon: 'lock',
                 children: [
                   {
@@ -293,7 +296,7 @@ export const SysUserDetailPage: Page = {
                       sort: [{ field: 'created_at', order: 'desc' }],
                       limit: 25,
                       showViewAll: true,
-                      title: { en: 'Permission Sets', 'zh-CN': '权限集', 'ja-JP': '権限セット', 'es-ES': 'Conjuntos de permisos', 'zh-Hant': '權限集', ar: 'مجموعات الأذونات' },
+                      title: { en: 'Permission Sets', 'zh-CN': '权限集', 'ja-JP': '権限セット', 'es-ES': 'Conjuntos de permisos', 'zh-Hant': '權限集', ar: 'مجموعات الأذونات', fr: 'Ensembles d’autorisations' },
                     },
                   },
                 ],
@@ -306,7 +309,7 @@ export const SysUserDetailPage: Page = {
                 // The Add picker binds a BU by its id (linkField: 'business_unit_id');
                 // sys_business_unit has no `label` field so the picker labels rows by
                 // its display field `name`.
-                label: { en: 'Business Units', 'zh-CN': '业务单元', 'ja-JP': 'ビジネスユニット', 'es-ES': 'Unidades de negocio', 'zh-Hant': '業務單位', ar: 'وحدات الأعمال' },
+                label: { en: 'Business Units', 'zh-CN': '业务单元', 'ja-JP': 'ビジネスユニット', 'es-ES': 'Unidades de negocio', 'zh-Hant': '業務單位', ar: 'وحدات الأعمال', fr: 'Unités commerciales' },
                 icon: 'network',
                 children: [
                   {
@@ -318,7 +321,7 @@ export const SysUserDetailPage: Page = {
                       sort: [{ field: 'created_at', order: 'desc' }],
                       limit: 25,
                       showViewAll: true,
-                      title: { en: 'Business Units', 'zh-CN': '业务单元', 'ja-JP': 'ビジネスユニット', 'es-ES': 'Unidades de negocio', 'zh-Hant': '業務單位', ar: 'وحدات الأعمال' },
+                      title: { en: 'Business Units', 'zh-CN': '业务单元', 'ja-JP': 'ビジネスユニット', 'es-ES': 'Unidades de negocio', 'zh-Hant': '業務單位', ar: 'وحدات الأعمال', fr: 'Unités commerciales' },
                       add: {
                         picker: {
                           object: 'sys_business_unit',
@@ -332,6 +335,7 @@ export const SysUserDetailPage: Page = {
                           'es-ES': 'Añadir a unidad de negocio',
                           'zh-Hant': '加入業務單位',
                           ar: 'إضافة إلى وحدة أعمال',
+                          fr: 'Ajouter à une unité commerciale',
                         },
                       },
                     },
@@ -339,7 +343,7 @@ export const SysUserDetailPage: Page = {
                 ],
               },
               {
-                label: { en: 'Sessions', 'zh-CN': '会话', 'ja-JP': 'セッション', 'es-ES': 'Sesiones', 'zh-Hant': '工作階段', ar: 'الجلسات' },
+                label: { en: 'Sessions', 'zh-CN': '会话', 'ja-JP': 'セッション', 'es-ES': 'Sesiones', 'zh-Hant': '工作階段', ar: 'الجلسات', fr: 'Sessions' },
                 icon: 'monitor',
                 children: [
                   {
@@ -351,13 +355,13 @@ export const SysUserDetailPage: Page = {
                       sort: [{ field: 'created_at', order: 'desc' }],
                       limit: 25,
                       showViewAll: true,
-                      title: { en: 'Sessions', 'zh-CN': '会话', 'ja-JP': 'セッション', 'es-ES': 'Sesiones', 'zh-Hant': '工作階段', ar: 'الجلسات' },
+                      title: { en: 'Sessions', 'zh-CN': '会话', 'ja-JP': 'セッション', 'es-ES': 'Sesiones', 'zh-Hant': '工作階段', ar: 'الجلسات', fr: 'Sessions' },
                     },
                   },
                 ],
               },
               {
-                label: { en: 'Linked Accounts', 'zh-CN': '关联账号', 'ja-JP': '連携アカウント', 'es-ES': 'Cuentas vinculadas', 'zh-Hant': '已關聯帳戶', ar: 'الحسابات المرتبطة' },
+                label: { en: 'Linked Accounts', 'zh-CN': '关联账号', 'ja-JP': '連携アカウント', 'es-ES': 'Cuentas vinculadas', 'zh-Hant': '已關聯帳戶', ar: 'الحسابات المرتبطة', fr: 'Comptes liés' },
                 icon: 'link',
                 children: [
                   {
@@ -369,13 +373,13 @@ export const SysUserDetailPage: Page = {
                       sort: [{ field: 'created_at', order: 'desc' }],
                       limit: 25,
                       showViewAll: true,
-                      title: { en: 'Linked Accounts', 'zh-CN': '关联账号', 'ja-JP': '連携アカウント', 'es-ES': 'Cuentas vinculadas', 'zh-Hant': '已關聯帳戶', ar: 'الحسابات المرتبطة' },
+                      title: { en: 'Linked Accounts', 'zh-CN': '关联账号', 'ja-JP': '連携アカウント', 'es-ES': 'Cuentas vinculadas', 'zh-Hant': '已關聯帳戶', ar: 'الحسابات المرتبطة', fr: 'Comptes liés' },
                     },
                   },
                 ],
               },
               {
-                label: { en: 'Organizations', 'zh-CN': '组织', 'ja-JP': '組織', 'es-ES': 'Organizaciones', 'zh-Hant': '組織', ar: 'المؤسسات' },
+                label: { en: 'Organizations', 'zh-CN': '组织', 'ja-JP': '組織', 'es-ES': 'Organizaciones', 'zh-Hant': '組織', ar: 'المؤسسات', fr: 'Organisations' },
                 icon: 'building-2',
                 children: [
                   {
@@ -387,13 +391,13 @@ export const SysUserDetailPage: Page = {
                       sort: [{ field: 'created_at', order: 'desc' }],
                       limit: 25,
                       showViewAll: true,
-                      title: { en: 'Organizations', 'zh-CN': '组织', 'ja-JP': '組織', 'es-ES': 'Organizaciones', 'zh-Hant': '組織', ar: 'المؤسسات' },
+                      title: { en: 'Organizations', 'zh-CN': '组织', 'ja-JP': '組織', 'es-ES': 'Organizaciones', 'zh-Hant': '組織', ar: 'المؤسسات', fr: 'Organisations' },
                     },
                   },
                 ],
               },
               {
-                label: { en: 'OAuth Apps', 'zh-CN': 'OAuth 应用', 'ja-JP': 'OAuth アプリ', 'es-ES': 'Aplicaciones OAuth', 'zh-Hant': 'OAuth 應用程式', ar: 'تطبيقات OAuth' },
+                label: { en: 'OAuth Apps', 'zh-CN': 'OAuth 应用', 'ja-JP': 'OAuth アプリ', 'es-ES': 'Aplicaciones OAuth', 'zh-Hant': 'OAuth 應用程式', ar: 'تطبيقات OAuth', fr: 'Applications OAuth' },
                 icon: 'key-square',
                 children: [
                   {
@@ -405,7 +409,7 @@ export const SysUserDetailPage: Page = {
                       sort: [{ field: 'created_at', order: 'desc' }],
                       limit: 25,
                       showViewAll: true,
-                      title: { en: 'OAuth Apps', 'zh-CN': 'OAuth 应用', 'ja-JP': 'OAuth アプリ', 'es-ES': 'Aplicaciones OAuth', 'zh-Hant': 'OAuth 應用程式', ar: 'تطبيقات OAuth' },
+                      title: { en: 'OAuth Apps', 'zh-CN': 'OAuth 应用', 'ja-JP': 'OAuth アプリ', 'es-ES': 'Aplicaciones OAuth', 'zh-Hant': 'OAuth 應用程式', ar: 'تطبيقات OAuth', fr: 'Applications OAuth' },
                     },
                   },
                 ],
@@ -430,7 +434,7 @@ export const SysUserDetailPage: Page = {
               // reasons: this raw `Page` literal reaches the wire verbatim, and
               // only the `{ dialect: 'cel' }` envelope routes to CEL.
               {
-                label: { en: 'Security', 'zh-CN': '安全', 'ja-JP': 'セキュリティ', 'es-ES': 'Seguridad', 'zh-Hant': '安全', ar: 'الأمان' },
+                label: { en: 'Security', 'zh-CN': '安全', 'ja-JP': 'セキュリティ', 'es-ES': 'Seguridad', 'zh-Hant': '安全', ar: 'الأمان', fr: 'Sécurité' },
                 icon: 'shield',
                 visibleWhen: P`has(record.id) && record.id == ctx.user.id`,
                 children: [
@@ -445,6 +449,7 @@ export const SysUserDetailPage: Page = {
                         'es-ES': 'Contraseña e inicio de sesión',
                         'zh-Hant': '密碼與登入',
                         ar: 'كلمة المرور وتسجيل الدخول',
+                        fr: 'Mot de passe et connexion',
                       },
                     },
                   },
@@ -459,6 +464,7 @@ export const SysUserDetailPage: Page = {
                         'es-ES': 'Cambia tu contraseña o la dirección de correo asociada a esta cuenta.',
                         'zh-Hant': '變更密碼或此帳號繫結的電子郵件地址。',
                         ar: 'غيّر كلمة المرور أو عنوان البريد الإلكتروني المرتبط بهذا الحساب.',
+                        fr: 'Modifiez votre mot de passe ou l’adresse e-mail associée à ce compte.',
                       },
                     },
                   },
@@ -488,6 +494,7 @@ export const SysUserDetailPage: Page = {
                         'es-ES': 'Autenticación de dos factores',
                         'zh-Hant': '兩步驟驗證',
                         ar: 'المصادقة الثنائية',
+                        fr: 'Authentification à deux facteurs',
                       },
                     },
                   },
@@ -503,6 +510,7 @@ export const SysUserDetailPage: Page = {
                         'es-ES': 'Añade una segunda capa de seguridad con una app de autenticación TOTP. Los códigos de respaldo te permiten iniciar sesión si pierdes tu dispositivo.',
                         'zh-Hant': '使用 TOTP 驗證器應用程式新增第二層安全防護。裝置遺失時，可使用備用驗證碼登入。',
                         ar: 'أضف طبقة أمان ثانية باستخدام تطبيق مصادقة TOTP. تتيح لك الرموز الاحتياطية تسجيل الدخول إذا فقدت جهازك.',
+                        fr: 'Ajoutez une seconde couche de sécurité avec une application d’authentification TOTP. Les codes de secours vous permettent de vous connecter si vous perdez votre appareil.',
                       },
                     },
                   },
@@ -536,6 +544,7 @@ export const SysUserDetailPage: Page = {
                         'es-ES': 'Verificación de correo',
                         'zh-Hant': '電子郵件驗證',
                         ar: 'توثيق البريد الإلكتروني',
+                        fr: 'Vérification de l’e-mail',
                       },
                     },
                   },
@@ -550,6 +559,7 @@ export const SysUserDetailPage: Page = {
                         'es-ES': 'Verifica tu correo para recibir restablecimientos de contraseña y notificaciones. El botón solo aparece mientras la verificación está pendiente.',
                         'zh-Hant': '驗證你的電子郵件，以便接收密碼重設和系統通知。此按鈕僅在電子郵件待驗證時顯示。',
                         ar: 'وثّق بريدك الإلكتروني لتصلك رسائل إعادة تعيين كلمة المرور والإشعارات. لا يظهر الزر إلا ما دام التوثيق معلّقًا.',
+                        fr: 'Vérifiez votre e-mail pour recevoir les réinitialisations de mot de passe et les notifications. Le bouton n’apparaît que tant que la vérification est en attente.',
                       },
                     },
                   },
@@ -573,6 +583,7 @@ export const SysUserDetailPage: Page = {
                         'es-ES': 'Zona de peligro',
                         'zh-Hant': '危險操作',
                         ar: 'منطقة الخطر',
+                        fr: 'Zone de danger',
                       },
                     },
                     className: 'text-destructive',
@@ -588,6 +599,7 @@ export const SysUserDetailPage: Page = {
                         'es-ES': 'Permanente. Una vez eliminada, tu cuenta no se puede recuperar.',
                         'zh-Hant': '此動作無法復原，帳號一經刪除即無法恢復。',
                         ar: 'إجراء نهائي. بمجرد حذف حسابك، لا يمكن استعادته.',
+                        fr: 'Action définitive. Une fois supprimé, votre compte ne peut pas être récupéré.',
                       },
                     },
                   },
@@ -606,7 +618,7 @@ export const SysUserDetailPage: Page = {
               // user_id FK; the sys_api_key object's own list-item actions
               // (revoke / restore) handle row operations.
               {
-                label: { en: 'API Keys', 'zh-CN': 'API 密钥', 'ja-JP': 'API キー', 'es-ES': 'Claves de API', 'zh-Hant': 'API 金鑰', ar: 'مفاتيح API' },
+                label: { en: 'API Keys', 'zh-CN': 'API 密钥', 'ja-JP': 'API キー', 'es-ES': 'Claves de API', 'zh-Hant': 'API 金鑰', ar: 'مفاتيح API', fr: 'Clés API' },
                 icon: 'key-round',
                 children: [
                   {
@@ -618,7 +630,7 @@ export const SysUserDetailPage: Page = {
                       sort: [{ field: 'created_at', order: 'desc' }],
                       limit: 25,
                       showViewAll: true,
-                      title: { en: 'API Keys', 'zh-CN': 'API 密钥', 'ja-JP': 'API キー', 'es-ES': 'Claves de API', 'zh-Hant': 'API 金鑰', ar: 'مفاتيح API' },
+                      title: { en: 'API Keys', 'zh-CN': 'API 密钥', 'ja-JP': 'API キー', 'es-ES': 'Claves de API', 'zh-Hant': 'API 金鑰', ar: 'مفاتيح API', fr: 'Clés API' },
                     },
                   },
                 ],
@@ -647,7 +659,7 @@ export const SysUserDetailPage: Page = {
               // anyone else either way. Same `P` envelope as the Security tab:
               // this raw `Page` literal reaches the wire verbatim.
               {
-                label: { en: 'AI Assistants', 'zh-CN': 'AI 助手', 'ja-JP': 'AI アシスタント', 'es-ES': 'Asistentes de IA', 'zh-Hant': 'AI 助理', ar: 'مساعدو الذكاء الاصطناعي' },
+                label: { en: 'AI Assistants', 'zh-CN': 'AI 助手', 'ja-JP': 'AI アシスタント', 'es-ES': 'Asistentes de IA', 'zh-Hant': 'AI 助理', ar: 'مساعدو الذكاء الاصطناعي', fr: 'Assistants IA' },
                 icon: 'bot',
                 visibleWhen: P`current_user.isPlatformAdmin == true`,
                 children: [
@@ -668,7 +680,7 @@ export const SysUserDetailPage: Page = {
               // object's `managedBy: 'system-data'` and the caller's grant, the
               // same verdict the grid's buttons read.
               {
-                label: { en: 'Preferences', 'zh-CN': '偏好设置', 'ja-JP': '設定', 'es-ES': 'Preferencias', 'zh-Hant': '偏好設定', ar: 'التفضيلات' },
+                label: { en: 'Preferences', 'zh-CN': '偏好设置', 'ja-JP': '設定', 'es-ES': 'Preferencias', 'zh-Hant': '偏好設定', ar: 'التفضيلات', fr: 'Préférences' },
                 icon: 'sliders',
                 children: [
                   {
@@ -680,7 +692,7 @@ export const SysUserDetailPage: Page = {
                       sort: [{ field: 'updated_at', order: 'desc' }],
                       limit: 25,
                       showViewAll: true,
-                      title: { en: 'Preferences', 'zh-CN': '偏好设置', 'ja-JP': '設定', 'es-ES': 'Preferencias', 'zh-Hant': '偏好設定', ar: 'التفضيلات' },
+                      title: { en: 'Preferences', 'zh-CN': '偏好设置', 'ja-JP': '設定', 'es-ES': 'Preferencias', 'zh-Hant': '偏好設定', ar: 'التفضيلات', fr: 'Préférences' },
                     },
                   },
                 ],
