@@ -254,6 +254,7 @@ const DECLARED_WATCH_HINTS = [
   'packages/drivers/driver-sql/src/sql-driver-balanced-group.ts',
   'packages/drivers/driver-sql/src/sql-driver-bulk-operations.ts',
   'packages/drivers/driver-sql/src/sql-driver-class-head.ts',
+  'packages/drivers/driver-sql/src/sql-driver-declared-rename.ts',
   'packages/drivers/driver-sql/src/sql-driver-column-creation.ts',
   'packages/drivers/driver-sql/src/sql-driver-cross-field-comparison.ts',
   'packages/drivers/driver-sql/src/sql-driver-crud.ts',

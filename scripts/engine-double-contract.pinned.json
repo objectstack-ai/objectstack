@@ -2042,6 +2042,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.seed-list-row-name.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.select-shorthand-refusal.test.ts",
       "verb": "delete",
       "pinned": 1

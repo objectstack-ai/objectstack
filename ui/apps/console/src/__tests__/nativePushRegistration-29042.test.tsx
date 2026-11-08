@@ -19,6 +19,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import { act, cleanup, render } from '@testing-library/react';
 import { useEffect, type ReactNode } from 'react';
+import { RegisterDeviceRequestSchema } from '@objectstack/spec/api';
 import { AuthCtx, type AuthContextValue } from '../../../../packages/auth/src/AuthContext';
 import { useAuth } from '../../../../packages/auth/src/useAuth';
 import { resetBeforeSignOutForTests, runBeforeSignOut } from '../../../../packages/auth/src/beforeSignOut';
@@ -364,5 +365,44 @@ describe('the origin a registration sends (objectstack#29042)', () => {
     expect(registrationOrigin({ protocol: 'http:', origin: 'http://localhost:5180' })).toBe('http://localhost:5180');
     expect(registrationOrigin({ protocol: 'about:', origin: 'null' })).toBeUndefined();
     expect(registrationOrigin({ protocol: 'data:', origin: 'null' })).toBeUndefined();
+  });
+});
+
+describe('a host the origin pattern cannot carry still registers, with no origin (objectstack#31472)', () => {
+  const pageUrl = window.location.href;
+  afterEach(() => {
+    (window as unknown as { happyDOM: { setURL(url: string): void } }).happyDOM.setURL(pageUrl);
+  });
+
+  it('an underscore host and a trailing-dot host send no origin; a normal host keeps its own', () => {
+    expect(registrationOrigin({ protocol: 'http:', origin: 'http://my_svc:3000' })).toBeUndefined();
+    expect(registrationOrigin({ protocol: 'https:', origin: 'https://crm.example.com.' })).toBeUndefined();
+    expect(registrationOrigin({ protocol: 'https:', origin: 'https://crm.example.com:8443' })).toBe('https://crm.example.com:8443');
+    expect(registrationOrigin({ protocol: 'http:', origin: 'http://10.0.0.7:3000' })).toBe('http://10.0.0.7:3000');
+  });
+
+  it.each([
+    ['an underscore host', 'http://my_svc:3000/home'],
+    ['a trailing-dot host', 'https://crm.example.com./home'],
+  ])('%s: the device is registered without origin, and the server accepts the body', async (_label, url) => {
+    (window as unknown as { happyDOM: { setURL(url: string): void } }).happyDOM.setURL(url);
+    installBridge({ installId: 'install-7' });
+    render(<Harness auth={{ userId: 'u1' }} pathname="/home" />);
+    await passPromptDelay();
+    await settle();
+
+    const requests = deviceRequests();
+    expect(requests).toEqual([
+      {
+        method: 'POST',
+        url: expect.stringContaining(DEVICES),
+        body: { token: 'tok-1', vendor: 'apns', platform: 'ios', deviceId: 'install-7' },
+      },
+    ]);
+    // The door parses the whole body with this schema: the body sent passes,
+    // and the same body naming the page origin is the refusal it avoids.
+    expect(RegisterDeviceRequestSchema.safeParse(requests[0]!.body).success).toBe(true);
+    const named = { ...(requests[0]!.body as object), origin: window.location.origin };
+    expect(RegisterDeviceRequestSchema.safeParse(named).success).toBe(false);
   });
 });
