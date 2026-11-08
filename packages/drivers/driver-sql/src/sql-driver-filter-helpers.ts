@@ -61,7 +61,9 @@ import {
   isOracleUuidText,
   oracleDayBinding,
   oracleInstantBinding,
+  oracleUuidRawBinding,
 } from './sql-driver-oracle-dialect.js';
+import type { OracleUuidBindingRole } from './sql-driver-oracle-dialect.js';
 import { jsonMembershipUnsupportedOnOracleError } from './sql-driver-predicate-emitters.js';
 import type { ReadPresentationKind } from './sql-driver-top-level.js';
 import type { SqlDriver } from './sql-driver.js';
@@ -104,6 +106,7 @@ export interface FilterHelpersHost {
   readonly isSqlite: SqlDriver['isSqlite'];
   jsonColumnFieldClass: SqlDriver['jsonColumnFieldClass'];
   readonly jsonFields: SqlDriver['jsonFields'];
+  readonly knex: SqlDriver['knex'];
   logWithheldFilterDiagnostic: SqlDriver['logWithheldFilterDiagnostic'];
   readonly logger: SqlDriver['logger'];
   readonly managedObjectFields: SqlDriver['managedObjectFields'];
@@ -135,6 +138,13 @@ export interface FilterHelpersHost {
 
 /** The bodies of the "Filter helpers" section of `SqlDriver`: a stateless facet, called by the class's stubs. */
 export class FilterHelpersFacet {
+  /** The body of `SqlDriver#oracleUuidBinding`; the method's docblock there is its contract. */
+  static oracleUuidBinding(this: Pick<FilterHelpersHost, 'isOracle' | 'knex' | 'oracleRawUuidFieldsByObject'>, object: string | null | undefined, field: string, value: unknown, role: OracleUuidBindingRole): unknown {
+    if (!this.isOracle || !object || value === null || value === undefined) return value;
+    if (this.oracleRawUuidFieldsByObject.get(object)?.has(field) !== true) return value;
+    return oracleUuidRawBinding(this.knex, field, value, role);
+  }
+
   /** The body of `SqlDriver#tableNameForBuilder`; the method's docblock there is its contract. */
   static tableNameForBuilder(builder: any): string | null {
     const t = builder?._single?.table;

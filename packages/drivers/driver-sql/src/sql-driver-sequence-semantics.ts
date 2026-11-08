@@ -94,6 +94,7 @@ export interface SequenceSemanticsHost {
   oracleUuidBinding: SqlDriver['oracleUuidBinding'];
   readonly organizationObjectRegistered: SqlDriver['organizationObjectRegistered'];
   readonly physicalTableByObject: SqlDriver['physicalTableByObject'];
+  primeOracleRawUuidColumns: SqlDriver['primeOracleRawUuidColumns'];
   remoteColumn: SqlDriver['remoteColumn'];
   resolveSequenceTenantId: SqlDriver['resolveSequenceTenantId'];
   resolveTenantField: SqlDriver['resolveTenantField'];
@@ -278,7 +279,10 @@ export class SequenceSemanticsFacet {
   }
 
   /** The body of `SqlDriver#update`; the method's docblock there is its contract. */
-  static async update(this: Pick<SequenceSemanticsHost, 'applyTenantScope' | 'applyWriteColumnMap' | 'auditMissingTenant' | 'formatInput' | 'formatOutput' | 'getBuilder' | 'keepSuppliedUpdatedAt' | 'oracleUuidBinding' | 'remoteColumn' | 'rotatedUpdateById' | 'rotationShardsOf' | 'stampsUpdatedAt' | 'updateWithPresumedTimestamp' | 'updatedAtStamp' | 'updatedAtStampIsPresumed'>, object: string, id: string | number, data: Record<string, any>, options?: DriverOptions): Promise<Record<string, unknown> | null> {
+  static async update(this: Pick<SequenceSemanticsHost, 'applyTenantScope' | 'applyWriteColumnMap' | 'auditMissingTenant' | 'formatInput' | 'formatOutput' | 'getBuilder' | 'isOracle' | 'keepSuppliedUpdatedAt' | 'oracleUuidBinding' | 'primeOracleRawUuidColumns' | 'remoteColumn' | 'rotatedUpdateById' | 'rotationShardsOf' | 'stampsUpdatedAt' | 'updateWithPresumedTimestamp' | 'updatedAtStamp' | 'updatedAtStampIsPresumed'>, object: string, id: string | number, data: Record<string, any>, options?: DriverOptions): Promise<Record<string, unknown> | null> {
+    // [#31390] On Oracle a federated object's RAW(16) uuid columns are read from
+    // the remote catalog before a comparand or a written value is bound.
+    if (this.isOracle) await this.primeOracleRawUuidColumns(object);
     this.auditMissingTenant(object, 'update', options);
     const rotationShards = this.rotationShardsOf(object);
     if (rotationShards) return this.rotatedUpdateById(object, rotationShards, id, data, options);
@@ -938,7 +942,10 @@ export class SequenceSemanticsFacet {
   }
 
   /** The body of `SqlDriver#delete`; the method's docblock there is its contract. */
-  static async delete(this: Pick<SequenceSemanticsHost, 'applyTenantScope' | 'auditMissingTenant' | 'getBuilder' | 'oracleUuidBinding' | 'remoteColumn' | 'rotationShardsOf'>, object: string, id: string | number, options?: DriverOptions): Promise<boolean> {
+  static async delete(this: Pick<SequenceSemanticsHost, 'applyTenantScope' | 'auditMissingTenant' | 'getBuilder' | 'isOracle' | 'oracleUuidBinding' | 'primeOracleRawUuidColumns' | 'remoteColumn' | 'rotationShardsOf'>, object: string, id: string | number, options?: DriverOptions): Promise<boolean> {
+    // [#31390] On Oracle a federated object's RAW(16) uuid columns are read from
+    // the remote catalog before a comparand or a written value is bound.
+    if (this.isOracle) await this.primeOracleRawUuidColumns(object);
     this.auditMissingTenant(object, 'delete', options);
     const rotationShards = this.rotationShardsOf(object);
     if (rotationShards) {

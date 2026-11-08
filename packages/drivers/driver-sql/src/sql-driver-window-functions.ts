@@ -46,14 +46,19 @@ export interface WindowFunctionsHost {
   buildWindowFunction: SqlDriver['buildWindowFunction'];
   formatOutput: SqlDriver['formatOutput'];
   getBuilder: SqlDriver['getBuilder'];
+  readonly isOracle: SqlDriver['isOracle'];
   readonly knex: SqlDriver['knex'];
   mapSortField: SqlDriver['mapSortField'];
+  primeOracleRawUuidColumns: SqlDriver['primeOracleRawUuidColumns'];
 }
 
 /** The bodies of the "Window Functions" section of `SqlDriver`: a stateless facet, called by the class's stubs. */
 export class WindowFunctionsFacet {
   /** The body of `SqlDriver#findWithWindowFunctions`; the method's docblock there is its contract. */
-  static async findWithWindowFunctions(this: Pick<WindowFunctionsHost, 'aliasIdentifierSql' | 'applyFilters' | 'applyTenantScope' | 'buildWindowFunction' | 'formatOutput' | 'getBuilder' | 'knex' | 'mapSortField'>, object: string, query: SqlWindowFunctionQuery, options?: DriverOptions): Promise<any[]> {
+  static async findWithWindowFunctions(this: Pick<WindowFunctionsHost, 'aliasIdentifierSql' | 'applyFilters' | 'applyTenantScope' | 'buildWindowFunction' | 'formatOutput' | 'getBuilder' | 'isOracle' | 'knex' | 'mapSortField' | 'primeOracleRawUuidColumns'>, object: string, query: SqlWindowFunctionQuery, options?: DriverOptions): Promise<any[]> {
+    // [#31390] On Oracle a federated object's RAW(16) uuid columns are read from
+    // the remote catalog before a comparand or a written value is bound.
+    if (this.isOracle) await this.primeOracleRawUuidColumns(object);
     const builder = this.getBuilder(object, options);
     // ROWS, so this is the read-side wall itself — not a consistency tidy-up
     // (#6792). This door returned every tenant's rows to a caller that passed

@@ -59,9 +59,11 @@ export interface BulkOperationsHost {
   injectTenantOnInsert: SqlDriver['injectTenantOnInsert'];
   readonly insertReturnsStoredRows: SqlDriver['insertReturnsStoredRows'];
   readonly isMssql: SqlDriver['isMssql'];
+  readonly isOracle: SqlDriver['isOracle'];
   keepSuppliedUpdatedAt: SqlDriver['keepSuppliedUpdatedAt'];
   readonly knex: SqlDriver['knex'];
   oracleUuidBinding: SqlDriver['oracleUuidBinding'];
+  primeOracleRawUuidColumns: SqlDriver['primeOracleRawUuidColumns'];
   readBackInsertedRows: SqlDriver['readBackInsertedRows'];
   resyncSequenceToDataMax: SqlDriver['resyncSequenceToDataMax'];
   remoteColumn: SqlDriver['remoteColumn'];
@@ -79,7 +81,10 @@ export interface BulkOperationsHost {
 /** The bodies of the "Bulk & Batch Operations" section of `SqlDriver`: a stateless facet, called by the class's stubs. */
 export class BulkOperationsFacet {
   /** The body of `SqlDriver#bulkCreate`; the method's docblock there is its contract. */
-  static async bulkCreate(this: Pick<BulkOperationsHost, 'applyWriteColumnMap' | 'auditMissingTenant' | 'autoNumberCounterKey' | 'collidingAutoNumberReservations' | 'fillAutoNumberFields' | 'formatInput' | 'formatOutput' | 'getBuilder' | 'injectTenantOnInsert' | 'insertReturnsStoredRows' | 'isMssql' | 'readBackInsertedRows' | 'resyncSequenceToDataMax' | 'rotationWriteTarget' | 'stampInsertTimestamps'>, object: string, data: any[], options?: DriverOptions): Promise<Record<string, unknown>[]> {
+  static async bulkCreate(this: Pick<BulkOperationsHost, 'applyWriteColumnMap' | 'auditMissingTenant' | 'autoNumberCounterKey' | 'collidingAutoNumberReservations' | 'fillAutoNumberFields' | 'formatInput' | 'formatOutput' | 'getBuilder' | 'injectTenantOnInsert' | 'insertReturnsStoredRows' | 'isMssql' | 'isOracle' | 'primeOracleRawUuidColumns' | 'readBackInsertedRows' | 'resyncSequenceToDataMax' | 'rotationWriteTarget' | 'stampInsertTimestamps'>, object: string, data: any[], options?: DriverOptions): Promise<Record<string, unknown>[]> {
+    // [#31390] On Oracle a federated object's RAW(16) uuid columns are read from
+    // the remote catalog before a comparand or a written value is bound.
+    if (this.isOracle) await this.primeOracleRawUuidColumns(object);
     // Same client-side id assignment as create() (id/_id normalization,
     // nanoid fallback when neither is supplied) — a row missing an id must
     // not be silently inserted with a NULL primary key just because the
@@ -262,7 +267,10 @@ export class BulkOperationsFacet {
   }
 
   /** The body of `SqlDriver#bulkDelete`; the method's docblock there is its contract. */
-  static async bulkDelete(this: Pick<BulkOperationsHost, 'applyTenantScope' | 'auditMissingTenant' | 'getBuilder' | 'oracleUuidBinding' | 'remoteColumn' | 'rotationShardsOf'>, object: string, ids: Array<string | number>, options?: DriverOptions): Promise<void> {
+  static async bulkDelete(this: Pick<BulkOperationsHost, 'applyTenantScope' | 'auditMissingTenant' | 'getBuilder' | 'isOracle' | 'oracleUuidBinding' | 'primeOracleRawUuidColumns' | 'remoteColumn' | 'rotationShardsOf'>, object: string, ids: Array<string | number>, options?: DriverOptions): Promise<void> {
+    // [#31390] On Oracle a federated object's RAW(16) uuid columns are read from
+    // the remote catalog before a comparand or a written value is bound.
+    if (this.isOracle) await this.primeOracleRawUuidColumns(object);
     this.auditMissingTenant(object, 'bulkDelete', options);
     for (const target of this.rotationShardsOf(object) ?? [object]) {
       // The primary key's column: the `external.columnMap` remote column on a
@@ -276,7 +284,10 @@ export class BulkOperationsFacet {
   }
 
   /** The body of `SqlDriver#updateMany`; the method's docblock there is its contract. */
-  static async updateMany(this: Pick<BulkOperationsHost, 'applyFilters' | 'applyTenantScope' | 'applyWriteColumnMap' | 'auditMissingTenant' | 'formatInput' | 'getBuilder' | 'keepSuppliedUpdatedAt' | 'rotationShardsOf' | 'stampsUpdatedAt' | 'updateWithPresumedTimestamp' | 'updatedAtStamp' | 'updatedAtStampIsPresumed'>, object: string, query: DriverQuery, data: any, options?: DriverOptions): Promise<number> {
+  static async updateMany(this: Pick<BulkOperationsHost, 'applyFilters' | 'applyTenantScope' | 'applyWriteColumnMap' | 'auditMissingTenant' | 'formatInput' | 'getBuilder' | 'isOracle' | 'keepSuppliedUpdatedAt' | 'primeOracleRawUuidColumns' | 'rotationShardsOf' | 'stampsUpdatedAt' | 'updateWithPresumedTimestamp' | 'updatedAtStamp' | 'updatedAtStampIsPresumed'>, object: string, query: DriverQuery, data: any, options?: DriverOptions): Promise<number> {
+    // [#31390] On Oracle a federated object's RAW(16) uuid columns are read from
+    // the remote catalog before a comparand or a written value is bound.
+    if (this.isOracle) await this.primeOracleRawUuidColumns(object);
     this.auditMissingTenant(object, 'updateMany', options);
 
     // `data ?? {}` keeps the nullish tolerance this door already had on the
@@ -318,7 +329,10 @@ export class BulkOperationsFacet {
   }
 
   /** The body of `SqlDriver#deleteMany`; the method's docblock there is its contract. */
-  static async deleteMany(this: Pick<BulkOperationsHost, 'applyFilters' | 'applyTenantScope' | 'auditMissingTenant' | 'getBuilder' | 'rotationShardsOf'>, object: string, query: DriverQuery, options?: DriverOptions): Promise<number> {
+  static async deleteMany(this: Pick<BulkOperationsHost, 'applyFilters' | 'applyTenantScope' | 'auditMissingTenant' | 'getBuilder' | 'isOracle' | 'primeOracleRawUuidColumns' | 'rotationShardsOf'>, object: string, query: DriverQuery, options?: DriverOptions): Promise<number> {
+    // [#31390] On Oracle a federated object's RAW(16) uuid columns are read from
+    // the remote catalog before a comparand or a written value is bound.
+    if (this.isOracle) await this.primeOracleRawUuidColumns(object);
     this.auditMissingTenant(object, 'deleteMany', options);
     let total = 0;
     for (const target of this.rotationShardsOf(object) ?? [object]) {
@@ -361,7 +375,10 @@ export class BulkOperationsFacet {
   }
 
   /** The body of `SqlDriver#count`; the method's docblock there is its contract. */
-  static async count(this: Pick<BulkOperationsHost, 'applyFilters' | 'applyTenantScope' | 'backendStatementFault' | 'getBuilder' | 'unresolvableFilterColumnRefusal'>, object: string, query?: DriverQuery, options?: DriverOptions): Promise<number> {
+  static async count(this: Pick<BulkOperationsHost, 'applyFilters' | 'applyTenantScope' | 'backendStatementFault' | 'getBuilder' | 'isOracle' | 'primeOracleRawUuidColumns' | 'unresolvableFilterColumnRefusal'>, object: string, query?: DriverQuery, options?: DriverOptions): Promise<number> {
+    // [#31390] On Oracle a federated object's RAW(16) uuid columns are read from
+    // the remote catalog before a comparand or a written value is bound.
+    if (this.isOracle) await this.primeOracleRawUuidColumns(object);
     const builder = this.getBuilder(object, options);
     this.applyTenantScope(builder, object, options);
 

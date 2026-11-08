@@ -44,7 +44,9 @@ export interface DistinctHost {
   coercionKey: SqlDriver['coercionKey'];
   distinctBackendFault: SqlDriver['distinctBackendFault'];
   getBuilder: SqlDriver['getBuilder'];
+  readonly isOracle: SqlDriver['isOracle'];
   presentReadValue: SqlDriver['presentReadValue'];
+  primeOracleRawUuidColumns: SqlDriver['primeOracleRawUuidColumns'];
   readPresentationKind: SqlDriver['readPresentationKind'];
   remoteColumn: SqlDriver['remoteColumn'];
 }
@@ -52,7 +54,10 @@ export interface DistinctHost {
 /** The bodies of the "Distinct" section of `SqlDriver`: a stateless facet, called by the class's stubs. */
 export class DistinctFacet {
   /** The body of `SqlDriver#distinct`; the method's docblock there is its contract. */
-  static async distinct(this: Pick<DistinctHost, 'applyFilters' | 'applyTenantScope' | 'coercionKey' | 'distinctBackendFault' | 'getBuilder' | 'presentReadValue' | 'readPresentationKind' | 'remoteColumn'>, object: string, field: string, filters?: FilterCondition, options?: DriverOptions): Promise<any[]> {
+  static async distinct(this: Pick<DistinctHost, 'applyFilters' | 'applyTenantScope' | 'coercionKey' | 'distinctBackendFault' | 'getBuilder' | 'isOracle' | 'presentReadValue' | 'primeOracleRawUuidColumns' | 'readPresentationKind' | 'remoteColumn'>, object: string, field: string, filters?: FilterCondition, options?: DriverOptions): Promise<any[]> {
+    // [#31390] On Oracle a federated object's RAW(16) uuid columns are read from
+    // the remote catalog before a comparand or a written value is bound.
+    if (this.isOracle) await this.primeOracleRawUuidColumns(object);
     const builder = this.getBuilder(object, options);
     // The third read door that skipped the chokepoint, and the one #6792 does
     // NOT name — the card asserts the opposite ("called at 13 sites — …,

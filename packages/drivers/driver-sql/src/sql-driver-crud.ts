@@ -66,12 +66,14 @@ export interface CrudHost {
   injectTenantOnInsert: SqlDriver['injectTenantOnInsert'];
   readonly insertReturnsStoredRows: SqlDriver['insertReturnsStoredRows'];
   readonly isMssql: SqlDriver['isMssql'];
+  readonly isOracle: SqlDriver['isOracle'];
   readonly isSqlite: SqlDriver['isSqlite'];
   readonly knex: SqlDriver['knex'];
   mapSortField: SqlDriver['mapSortField'];
   oracleUuidBinding: SqlDriver['oracleUuidBinding'];
   orderKeysFor: SqlDriver['orderKeysFor'];
   primeMssqlPagingKey: SqlDriver['primeMssqlPagingKey'];
+  primeOracleRawUuidColumns: SqlDriver['primeOracleRawUuidColumns'];
   readBackInsertedRows: SqlDriver['readBackInsertedRows'];
   remoteColumn: SqlDriver['remoteColumn'];
   resolveTenantField: SqlDriver['resolveTenantField'];
@@ -118,7 +120,10 @@ export class CrudFacet {
    * cited that as agreement, which it was not; objectstack#4419.) The
    * obligation the contract states is on `find`, and this keeps it there.
    */
-  static async findRows(this: Pick<CrudHost, 'applyFilters' | 'applyTenantScope' | 'backendStatementFault' | 'formatOutput' | 'getBuilder' | 'isMssql' | 'mapSortField' | 'orderKeysFor' | 'primeMssqlPagingKey' | 'remoteColumn' | 'unresolvableFilterColumnRefusal'>, object: string, query: DriverQuery, options?: DriverOptions, singleRowLookup = false): Promise<any[]> {
+  static async findRows(this: Pick<CrudHost, 'applyFilters' | 'applyTenantScope' | 'backendStatementFault' | 'formatOutput' | 'getBuilder' | 'isMssql' | 'isOracle' | 'mapSortField' | 'orderKeysFor' | 'primeMssqlPagingKey' | 'primeOracleRawUuidColumns' | 'remoteColumn' | 'unresolvableFilterColumnRefusal'>, object: string, query: DriverQuery, options?: DriverOptions, singleRowLookup = false): Promise<any[]> {
+    // [#31390] On Oracle a federated object's RAW(16) uuid columns are read from
+    // the remote catalog before a comparand or a written value is bound.
+    if (this.isOracle) await this.primeOracleRawUuidColumns(object);
     // [#31327] On SQL Server a federated object's paging key is read from the
     // remote catalog before the ORDER BY is decided (`primeMssqlPagingKey`).
     if (this.isMssql) await this.primeMssqlPagingKey(object);
@@ -273,7 +278,10 @@ export class CrudFacet {
   }
 
   /** The body of `SqlDriver#create`; the method's docblock there is its contract. */
-  static async create(this: Pick<CrudHost, 'applyWriteColumnMap' | 'auditMissingTenant' | 'collidingAutoNumberReservations' | 'decorateHashShadowDuplicate' | 'fillAutoNumberFields' | 'formatInput' | 'formatOutput' | 'getBuilder' | 'injectTenantOnInsert' | 'insertReturnsStoredRows' | 'isMssql' | 'readBackInsertedRows' | 'resyncSequenceToDataMax' | 'rotationWriteTarget' | 'stampInsertTimestamps'>, object: string, data: Record<string, any>, options?: DriverOptions): Promise<Record<string, unknown>> {
+  static async create(this: Pick<CrudHost, 'applyWriteColumnMap' | 'auditMissingTenant' | 'collidingAutoNumberReservations' | 'decorateHashShadowDuplicate' | 'fillAutoNumberFields' | 'formatInput' | 'formatOutput' | 'getBuilder' | 'injectTenantOnInsert' | 'insertReturnsStoredRows' | 'isMssql' | 'isOracle' | 'primeOracleRawUuidColumns' | 'readBackInsertedRows' | 'resyncSequenceToDataMax' | 'rotationWriteTarget' | 'stampInsertTimestamps'>, object: string, data: Record<string, any>, options?: DriverOptions): Promise<Record<string, unknown>> {
+    // [#31390] On Oracle a federated object's RAW(16) uuid columns are read from
+    // the remote catalog before a comparand or a written value is bound.
+    if (this.isOracle) await this.primeOracleRawUuidColumns(object);
     const { _id, ...rest } = data;
     const toInsert = { ...rest };
 
