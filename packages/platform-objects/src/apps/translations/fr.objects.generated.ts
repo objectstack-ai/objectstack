@@ -1160,9 +1160,10 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
       },
       revoked_reason: {
         label: "Motif de la révocation",
-        help: "Renseigné lorsque la réinitialisation forcée du mot de passe par un administrateur a révoqué cette clé. Seul un administrateur de la plateforme peut restaurer une telle clé ; son propriétaire en crée une nouvelle. Effacé lorsque la clé est restaurée. Vide pour une clé révoquée depuis la liste Clés API.",
+        help: "Motif de la révocation de la clé, lorsqu'il détermine qui peut la restaurer. Réinitialisation du mot de passe par un administrateur : seul un administrateur de la plateforme peut restaurer la clé. Fin de l'appartenance à l'organisation : le propriétaire a quitté l'organisation et personne ne peut restaurer la clé ; un membre en crée une nouvelle. Effacé lorsque la clé est restaurée. Vide pour une clé révoquée depuis la liste Clés API.",
         options: {
-          admin_password_reset: "Réinitialisation du mot de passe par un administrateur"
+          admin_password_reset: "Réinitialisation du mot de passe par un administrateur",
+          organization_membership_ended: "Fin de l'appartenance à l'organisation"
         }
       },
       key: {
