@@ -215,10 +215,10 @@ export const RestrictionProfileSchema = lazySchema(() => strictObject(
      * - `approval` / `approval_revise` are in this vocabulary, so this list
      *   judges them: an environment that runs the approvals plugin lists
      *   them, and one that does not leaves them out.
-     * - A node type outside this vocabulary exists because a code plugin the
-     *   spec declares no contract for registered it, so this list cannot name
-     *   it and `allowCode` governs it: refused under `allowCode: false`,
-     *   allowed under `allowCode: true`.
+     * - A node type outside the profile's vocabulary cannot be named by this
+     *   list (a code plugin the spec declares no contract for registered it),
+     *   so `allowCode` governs it: refused under `allowCode: false`, allowed
+     *   under `allowCode: true`.
      */
     allowedFlowNodeTypes: z
       .array(RestrictionProfileNodeType)
