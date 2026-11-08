@@ -30,6 +30,7 @@
 - 新签名 ⇒ ⛔ 不重投,PR 与其 `Fixes` 卡各留完整签名与初判;下条三事实全立可重投一次。
 - 三事实:失败文件 import 闭包与 diff 不相交、队列基座同 shard 绿、首错是超时非断言。
 - 每次处置留审计评论,重投写签名与台账依据或三行回执;同签名再弹即停,交下一席重诊。
+- PR 侧红(非队列)同在本窗口处置:义务与三步只住 `platform-readings.md`「红检查先读日志」。
 - 挂 auto-merge/入队前读 K = `git rev-list --count --first-parent PRBASE..origin/main`。
 - PRBASE = 末次绿 PR 跑 Test Core 所印 `Affected-set diff base`,⛔ 不取该跑起始时刻。
 - K ≥ 15,或标签 PR 的 PRBASE 后 main 落新语种包(任何 K)⇒ 先 merge main 等重跑绿,`behind` 例外。
@@ -42,7 +43,6 @@
 - 四步序已机械化 `bash scripts/pm/os-regen-merge.sh`,步骤以脚本为权威;⛔ 禁 rebase 与 force-push。
 - 重生成后断言所有兄弟单的条目都还在。
 - 更硬的旁证是查上一单的实现体完好:`git grep` 带引号精确名对 `origin/main` 与实现文件。
-- 锚点断言的正确措辞:断言 `pnpm --filter @objectstack/spec check:authorable-surface` 绿即可。
 
 ## B. 跟到 MERGED 为止;入队后的看护归车道 PM 落地窗口
 
