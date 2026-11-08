@@ -32,6 +32,7 @@
  * | mysql              | `password`   | same, on the discrete-field branch                               |
  * | mongodb            | `password`   | `spec.secret ?? cfg.password` in `buildMongoUrl`                 |
  * | turso              | `authToken`  | `spec.secret` read AHEAD of `config.authToken` (#8152)           |
+ * | oracle             | `password`   | `spec.secret` is the ONLY password `buildOracleConnection` sends  |
  * | sqlite/wasm/memory | *(none)*     | no credential slot at all                                        |
  *
  * Three families are deliberately NOT candidates, each for its own reason:

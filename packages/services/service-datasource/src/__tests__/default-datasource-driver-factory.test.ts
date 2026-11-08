@@ -135,6 +135,65 @@ describe('createDefaultDatasourceDriverFactory — mysql construction', () => {
   });
 });
 
+// ADR-0015 §4.6 (#31328): oracle is a federation dialect of the shared SQL
+// driver — knex `oracledb`, node-oracledb in Thin mode. Construction only: no
+// socket is opened, so no Oracle server is needed for these pins.
+describe('createDefaultDatasourceDriverFactory — oracle construction (#31328)', () => {
+  const connectionOf = (handle: any) => {
+    const driver = handle.driver ?? handle;
+    return (driver?.config ?? driver?.knexConfig ?? {}).connection;
+  };
+
+  it('supports the oracle id and its oracledb alias', () => {
+    expect(factory().supports('oracle')).toBe(true);
+    expect(factory().supports('oracledb')).toBe(true);
+  });
+
+  it('composes the Easy Connect string from host / port / serviceName; the password is the bound secret', async () => {
+    const handle: any = await factory().create({
+      driver: 'oracle',
+      config: { host: 'ora.internal', serviceName: 'FREEPDB1', username: 'app' },
+      secret: 's3cret',
+      schemaMode: 'external',
+    });
+    const driver = handle.driver ?? handle;
+    expect(driver?.constructor?.name).toMatch(/SqlDriver$/);
+    expect(connectionOf(handle)).toEqual({ connectString: 'ora.internal:1521/FREEPDB1', user: 'app', password: 's3cret' });
+    try { await handle.disconnect?.(); } catch { /* pool never opened */ }
+  });
+
+  it('passes a declared connectString through verbatim (a tcps:// string is how TLS is chosen)', async () => {
+    const handle: any = await factory().create({
+      driver: 'oracle',
+      config: { connectString: 'tcps://ora.internal:2484/FREEPDB1', host: 'ignored', serviceName: 'ignored', username: 'app' },
+      schemaMode: 'external',
+    });
+    expect(connectionOf(handle)).toEqual({ connectString: 'tcps://ora.internal:2484/FREEPDB1', user: 'app' });
+    try { await handle.disconnect?.(); } catch { /* pool never opened */ }
+  });
+
+  it('refuses a datasource `ssl` block — node-oracledb Thin has no slot for it, so it would be dropped', async () => {
+    await expect(factory().create({
+      name: 'erp',
+      driver: 'oracle',
+      config: { host: 'ora.internal', serviceName: 'FREEPDB1', username: 'app' },
+      ssl: { enabled: true, ca: 'CA-PEM' },
+      schemaMode: 'external',
+    } as any)).rejects.toThrow(/datasource 'erp': the oracle driver does not read a datasource `ssl` block.*tcps:\/\//s);
+  });
+
+  it('an `ssl` block that turns TLS off is not refused (nothing would be dropped)', async () => {
+    const handle: any = await factory().create({
+      driver: 'oracle',
+      config: { host: 'ora.internal', serviceName: 'FREEPDB1', username: 'app' },
+      ssl: { enabled: false },
+      schemaMode: 'external',
+    } as any);
+    expect(connectionOf(handle).connectString).toBe('ora.internal:1521/FREEPDB1');
+    try { await handle.disconnect?.(); } catch { /* pool never opened */ }
+  });
+});
+
 // #4083 — the `memory` id built a bare `new InMemoryDriver()`, inheriting the
 // driver's THEN-default `persistence: 'auto'` (#4065 has since made that default
 // `false`, so this suite now pins the factory's own guarantee rather than a

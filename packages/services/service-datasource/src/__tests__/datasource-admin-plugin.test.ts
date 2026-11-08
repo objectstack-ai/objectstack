@@ -123,7 +123,9 @@ describe('DatasourceAdminServicePlugin: probe', () => {
 
   it('returns ok:false when no factory supports the driver', async () => {
     const { service } = await boot({ driverFactory: fakeFactory() });
-    const res = await service.testConnection({ name: 'x', driver: 'oracle', config: {} });
+    // A driver id outside the built-in vocabulary (`oracle` served here until
+    // #31328 made it one).
+    const res = await service.testConnection({ name: 'x', driver: 'db2', config: {} });
     expect(res.ok).toBe(false);
     expect(res.error).toMatch(/no driver factory supports/i);
   });

@@ -158,6 +158,8 @@ describe('a missing database client refuses the boot with ITS install (#24909)',
     ['pg', 'postgres', () => ({ url: 'postgres://app@127.0.0.1:1/app' })],
     ['mysql2', 'mysql', () => ({ host: '127.0.0.1', port: 1, database: 'app', user: 'app' })],
     ['better-sqlite3', 'sqlite', () => ({ filename: join(scratch, 'app.db') })],
+    // #31328 — federation only, so the datasource declares `schemaMode: 'external'`.
+    ['oracledb', 'oracle', () => ({ host: '127.0.0.1', port: 1, serviceName: 'FREEPDB1', username: 'app', schemaMode: 'external' })],
   ];
 
   it.each(arms)('%s absent: the %s default is refused, ending on the install of that client', async (client, driver, config) => {

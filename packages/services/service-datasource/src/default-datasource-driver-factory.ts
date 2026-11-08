@@ -874,30 +874,6 @@ function assertOracleSslNotDeclared(spec: DatasourceConnectionSpec): void {
   );
 }
 
-/** The optional package knex's `oracledb` client loads, and the command that installs it. */
-export const ORACLE_DRIVER_PACKAGE = 'oracledb';
-
-/** @see {@link ORACLE_DRIVER_PACKAGE} */
-export const ORACLE_DRIVER_INSTALL_COMMAND = `npm install ${ORACLE_DRIVER_PACKAGE}`;
-
-/** Whether `err` is knex failing to load the `oracledb` package. */
-function isMissingOracledbPackage(err: unknown): boolean {
-  const message = err instanceof Error ? err.message : String(err);
-  return /Cannot find (module|package) ['"]oracledb['"]/.test(message) || /npm install oracledb/.test(message);
-}
-
-/** What the `oracle` arm says when the optional `oracledb` package is absent. */
-export function missingOracledbMessage(args: { datasource?: string; cause?: unknown }): string {
-  const cause = args.cause instanceof Error ? args.cause.message.split('\n')[0] : undefined;
-  return (
-    `datasource '${args.datasource ?? 'default'}' uses the oracle driver, but the optional package ` +
-    `'${ORACLE_DRIVER_PACKAGE}' is not installed, so no connection was opened. Install it with ` +
-    `\`${ORACLE_DRIVER_INSTALL_COMMAND}\` in the server's project (it runs in Thin mode: pure JavaScript, ` +
-    `no Oracle Client libraries) and restart.` +
-    (cause ? ` (${cause})` : '')
-  );
-}
-
 /**
  * Host-composition keys the CLI/standalone stack stamps into a `default`
  * datasource's `config` for the SQL builders (#3826). They are not memory-driver
@@ -1274,31 +1250,19 @@ export function createDefaultDatasourceDriverFactory(
         // ADR-0015 §4.6 — federation only: the spec refuses a managed oracle
         // datasource at authoring, and `SqlDriver` refuses every DDL operation
         // on it by name; this arm only connects. knex `oracledb`, node-oracledb
-        // in Thin mode (pure JavaScript). `oracledb` is an OPTIONAL peer of
-        // `@objectstack/driver-sql`, and knex loads it at construction — so its
-        // absence surfaces HERE, as the install remedy rather than knex's own
-        // `Knex: run $ npm install oracledb --save`.
+        // in Thin mode (pure JavaScript, no Oracle Client libraries). The
+        // `oracledb` package is an OPTIONAL install of `@objectstack/driver-sql`
+        // that knex loads by name, like `pg` and `mysql2`, so its absence is
+        // answered by `connect-failure-remedy.ts`'s client-install remedy
+        // (`OPTIONAL_DRIVER_CLIENT_PACKAGES`).
         assertOracleSslNotDeclared(spec);
         const { SqlDriver } = await import('@objectstack/driver-sql');
-        let driver: any;
-        try {
-          driver = new SqlDriver({
-            client: 'oracledb',
-            connection: buildOracleConnection(spec) as any,
-            pool: buildSqlPool(spec),
-            ...(schemaMode ? { schemaMode: schemaMode as any } : {}),
-          } as any);
-        } catch (err: any) {
-          if (isMissingOracledbPackage(err)) {
-            throw new MissingDriverPackageError({
-              driverType: 'oracle',
-              packageName: ORACLE_DRIVER_PACKAGE,
-              installCommand: ORACLE_DRIVER_INSTALL_COMMAND,
-              message: missingOracledbMessage({ datasource: spec.name, cause: err }),
-            });
-          }
-          throw err;
-        }
+        const driver = new SqlDriver({
+          client: 'oracledb',
+          connection: buildOracleConnection(spec) as any,
+          pool: buildSqlPool(spec),
+          ...(schemaMode ? { schemaMode: schemaMode as any } : {}),
+        } as any);
         return toHandle(driver);
       }
 
