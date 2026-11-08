@@ -229,7 +229,7 @@ describe('[#23022] start() issues no DDL when the engine resolved skipSchemaSync
       manifest: { id: 'com.acme.crm', version: '1.0.0' } as any,
       metadata: {},
     });
-    expect(out).toEqual({ success: true });
+    expect(out).toEqual({ success: true, version: expect.any(String), createdAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/) });
   });
 
   it.each([

@@ -135,7 +135,7 @@ describe('[#24086] rows stored before the change keep hydrating (stated toleranc
   it("a stored type 'application' / scope 'environment' row hydrates as stored after a restart", async () => {
     const dir = freshDir();
     const first = await boot(dir);
-    expect(await first.packages.publish({ manifest: AI_BASE as never, metadata: {} as never })).toEqual({ success: true });
+    expect(await first.packages.publish({ manifest: AI_BASE as never, metadata: {} as never })).toEqual({ success: true, version: expect.any(String), createdAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/) });
     await first.kernel.shutdown();
 
     const second = await boot(dir);
@@ -163,7 +163,7 @@ describe('[#24086] rows stored before the change keep hydrating (stated toleranc
     const AI_APP = { ...AI_BASE, id: 'com.example.ai-app', name: 'AI app', icon: 'sparkles' };
     const dir = freshDir();
     const first = await boot(dir);
-    expect(await first.packages.publish({ manifest: AI_APP as never, metadata: {} as never })).toEqual({ success: true });
+    expect(await first.packages.publish({ manifest: AI_APP as never, metadata: {} as never })).toEqual({ success: true, version: expect.any(String), createdAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/) });
     await first.kernel.shutdown();
 
     const second = await boot(dir);
