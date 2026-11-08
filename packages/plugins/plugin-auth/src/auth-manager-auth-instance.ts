@@ -158,6 +158,7 @@ export interface AuthInstanceHost {
   isPlatformAdminUserId: AuthManager['isPlatformAdminUserId'];
   isSsoWired: AuthManager['isSsoWired'];
   linkingContext: AuthManager['linkingContext'];
+  logDurabilityDegradation: AuthManager['logDurabilityDegradation'];
   recordPasswordHistory: AuthManager['recordPasswordHistory'];
   resolveActor: AuthManager['resolveActor'];
   resolveAuthSecret: AuthManager['resolveAuthSecret'];
@@ -823,6 +824,7 @@ export async function createAuthInstance(this: AuthInstanceHost): Promise<Auth<a
           enforceConcurrentCap: (...a) => this.enforceConcurrentCap(...a),
           externalDirectoryDoorDeps: (...a) => this.externalDirectoryDoorDeps(...a),
           isEmailDeliveryLive: (...a) => this.isEmailDeliveryLive(...a),
+          logDurabilityDegradation: (...a) => this.logDurabilityDegradation(...a),
           recordPasswordHistory: (...a) => this.recordPasswordHistory(...a),
           roleChangeGrantDeps: (...a) => this.roleChangeGrantDeps(...a),
           sendChangeEmailNotice: (...a) => this.sendChangeEmailNotice(...a),

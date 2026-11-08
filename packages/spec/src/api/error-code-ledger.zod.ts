@@ -599,6 +599,7 @@ export const ERROR_CODE_LEDGER = {
     'ASYNC_NOT_SUPPORTED',
     'AUTH_CONFIG_ERROR',
     'CREATE_FAILED',
+    'CREDENTIALS_NAME_DIFFERENT_ACCOUNTS', // 401, before every gate and the endpoint: the request's session cookie and its bearer token name two different signed-in accounts, so it is refused and nothing runs for either; an auth request is judged and executed as one account (one credential, one account, or a credential naming no live account is unaffected)
     'DOMAIN_VERIFICATION_DISABLED', // domain verification is off on this deployment
     'DOMAIN_VERIFICATION_FAILED', // pass-through from better-auth
     'EMAIL_DOMAIN_NOT_ALLOWED',   // [#11739] audience posture email_domain: the address's domain is off the allowlist
