@@ -469,7 +469,13 @@ export class CloudConnectionPlugin implements Plugin {
                 version: '1.0.0',
                 type: 'plugin',
                 scope: 'system',
-                defaultDatasource: 'cloud',
+                // No `defaultDatasource`, deliberately: the row rides the
+                // engine's default datasource, the one `sys_secret` (the
+                // platform-objects manifest, which names none) seals its
+                // token into. So the row and its secret share one database —
+                // the one every replica connects to and the one the pre-boot
+                // read opens. Naming `cloud` here would split them on any
+                // deployment that registers a `cloud` datasource.
                 namespace: 'sys',
                 objects: [SysCloudBindingCredential],
             });

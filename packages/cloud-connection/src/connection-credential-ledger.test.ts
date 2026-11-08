@@ -57,6 +57,7 @@ import {
 } from './connection-credential-ledger.js';
 import { CloudConnectionPlugin } from './cloud-connection-plugin.js';
 import { SysCloudBindingCredential } from './sys-cloud-binding-credential.object.js';
+import { readCloudBindingCredentialBeforeBoot } from './connection-credential-preboot.js';
 import { bindCatalogFromTables } from './__tests__/security-catalog.testkit.js';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 
@@ -301,6 +302,58 @@ describe('[#31554] the plugin chooses the shared row only for declared replicas 
         } finally {
             vi.unstubAllGlobals();
         }
+    });
+
+    it("registers the row on the engine's default datasource, beside sys_secret, even when a `cloud` datasource exists — and the pre-boot read finds it there", async () => {
+        vi.stubEnv('OS_CLUSTER_REPLICAS', '2');
+        dir = mkdtempSync(join(tmpdir(), 'ccl-plugin-'));
+        const key = randomBytes(32);
+        const primaryFile = join(dir, 'primary.sqlite');
+        const ql = new ObjectQL();
+        engines.push(ql);
+        const primary = new SqlDriver({ client: 'better-sqlite3', connection: { filename: primaryFile }, useNullAsDefault: true });
+        const cloud = new SqlDriver({ client: 'better-sqlite3', connection: { filename: join(dir, 'cloud.sqlite') }, useNullAsDefault: true });
+        (cloud as { name: string }).name = 'cloud'; // a second datasource named `cloud`, as a control-plane-proxied kernel has
+        await primary.connect();
+        await cloud.connect();
+        ql.registerDriver(primary, true);
+        ql.registerDriver(cloud);
+        await ql.init();
+        // sys_secret's own manifest, as PlatformObjectsPlugin registers it: no defaultDatasource.
+        ql.registerApp({ id: 'com.objectstack.platform-objects', name: 'Platform Objects', version: '1.0.0', type: 'plugin', scope: 'system', objects: [SysSecret] });
+        const { ctx, fire } = pluginContext({
+            manifest: { register: (m: unknown) => ql.registerApp(m) },
+            cluster: { driver: 'redis', nodeId: 'n1' },
+            objectql: ql,
+        });
+        const plugin = new CloudConnectionPlugin({ singleEnvironment: true, controlPlaneUrl: 'http://cloud.test', credentialPath: join(dir, 'cc.json') });
+        await plugin.init(ctx as never);
+        await ql.syncSchemas();
+        ql.setCryptoProvider(new LocalCryptoProvider({ key }));
+        await plugin.start(ctx as never);
+        await fire('kernel:ready');
+
+        expect(ql.getDriverForObject(CLOUD_BINDING_CREDENTIAL_OBJECT)).toBe(primary);
+        expect(ql.getDriverForObject('sys_secret')).toBe(primary);
+        await new SharedConnectionCredentialLedger(() => ql as never).write(FULL);
+        expect(await primary.find(CLOUD_BINDING_CREDENTIAL_OBJECT, {} as never)).toHaveLength(1);
+        expect(await primary.find('sys_secret', {} as never)).toHaveLength(1);
+        await expect(cloud.find(CLOUD_BINDING_CREDENTIAL_OBJECT, {} as never)).rejects.toThrow(); // never created there
+        await fire('kernel:shutdown');
+        await plugin.destroy();
+
+        // Before the kernel, one connection to that default datasource reads it back.
+        const result = await readCloudBindingCredentialBeforeBoot({
+            env: { OS_CLUSTER_REPLICAS: '2', OS_CLUSTER_DRIVER: 'redis' },
+            openDriver: async () => {
+                const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: primaryFile }, useNullAsDefault: true });
+                await driver.connect();
+                return driver as never;
+            },
+            cryptoProvider: new LocalCryptoProvider({ key }),
+            timeoutMs: 10_000,
+        });
+        expect(result).toEqual({ status: 'read', credential: FULL });
     });
 
     it('with no manifest service to register the object, reports the split at error with its consequence and fix, and keeps the file', async () => {

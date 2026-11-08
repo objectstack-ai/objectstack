@@ -194,7 +194,9 @@ every replica reads:
   the cloud, such as an online licence check, sees a change within 30 seconds.
 - **The database, not the cluster store, holds it.** The cluster store is a
   cache: flushing it, or running it without persistence, must never
-  disconnect the server.
+  disconnect the server. The row lives in the server's default database, the
+  same one that holds its encrypted secrets, even when another datasource
+  (such as one named `cloud`) is configured.
 - **It can be read before the server starts.** The multi-node licence check
   runs before startup, so a host reads the row once at that point with
   `readCloudBindingCredentialBeforeBoot` from `@objectstack/cloud-connection`.
