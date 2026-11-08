@@ -103,6 +103,7 @@ export interface FilterHelpersHost {
   readonly managedObjectFields: SqlDriver['managedObjectFields'];
   mapSortField: SqlDriver['mapSortField'];
   readonly mediaFields: SqlDriver['mediaFields'];
+  readonly mssqlGuidColumnsByObject: SqlDriver['mssqlGuidColumnsByObject'];
   needsLegacyDatetimeRepair: SqlDriver['needsLegacyDatetimeRepair'];
   needsLegacyTimeRepair: SqlDriver['needsLegacyTimeRepair'];
   readonly numericFields: SqlDriver['numericFields'];
@@ -628,12 +629,12 @@ export class FilterHelpersFacet {
    * because SQLite does not honour a default escape character (MySQL/Postgres do,
    * but the explicit clause is correct for all three).
    */
-  static applyContainsLike(this: Pick<FilterHelpersHost, 'applyLike'>, builder: any, method: string, field: string, value: unknown): void {
-    this.applyLike(builder, method, field, value, 'contains');
+  static applyContainsLike(this: Pick<FilterHelpersHost, 'applyLike'>, builder: any, method: string, field: string, value: unknown, guidColumn = false): void {
+    this.applyLike(builder, method, field, value, 'contains', false, false, guidColumn);
   }
 
   /** The body of `SqlDriver#applyFilterCondition`; the method's docblock there is its contract. */
-  static applyFilterCondition(this: Pick<FilterHelpersHost, 'applyContainsLike' | 'applyCrossFieldComparison' | 'applyEmptyOperator' | 'applyFalseConstant' | 'applyFilterCondition' | 'applyJsonMembership' | 'applyLike' | 'applyLikePattern' | 'applyNormalizedComparison' | 'applyNowAnchorComparison' | 'applyNullSafeNegative' | 'applyTextOperatorOverNonTextColumn' | 'assertOperatorAppliesToColumn' | 'coerceFilterValue' | 'coercionKey' | 'filterColumnExpr' | 'isJsonColumn' | 'isNonTextColumn' | 'isOracle' | 'mapSortField' | 'readableIdsSubquery' | 'remoteColumn' | 'withWithheldFilterLog'>,
+  static applyFilterCondition(this: Pick<FilterHelpersHost, 'applyContainsLike' | 'applyCrossFieldComparison' | 'applyEmptyOperator' | 'applyFalseConstant' | 'applyFilterCondition' | 'applyJsonMembership' | 'applyLike' | 'applyLikePattern' | 'applyNormalizedComparison' | 'applyNowAnchorComparison' | 'applyNullSafeNegative' | 'applyTextOperatorOverNonTextColumn' | 'assertOperatorAppliesToColumn' | 'coerceFilterValue' | 'coercionKey' | 'filterColumnExpr' | 'isJsonColumn' | 'isMssql' | 'isNonTextColumn' | 'isOracle' | 'mapSortField' | 'mssqlGuidColumnsByObject' | 'readableIdsSubquery' | 'remoteColumn' | 'withWithheldFilterLog'>,
     builder: Knex.QueryBuilder,
     condition: any,
     logicalOp: 'and' | 'or' = 'and',
@@ -765,6 +766,11 @@ export class FilterHelpersFacet {
         // Non-null only for a SQLite `Field.datetime`, whose two stored forms
         // (INTEGER epoch / ISO TEXT) must be unified before comparing (#3912).
         const columnExpr = this.filterColumnExpr(table, localField, field);
+        // [#31395] A SQL Server `uniqueidentifier` column, as the remote catalog
+        // reported it (`primeMssqlGuidColumns`): the text operators below match
+        // it as its lower-case text, the form a read answers.
+        const guidColumn =
+          this.isMssql && table !== null && this.mssqlGuidColumnsByObject.get(table)?.has(field) === true;
         for (const [rawOp, opValue] of Object.entries(value as Record<string, any>)) {
           const method = logicalOp === 'or' ? 'orWhere' : 'where';
           // [ADR-0139 D3] The composed `ReadableIds` leaf — the one non-list a
@@ -922,7 +928,7 @@ export class FilterHelpersFacet {
             // which is the other half of the sentence the spec now states.
             case '$contains':
               if (!this.applyJsonMembership(builder, method, table, localField, field, opValue, false, value)) {
-                this.applyContainsLike(builder, method, field, opValue);
+                this.applyContainsLike(builder, method, field, opValue, guidColumn);
               }
               break;
             // [#5702] The case-INSENSITIVE twin of `$contains`, and the
@@ -932,7 +938,7 @@ export class FilterHelpersFacet {
             // only the comparand compares a folded needle against a raw column
             // and matches just the rows that were already lower-case.
             case '$icontains':
-              this.applyLike(builder, method, field, opValue, 'contains', false, true);
+              this.applyLike(builder, method, field, opValue, 'contains', false, true, guidColumn);
               break;
             case '$notContains':
               // [commit e04a0aff2] The exact complement of the arm above, on the same
@@ -946,15 +952,15 @@ export class FilterHelpersFacet {
                 // [#5298] NULL-safe: `NOT LIKE` is UNKNOWN for a NULL column, and
                 // "does not contain" is true of a value that is not there.
                 this.applyNullSafeNegative(builder, method, field, (qb) =>
-                  this.applyLike(qb, 'orWhere', field, opValue, 'contains', true),
+                  this.applyLike(qb, 'orWhere', field, opValue, 'contains', true, false, guidColumn),
                 );
               }
               break;
             case '$startsWith':
-              this.applyLike(builder, method, field, opValue, 'starts');
+              this.applyLike(builder, method, field, opValue, 'starts', false, false, guidColumn);
               break;
             case '$endsWith':
-              this.applyLike(builder, method, field, opValue, 'ends');
+              this.applyLike(builder, method, field, opValue, 'ends', false, false, guidColumn);
               break;
             // [#7536] The pattern pair. NOT `applyLike`: that method escapes the
             // comparand and wraps it in the shape's wildcards, which is the
@@ -969,10 +975,10 @@ export class FilterHelpersFacet {
             // and a pattern is not a value of that type — coercing it would
             // rewrite the pattern text.
             case '$like':
-              this.applyLikePattern(builder, method, field, opValue as string, false);
+              this.applyLikePattern(builder, method, field, opValue as string, false, guidColumn);
               break;
             case '$ilike':
-              this.applyLikePattern(builder, method, field, opValue as string, true);
+              this.applyLikePattern(builder, method, field, opValue as string, true, guidColumn);
               break;
             case '$between': {
               const arr = Array.isArray(coerced) ? coerced : [];
