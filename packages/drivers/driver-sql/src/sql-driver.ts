@@ -8905,6 +8905,7 @@ export class SqlDriver implements IDataDriver {
       get numericFields() { return driver.numericFields; },
       presentReadColumns: (...a) => driver.presentReadColumns(...a),
       readPresentationKind: (...a) => driver.readPresentationKind(...a),
+      remoteColumn: (...a) => driver.remoteColumn(...a),
     }));
     bulkOperationsHost.install((driver) => ({
       applyFilters: (...a) => driver.applyFilters(...a),
@@ -9049,6 +9050,7 @@ export class SqlDriver implements IDataDriver {
       get getBuilder() { return driver.getBuilder.bind(driver); },
       presentReadValue: (...a) => driver.presentReadValue(...a),
       readPresentationKind: (...a) => driver.readPresentationKind(...a),
+      remoteColumn: (...a) => driver.remoteColumn(...a),
     }));
     fieldMappingHost.install((driver) => ({
       get fieldColumnByObject() { return driver.fieldColumnByObject; },
