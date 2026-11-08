@@ -1,0 +1,323 @@
+---
+title: Dataset Tools schema — AI Protocol reference
+navTitle: Dataset Tools
+description: "Dataset AI tools — the inputs and outputs of list_datasets and query_dataset."
+---
+
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
+
+Dataset AI tools — the inputs and outputs of `list_datasets` and
+`query_dataset` (ADR-0149 D2).
+
+The two tools give an AI the business semantic layer a person already reads
+through dashboards and reports: `list_datasets` returns the catalogue (the
+datasets the caller may query, their dimensions and measures, each member's
+business vocabulary, and which of the caller's words matched which member),
+and `query_dataset` runs a `DatasetSelection` against one saved dataset and
+answers rows plus a `provenance` block naming the dataset and the measures
+used. The shapes are declared here once and projected to the JSON Schema an
+`AIToolDefinition` carries (`getDatasetToolJsonSchemas`), so the MCP
+registration and the product AI's registration read one definition.
+
+`query_dataset`'s `selection` is `DatasetSelectionSchema` BY REFERENCE, the
+body `POST /api/v1/analytics/dataset/query` takes under the same key: the AI
+has no private dialect, and the selection's own aliases and guidance apply
+inside it. Only a saved dataset is addressed, by `datasetName`: there is no
+inline `dataset` and no `previewDrafts` on this tool, because an AI that could
+author a dataset inline could author its own 口径.
+
+Only the shapes are spec. The executor, the catalogue builder with its
+admission and member withholding, the term matcher and the row cap
+(`selection.limit` held to the bridge's `maxQueryLimit`) belong to
+`@objectstack/service-analytics` (card #31589); the MCP registration under
+`data:read` to `@objectstack/mcp` (card #31590). The tool descriptions, which
+carry the ADR-0149 D3 selection rule to the model, are written by the
+executor: AI guidance text does not enter the spec (ADR-0149 M1, ruled A).
+
+<Callout type="info">
+**Source:** `packages/spec/src/ai/dataset-tools.zod.ts`
+</Callout>
+
+## TypeScript Usage
+
+```typescript
+import { DatasetCatalogDimensionSchema, DatasetCatalogEntrySchema, DatasetCatalogMeasureSchema, DatasetProvenanceSchema, DatasetTermMatchSchema, DatasetTermMatchedOn, ListDatasetsInputSchema, ListDatasetsOutputSchema, QueryDatasetInputSchema, QueryDatasetOutputSchema } from '@objectstack/spec/ai';
+import type { DatasetCatalogDimension, DatasetCatalogEntry, DatasetCatalogMeasure, DatasetProvenance, DatasetTermMatch, DatasetTermMatchedOn, ListDatasetsInput, ListDatasetsOutput, QueryDatasetInput, QueryDatasetOutput } from '@objectstack/spec/ai';
+
+// Validate data
+const result = DatasetCatalogDimensionSchema.parse(data);
+```
+
+---
+
+## DatasetCatalogDimension
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Dimension name — what `selection.dimensions` takes |
+| **label** | `string` | ✅ | Display label at the caller's locale — the text the query answer's `fields[].label` carries for this dimension |
+| **description** | `string` | optional | The dimension's business definition at the caller's locale; absent when the dataset declares none |
+| **type** | `Enum<'string' \| 'number' \| 'boolean' \| 'time' \| 'geo'>` | ✅ | Column type in the `DimensionType` vocabulary — the word the query answer's `fields[].type` carries for this dimension (a date dimension is `time`) |
+| **synonyms** | `string[]` | optional | The words a person uses for this dimension in a question, as the dataset declares them; matched, never rendered |
+
+
+---
+
+## DatasetCatalogEntry
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Dataset name — what `query_dataset` takes as `datasetName` |
+| **label** | `string` | ✅ | Dataset label at the caller's locale |
+| **description** | `string` | optional | Dataset description at the caller's locale; absent when the dataset declares none |
+| **object** | `string` | ✅ | The dataset's base object, by machine name |
+| **membersWithheld** | `true` | optional | Present, and `true`, when a member was left out because this caller cannot read a field it reads: the narrowing is stated, so an answer can say a measure exists that this caller may not see (ADR-0090 D10). Absent when every member the dataset publishes is listed |
+| **dimensions** | `{ name: string; label: string; description?: string; type: Enum<'string' \| 'number' \| 'boolean' \| 'time' \| 'geo'>; … }[]` | ✅ | The dimensions this caller may group by |
+| **measures** | `{ name: string; label: string; description?: string; aggregate?: Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct'>; … }[]` | ✅ | The measures this caller may read |
+| **matches** | `{ term: string; member: string; matchedOn: Enum<'name' \| 'label' \| 'synonym'> }[]` | optional | Each of the caller's `terms` that matched a member of this dataset, computed by the platform under the same normalization the dataset's own validation uses. Absent when no `terms` were sent |
+
+### Nested Shape: `DatasetCatalogEntry.dimensions[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Dimension name — what `selection.dimensions` takes |
+| **label** | `string` | ✅ | Display label at the caller's locale — the text the query answer's `fields[].label` carries for this dimension |
+| **description** | `string` | optional | The dimension's business definition at the caller's locale; absent when the dataset declares none |
+| **type** | `Enum<'string' \| 'number' \| 'boolean' \| 'time' \| 'geo'>` | ✅ | Column type in the `DimensionType` vocabulary — the word the query answer's `fields[].type` carries for this dimension (a date dimension is `time`) |
+| **synonyms** | `string[]` | optional | The words a person uses for this dimension in a question, as the dataset declares them; matched, never rendered |
+
+### Nested Shape: `DatasetCatalogEntry.measures[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Measure name — what `selection.measures` takes |
+| **label** | `string` | ✅ | Display label at the caller's locale — the text the query answer's `fields[].label` carries for this measure |
+| **description** | `string` | optional | The measure's business definition at the caller's locale: what the number includes and when to use it. Absent when the dataset declares none |
+| **aggregate** | `Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct'>` | optional | The measure's aggregate; absent on a derived measure, which has no single aggregate |
+| **format** | `string` | optional | Display format hint, as the measure declares it (e.g. "$0,0", "0.0%") |
+| **polarity** | `Enum<'higher' \| 'lower' \| 'neutral'>` | optional | Which direction of change is good news, as the measure declares it; absent means a rise is good |
+| **synonyms** | `string[]` | optional | The words a person uses for this measure in a question, as the dataset declares them; matched, never rendered |
+
+### Nested Shape: `DatasetCatalogEntry.matches[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **term** | `string` | ✅ | The caller's term, as sent in `terms` |
+| **member** | `string` | ✅ | The member the term matched, as `measures.<name>` or `dimensions.<name>` |
+| **matchedOn** | `Enum<'name' \| 'label' \| 'synonym'>` | ✅ | Which of the member's words the term equals after normalization: its `name`, its `label` (any locale) or one of its `synonyms` |
+
+
+---
+
+## DatasetCatalogMeasure
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Measure name — what `selection.measures` takes |
+| **label** | `string` | ✅ | Display label at the caller's locale — the text the query answer's `fields[].label` carries for this measure |
+| **description** | `string` | optional | The measure's business definition at the caller's locale: what the number includes and when to use it. Absent when the dataset declares none |
+| **aggregate** | `Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct'>` | optional | The measure's aggregate; absent on a derived measure, which has no single aggregate |
+| **format** | `string` | optional | Display format hint, as the measure declares it (e.g. "$0,0", "0.0%") |
+| **polarity** | `Enum<'higher' \| 'lower' \| 'neutral'>` | optional | Which direction of change is good news, as the measure declares it; absent means a rise is good |
+| **synonyms** | `string[]` | optional | The words a person uses for this measure in a question, as the dataset declares them; matched, never rendered |
+
+
+---
+
+## DatasetProvenance
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **kind** | `'dataset'` | ✅ | The answer was computed from a governed dataset |
+| **dataset** | `{ name: string; label: string }` | ✅ | The dataset the answer was computed from |
+| **measures** | `{ name: string; label: string; description?: string }[]` | ✅ | The selected measures, in selection order |
+| **dimensions** | `{ name: string; label: string }[]` | ✅ | The selected dimensions, in selection order |
+| **runtimeFilter** | `any` | optional | The caller's `selection.runtimeFilter`, echoed as sent; absent when none was sent. The dataset's own `filter` is never echoed |
+
+### Nested Shape: `DatasetProvenance.dataset`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Dataset name |
+| **label** | `string` | ✅ | Dataset label at the caller's locale |
+
+### Nested Shape: `DatasetProvenance.measures[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Measure name |
+| **label** | `string` | ✅ | Measure label at the caller's locale |
+| **description** | `string` | optional | The measure's business definition at the caller's locale — the sentence that explains what the number includes. Absent when the measure declares none |
+
+### Nested Shape: `DatasetProvenance.dimensions[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Dimension name |
+| **label** | `string` | ✅ | Dimension label at the caller's locale |
+
+
+---
+
+## DatasetTermMatch
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **term** | `string` | ✅ | The caller's term, as sent in `terms` |
+| **member** | `string` | ✅ | The member the term matched, as `measures.<name>` or `dimensions.<name>` |
+| **matchedOn** | `Enum<'name' \| 'label' \| 'synonym'>` | ✅ | Which of the member's words the term equals after normalization: its `name`, its `label` (any locale) or one of its `synonyms` |
+
+
+---
+
+## DatasetTermMatchedOn
+
+### Allowed Values
+
+* `name`
+* `label`
+* `synonym`
+
+
+---
+
+## ListDatasetsInput
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **terms** | `string[]` | optional | Candidate business words lifted from the question (e.g. ["营收", "销售阶段"]). Each is compared, after normalization (`normalizeDatasetTerm`), with every listed member's name, label and synonyms, and each hit is reported on its dataset's `matches`. Omit it to list the whole catalogue. |
+
+
+---
+
+## ListDatasetsOutput
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **datasets** | `{ name: string; label: string; description?: string; object: string; … }[]` | ✅ | The datasets this caller may query. A dataset the caller may not query is absent, the same answer as one that does not exist |
+| **partial** | `true` | optional | Present, and `true`, when the dataset read was degraded and `datasets` may be incomplete; `warning` says why. Absent on a complete answer |
+| **warning** | `string` | optional | Why the answer is partial; present exactly when `partial` is |
+
+### Nested Shape: `ListDatasetsOutput.datasets[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Dataset name — what `query_dataset` takes as `datasetName` |
+| **label** | `string` | ✅ | Dataset label at the caller's locale |
+| **description** | `string` | optional | Dataset description at the caller's locale; absent when the dataset declares none |
+| **object** | `string` | ✅ | The dataset's base object, by machine name |
+| **membersWithheld** | `true` | optional | Present, and `true`, when a member was left out because this caller cannot read a field it reads: the narrowing is stated, so an answer can say a measure exists that this caller may not see (ADR-0090 D10). Absent when every member the dataset publishes is listed |
+| **dimensions** | `{ name: string; label: string; description?: string; type: Enum<'string' \| 'number' \| 'boolean' \| 'time' \| 'geo'>; … }[]` | ✅ | The dimensions this caller may group by |
+| **measures** | `{ name: string; label: string; description?: string; aggregate?: Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct'>; … }[]` | ✅ | The measures this caller may read |
+| **matches** | `{ term: string; member: string; matchedOn: Enum<'name' \| 'label' \| 'synonym'> }[]` | optional | Each of the caller's `terms` that matched a member of this dataset, computed by the platform under the same normalization the dataset's own validation uses. Absent when no `terms` were sent |
+
+
+---
+
+## QueryDatasetInput
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **datasetName** | `string` | ✅ | The saved dataset to query, by name, as `list_datasets` lists it. A dataset that does not exist and one this caller may not query get the same `NOT_FOUND` answer |
+| **selection** | `{ dimensions?: string[]; measures: string[]; runtimeFilter?: any; timeDimensions?: object[]; … }` | ✅ |  |
+
+### Nested Shape: `QueryDatasetInput.selection`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **dimensions** | `string[]` | optional | List of dimensions to group by |
+| **measures** | `string[]` | ✅ | List of metrics to calculate |
+| **runtimeFilter** | `any` | optional | Presentation-scope filter (canonical Query DSL FilterCondition), ANDed with the dataset's intrinsic filter at render |
+| **timeDimensions** | `{ dimension: string; granularity?: Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>; dateRange?: Enum<'today' \| 'yesterday' \| 'this_week' \| 'last_week' \| 'this_month' \| 'last_month' \| …> \| [string, string] }[]` | optional | Time-bucketed dimensions. Each entry names a dimension, an optional bucket `granularity`, and an optional `dateRange` — a preset name from the closed date-range vocabulary (e.g. `'last_7_days'`) or an explicit `[start, end]` window; an unrecognised string answers `400 ANALYTICS_DATE_RANGE_UNRECOGNIZED` instead of silently widening. |
+| **dateGranularity** | `Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>` | optional | Presentation-scope date bucketing applied to every selected `date` dimension; an explicit `timeDimensions` entry wins over it, and the dataset dimension's own default is used when neither is set |
+| **order** | `Record<string, Enum<'asc' \| 'desc'>>` | optional |  |
+| **limit** | `integer` | optional | Maximum number of rows to return, applied after `order` — a non-negative integer (`0` returns no rows) |
+| **offset** | `integer` | optional | Number of rows to skip before the first row returned, applied after `order` — a non-negative integer; an `offset` with no `limit` returns every row after it |
+| **compareTo** | `{ kind: Enum<'previousPeriod' \| 'previousYear'>; dimension?: string }` | optional | Period-over-period comparison window (`{ kind, dimension? }`); attaches `<measure>__compare` columns |
+| **totals** | `{ groupings: string[][] }` | optional | Server-side marginal aggregates; each grouping is a dimension subset to additionally aggregate by, `[]` being the grand total |
+| **timezone** | `string` | optional |  |
+
+
+---
+
+## QueryDatasetOutput
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **rows** | `Record<string, any>[]` | ✅ | Result rows |
+| **fields** | `{ name: string; type: string; label?: string; format?: string; … }[]` | ✅ | Column metadata |
+| **totals** | `{ dimensions: string[]; rows: Record<string, any>[] }[]` | optional | Marginal aggregates - one entry per requested totals grouping, in request order, each computed with the measure's true aggregate over the underlying data (never re-derived from bucketed values). The grand-total grouping yields a single dimensionless row. |
+| **object** | `string` | optional | The base object of the dataset the answer was computed from: the dataset's `object`, by machine name. Every dataset answer (`POST /analytics/dataset/query`) must carry it, whatever dimensions are selected and whether or not rows came back, so a consumer can refresh on that object's record changes and drill into its records. Absent on a cube query answer, which has no dataset behind it. |
+| **dimensionFields** | `Record<string, string>` | optional | Drill-through sidecar: each equality-drillable dimension the answer is grouped by, dimension name to that dataset dimension's own `field` (a base-object field or a `relationship.field` path). Set only on a dataset answer (`POST /analytics/dataset/query`) that has rows and groups by at least one dimension with a `field` that is not `type: 'date'`; a date dimension is never listed (see `drillRanges`). Absent on a cube query answer. |
+| **drillRawRows** | `Record<string, any>[]` | optional | Drill-through sidecar, aligned to `rows` by index: each `dimensionFields` dimension name to the stored value that row was grouped by (a select option's value, a lookup's record id), captured before label resolution rewrites the row to its display label. An exact-match drill filter is built from these, not from the labels in `rows`. Set exactly when `dimensionFields` is. |
+| **drillRawTotals** | `Record<string, any>[][]` | optional | Drill-through sidecar for `totals`: entry `[i][j]` aligns to `totals[i].rows[j]` and holds the stored value of the `dimensionFields` dimensions that grouping groups by, so the grand-total grouping yields an empty map per row. Set only when `dimensionFields` is and the answer carries at least one `totals` grouping. |
+| **drillRanges** | `Record<string, { field: string; gte: string; lt: string }>[]` | optional | Drill-through sidecar for date ranges, aligned to `rows` by index: date dimension name to the half-open range `[gte, lt)` that row's records fall in on that dimension's field. A time bucket gets the span it covers; a `timeDimensions[].dateRange` window gets the window the query filtered by on every row, or narrows the bucket entry on the same field to the part inside the window. Bounds are `YYYY-MM-DD` calendar days, or ISO-8601 instants when the source field is `datetime` (a bucket's at midnight in the reference timezone); a row whose bucket value is null gets no bucket entry, and a window whose end is an instant or the last supported day gets none. Set only on a dataset answer that has rows and groups by at least one `type: 'date'` dimension with a `field` and a granularity, or carries a `dateRange` on a dimension with a `field`; independent of `dimensionFields`. Absent on a cube query answer. |
+| **drillScopes** | `Record<string, any>` | optional | Drill-through sidecar per measure: each selected measure name to the list filter, on the answer's `object`, that selects the records that measure aggregates: the dataset's own `filter`, AND the measure's own `filter`, AND, for a measure over a `field`, that field holding a value (`{ "$null": false }`; both instants for a duration measure), with each `{token}` resolved as the query resolved it; `{}` when none of these applies. A drill lists the clicked bucket (`dimensionFields` / `drillRawRows` / `drillRawTotals`, `drillRanges`) AND the widget's own filter AND this scope. A measure is left out when no list filter on `object` selects its records (a derived measure; a scope that names a relationship path such as `account.region`, as a key or as a `$field` reference), and a measure left out offers no drill. Keyed by measure name: a `__compare` column has no entry. Set on every dataset answer (`POST /analytics/dataset/query`) that has rows; absent on a cube query answer and on a draft-preview answer. |
+| **provenance** | `{ kind: 'dataset'; dataset: object; measures: object[]; dimensions: object[]; … }` | ✅ | The dataset and members the answer was computed from |
+| **rowCount** | `integer` | ✅ | How many rows `rows` holds |
+| **truncated** | `boolean` | ✅ | `true` when more rows existed past the row cap the tool applied and were not returned |
+| **delegationNarrowed** | `true` | optional | Present, and `true`, when the caller acts as an agent whose authority narrows what it may read on the dataset's object; `warning` states the narrowing (ADR-0090 D10) |
+| **warning** | `string` | optional | The narrowing statement; present exactly when `delegationNarrowed` is |
+
+### Nested Shape: `QueryDatasetOutput.fields[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ |  |
+| **type** | `string` | ✅ | Column data type, in the `DimensionType` vocabulary (`string` / `number` / `boolean` / `time` / `geo`). A dimension column carries its cube dimension's type; a measure column is `number` except for `min`/`max` over a `date`/`datetime`/`time` field, which is `time` — those aggregates return a value of the aggregated field's own type. `count`/`count_distinct`, `sum`/`avg` and derived measures stay numeric. |
+| **label** | `string` | optional | Human display label (e.g. measure `label`) — for legends/KPIs. |
+| **format** | `string` | optional | Display format hint (e.g. measure `format` like "$0,0", "0.0%"). |
+| **currency** | `string` | optional | Resolved ISO 4217 code for a MONETARY measure (explicit measure `currency`, then the source field's fixed currency — its `currencyConfig.defaultCurrency`, read only under `currencyMode: 'fixed'` — then the tenant default). Absent on non-monetary columns, which must never render a symbol, and on a column that carries `currencyField`. |
+| **currencyField** | `string` | optional | [ADR-0144 D2] The PER-ROW currency of a measure column over a `currencyMode: 'record'` amount: the `name` of the dimension column in this answer that groups by the amount's code field, whose value in each row is that row's ISO 4217 code. `currency` is absent when this is present. Only on a `queryDataset` measure column that takes the `sum`, `avg`, `min` or `max` of such an amount; never on a `count`. |
+| **percentScale** | `Enum<'fraction' \| 'whole'>` | optional | The column's percent SCALE, when it is a percentage: `fraction` for a 0-1 ratio (`1` renders as "100%"), `whole` for percentage points (`1` renders as "1%"). Resolved from metadata; absent when the column is not a percentage. Renderers that receive it must scale by it instead of guessing from the value. |
+| **builtinAggregate** | `Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct'>` | optional | Closed aggregate discriminator for a measure column whose display name is the server's built-in default: the dataset measure declared an `aggregate` and no `label`. A renderer may substitute its own localized name for the aggregate. Absent whenever the author declared a label, and on dimension / derived columns. |
+| **aggregate** | `Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct'>` | optional | The aggregate a measure column carries, in the closed `AggregationFunction` vocabulary: the dataset measure's own `aggregate`, stated whether or not the author declared a `label`, so a renderer can tell a `count` from a `sum` (integer axis ticks for a count, for example). Set on every measure column of a dataset answer (`POST /analytics/dataset/query`, the live query and the draft-data preview alike) whose measure declares an `aggregate`, its `__compare` column included. Absent on dimension columns and on derived measures, which have no single aggregate, and on a cube query answer (`POST /analytics/query`). Unlike `builtinAggregate`, it says nothing about who named the column. |
+| **nullLabel** | `string` | optional | Display name of a dimension column's null bucket: the dataset dimension's `nullLabel`, resolved at the request locale like `label`. A renderer draws the column's null values under it instead of its own default. Set only on a dimension column of a dataset answer (`POST /analytics/dataset/query`) whose dimension declares one; absent on measure columns and on a cube query answer. Display copy only: grouping is unchanged. |
+| **polarity** | `Enum<'higher' \| 'lower' \| 'neutral'>` | optional | Which direction of change is good news for a measure column: the dataset measure's `polarity` (`higher` / `lower` / `neutral`), relayed as declared. A renderer colours a period-over-period delta by it: `lower` draws a rise as bad, `neutral` draws no good or bad colour. Set on a measure column of a dataset answer (`POST /analytics/dataset/query`, the live query and the draft-data preview alike) whose measure declares one, its `__compare` column included; absent otherwise, on dimension columns, and on a cube query answer. Absent means a rise is drawn as good. |
+
+### Nested Shape: `QueryDatasetOutput.totals[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **dimensions** | `string[]` | ✅ | The dimension subset this marginal was grouped by (empty array = grand total) |
+| **rows** | `Record<string, any>[]` | ✅ | The grouping's dimension columns plus the same measure columns as the main rows |
+
+### Nested Shape: `QueryDatasetOutput.drillRanges[number][string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | The date dimension's own `field` |
+| **gte** | `string` | ✅ | Inclusive lower bound of the range |
+| **lt** | `string` | ✅ | Exclusive upper bound of the range |
+
+### Nested Shape: `QueryDatasetOutput.provenance`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **kind** | `'dataset'` | ✅ | The answer was computed from a governed dataset |
+| **dataset** | `{ name: string; label: string }` | ✅ | The dataset the answer was computed from |
+| **measures** | `{ name: string; label: string; description?: string }[]` | ✅ | The selected measures, in selection order |
+| **dimensions** | `{ name: string; label: string }[]` | ✅ | The selected dimensions, in selection order |
+| **runtimeFilter** | `any` | optional | The caller's `selection.runtimeFilter`, echoed as sent; absent when none was sent. The dataset's own `filter` is never echoed |
+
+
+---
+

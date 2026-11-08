@@ -197,8 +197,8 @@ describe('JSON Schema projection', () => {
   });
 
   it('`parameters` is the closed input an AIToolDefinition carries', () => {
-    const { parameters } = getDatasetToolJsonSchemas().query_dataset as {
-      parameters: { type: string; required: string[]; additionalProperties: unknown; properties: Record<string, unknown> };
+    const parameters = getDatasetToolJsonSchemas().query_dataset.parameters as unknown as {
+      type: string; required: string[]; additionalProperties: unknown; properties: Record<string, unknown>;
     };
     expect(parameters.type).toBe('object');
     expect(parameters.required.sort()).toEqual(['datasetName', 'selection']);
@@ -211,8 +211,8 @@ describe('JSON Schema projection', () => {
   });
 
   it('`outputSchema` carries provenance and no SQL', () => {
-    const { outputSchema } = getDatasetToolJsonSchemas().query_dataset as {
-      outputSchema: { required: string[]; properties: Record<string, unknown> };
+    const outputSchema = getDatasetToolJsonSchemas().query_dataset.outputSchema as unknown as {
+      required: string[]; properties: Record<string, unknown>;
     };
     expect(outputSchema.required).toEqual(expect.arrayContaining(['rows', 'fields', 'provenance', 'rowCount', 'truncated']));
     expect(Object.keys(outputSchema.properties)).not.toContain('sql');

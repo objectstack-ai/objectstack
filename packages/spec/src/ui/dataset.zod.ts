@@ -174,10 +174,14 @@ export const DatasetMemberSynonymsSchema = lazySchema(() => z.array(
  * an inline locale map — bounded to 500 characters per locale by
  * {@link DatasetSchema}'s refinement.
  */
+const DATASET_MEMBER_DESCRIPTION_EXAMPLE = {
+  dimension: '商机当前所处的销售阶段，从初步接洽到赢单或丢单',
+  measure: '已赢单金额合计，按成交日期归月；不含报价中与已丢单',
+} as const;
 const datasetMemberDescription = (kind: 'dimension' | 'measure') => I18nLabelSchema.optional()
   .describe(
     `Business definition of this ${kind} in plain language — one or two sentences on what it is and when to `
-    + 'use it (e.g. "已赢单金额合计，按成交日期归月；不含报价中与已丢单"). Never a prompt or an instruction to an AI. '
+    + `use it (e.g. "${DATASET_MEMBER_DESCRIPTION_EXAMPLE[kind]}"). Never a prompt or an instruction to an AI. `
     + 'At most 500 characters per locale.',
   )
   .meta({ title: 'Description' });
@@ -1015,6 +1019,8 @@ export type DatasetMeasure = z.input<typeof DatasetMeasureSchema>;
 export type DatasetMeasureDuration = z.input<typeof DatasetMeasureDurationSchema>;
 export type DatasetDurationUnit = z.input<typeof DatasetDurationUnit>;
 export type DatasetMeasurePolarity = z.input<typeof DatasetMeasurePolarity>;
+/** [ADR-0149 D1] A dataset member's `synonyms`: the words a question is matched against. */
+export type DatasetMemberSynonyms = z.input<typeof DatasetMemberSynonymsSchema>;
 export type DerivedMeasureOpValue = z.input<typeof DerivedMeasureOp>;
 export type Dataset = z.input<typeof DatasetSchema>;
 
