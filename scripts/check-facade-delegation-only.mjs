@@ -41,7 +41,9 @@
  * Each is its own `facades` row, and an exception row in such a file names its
  * `class` (in a file with one facade the `class` may be left out).
  *
- * The next split adds one `facades` row. ⛔ A file joins only once it is in
+ * The next split adds one `facades` row, and a NEW facade file also adds its
+ * path to `DECLARED_WATCH_HINTS` below (the self-test refuses the registry and
+ * the declaration disagreeing). ⛔ A file joins only once it is in
  * facade form on `main`, so the gate never reds `main` ahead of a landing: the
  * PR that lands the facade (or the first PR after it) adds the row.
  *
@@ -169,6 +171,30 @@ import { parseSourceFile } from './ts-parse.mjs';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, '..');
 export const REGISTRY_FILE = 'scripts/facade-delegation-registry.json';
+
+/**
+ * The files this gate JUDGES, declared for `scripts/pm/dispatch-gates.mjs`,
+ * which reads a gate's population from the path literals in its source text.
+ *
+ * Without this list the gate's only literal is `REGISTRY_FILE`, so the
+ * derivation filed the family as an "artifact roster" and stayed silent for a
+ * diff to `protocol.ts`: the facade files live inside the registry JSON, where
+ * a text scanner cannot see them. A dev who added two bodies to that facade
+ * read 102 green derived gates, and CI went red on this one.
+ *
+ * The spelling is `DECLARED_WATCH_HINTS` (one repo-relative FILE per string,
+ * the idiom of `scripts/check-tenant-chokepoint.mjs`) and not a subtree: the
+ * gate reads the facade file and nothing beside it, so `packages/objectql/**`
+ * would name it on hundreds of files it never opens. The list must stay a
+ * literal array (`check:watch-hint-literal`). The self-test holds it EQUAL to
+ * the registry's `facades[].file` in both directions, so registering a new
+ * facade file reds until it is added here, and the failure names the string.
+ */
+const DECLARED_WATCH_HINTS = [
+  'packages/metadata-protocol/src/protocol.ts',
+  'packages/objectql/src/engine.ts',
+  'packages/drivers/driver-sql/src/sql-driver.ts',
+];
 
 const CARD_REF = /^#[1-9][0-9]*$/;
 const FACADE_KEYS = Object.freeze(['file', 'class', 'card']);
@@ -824,8 +850,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'N4 a facade row without its card → RED': 1,
   'N5 an empty registry → GREEN with nothing guarded, never a crash': 1,
   'N6 the committed registry is well-formed against this checkout': 1,
+  'N7 the declared watch hints are exactly the committed registry\'s facade files': 1,
 });
-const SELF_TEST_BATTERY_FLOOR = 37;
+const SELF_TEST_BATTERY_FLOOR = 38;
 
 function selfTest() {
   const FILE = 'pkg/src/facade.ts';
@@ -1019,6 +1046,23 @@ function selfTest() {
     { label: 'N6 the committed registry is well-formed against this checkout', run: () => {
       const r = runGate({ root: REPO_ROOT, registryPath: join(REPO_ROOT, REGISTRY_FILE) });
       return r.loadError ?? (r.result.problems.length === 0 ? null : `the committed registry is red: ${r.result.problems.map((p) => p.message).join(' | ')}`);
+    } },
+    { label: 'N7 the declared watch hints are exactly the committed registry\'s facade files', run: () => {
+      const registry = JSON.parse(readFileSync(join(REPO_ROOT, REGISTRY_FILE), 'utf8'));
+      const registered = [...new Set((registry.facades ?? []).map((f) => f.file))];
+      const missing = registered.filter((f) => !DECLARED_WATCH_HINTS.includes(f));
+      const unread = DECLARED_WATCH_HINTS.filter((h) => !registered.includes(h));
+      const doubled = DECLARED_WATCH_HINTS.filter((h, i) => DECLARED_WATCH_HINTS.indexOf(h) !== i);
+      return all(
+        registered.length > 0 ? null : `${REGISTRY_FILE} registers no facade file, so there is nothing to hold the declaration to`,
+        missing.length === 0 ? null
+          : `registered facade file(s) ${missing.map((f) => `'${f}'`).join(', ')} missing from DECLARED_WATCH_HINTS: ` +
+            'add each string there, or dispatch-gates never names this gate for a diff to that file',
+        unread.length === 0 ? null
+          : `DECLARED_WATCH_HINTS names ${unread.map((f) => `'${f}'`).join(', ')}, which ${REGISTRY_FILE} does not register: ` +
+            'remove each string, or dispatch-gates names this gate for a file it never reads',
+        doubled.length === 0 ? null : `DECLARED_WATCH_HINTS names ${doubled.join(', ')} twice`,
+      );
     } },
   ];
 

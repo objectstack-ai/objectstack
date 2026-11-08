@@ -158,6 +158,7 @@ export const KNOWN_SCHEMA_TYPES: readonly string[] = [
   'field:position-ref',
   'field:progress',
   'field:qrcode',
+  'field:quiet-hours',
   'field:radio',
   'field:rating',
   'field:recipient-picker',

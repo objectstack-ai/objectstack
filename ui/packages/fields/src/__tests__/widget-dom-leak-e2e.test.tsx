@@ -151,6 +151,7 @@ import {
   NotificationTopicField,
   NotificationChannelField,
 } from '../widgets/RegistryRefField';
+import { QuietHoursField } from '../widgets/QuietHoursField';
 
 /* ════════════════════════════════════════════════════════════════════════════
  * Every registered field widget, both hosts
@@ -216,6 +217,7 @@ const WIDGETS: Record<string, ComponentType<any>> = {
   'permission-ref': PermissionRefField,
   'notification-topic': NotificationTopicField,
   'notification-channel': NotificationChannelField,
+  'quiet-hours': QuietHoursField,
 };
 
 /** Option widgets render an "unfillable" placeholder unless offered a list. */
