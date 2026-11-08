@@ -3591,6 +3591,7 @@ const ja = {
       organizationExists: 'その組織はすでに存在します。',
       slugTaken: 'そのスラッグはすでに使用されています。',
       notAllowedToCreate: '新しい組織を作成する権限がありません。',
+      organizationLimitReached: '作成できる組織の数が上限に達しました。招待されて参加した組織は上限に含まれません。',
       notTheRecipient: 'この招待の宛先はあなたではありません。',
       invitationNotFound: 'この招待は存在しないか、有効期限が切れています。',
       unknown: '問題が発生しました。もう一度お試しください。',
