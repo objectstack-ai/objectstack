@@ -65,6 +65,9 @@ import { ObjectKernel } from '@objectstack/core';
 import type { PluginContext } from '@objectstack/core';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { EMAIL_SEND_CAPABILITY } from './email-routes.js';
+// Pays `@objectstack/objectql`'s first load at collection, never inside a clocked case
+// (the route modules import it lazily).
+import '@objectstack/objectql';
 
 const captured = vi.hoisted(() => ({ servers: [] as any[] }));
 

@@ -18,6 +18,9 @@
 import { describe, it, expect, vi } from 'vitest';
 import { ObjectKernel, isServiceNotRegisteredError } from '@objectstack/core';
 import { RestServer } from './rest-server';
+// Pays `@objectstack/objectql`'s first load at collection, never inside a clocked case
+// (the route modules import it lazily).
+import '@objectstack/objectql';
 
 const TASK = {
   name: 'task',
