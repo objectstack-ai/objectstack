@@ -268,8 +268,9 @@ describe('overrides of the base, as advice (ADR-0146 D2, as amended)', () => {
   it('loader stamps that name the version an item came with are not a change', async () => {
     const engine = await makeEngine([LEAD], {});
     const stamped = (version: string) => ({ ...view('Leads'), _packageId: BASE, _packageVersion: version });
+    // The container carries the stamps (its expanded items are fresh documents): override it as well as its item.
     const { environment } = await planPackageUpgrade(engine, crm('1.0.0', [stamped('1.0.0')]), crm('2.0.0', [stamped('2.0.0')]), {
-      listOverrides: reader([override('1.0.0')]),
+      listOverrides: reader([override('1.0.0'), { type: 'view', name: 'acme_lead', basedOn: '1.0.0' }]),
     });
     expect(environment.overrides).toEqual({ hidesChange: [], stale: [] });
   });
