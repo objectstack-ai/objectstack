@@ -2298,6 +2298,13 @@ export const ObjectStackDefinitionSchema = lazySchema(() => strictObject({
       'no kernel, runtime or service ever called `onDisable` (the uninvoked lifecycle '
       + 'family is retired), so a value written here goes nowhere. Do teardown inside the '
       + 'resources `onEnable` acquires.',
+    // Never a declared key. The platform's collection registries listed it until
+    // its listings were retired (ADR-0049), which is what a reader copies it from.
+    ragPipelines:
+      'there is no top-level `ragPipelines` collection — a RAG pipeline was never a metadata '
+      + 'type a stack can declare, and the registries that listed one were retired (ADR-0049). '
+      + 'Delete the key. Retrieval sources are described by the knowledge-source schemas in '
+      + '`@objectstack/spec/ai` and indexed by the knowledge service the deployment installs.',
   },
 }, {
   /** System Configuration */

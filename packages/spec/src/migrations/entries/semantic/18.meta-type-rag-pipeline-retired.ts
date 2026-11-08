@@ -33,7 +33,10 @@ export const entry: SemanticMigration = {
     + 'unrecognised-type refusal (a `/meta` type name the platform does not have is refused, never '
     + 'minted as a namespace) instead of the store-anything branch, and `GET /meta/types` no longer '
     + 'lists `rag_pipeline` as creatable. `scripts/check-stack-collection-maps.mjs` holds every '
-    + 'collection map to the stack schema with no waiver for the key. Legacy stored `rag_pipeline` '
-    + 'rows, if a deployment wrote any through the old door, are untouched: reads still answer and '
-    + 'DELETE still works, so the residue is removable; only a new write is refused.',
+    + 'collection map to the stack schema with no waiver for the key, and a stack that writes '
+    + '`ragPipelines` is refused with a prescription. Legacy stored `rag_pipeline` rows, if a '
+    + 'deployment wrote any through the old door, are not rewritten: `/meta` reads still answer and '
+    + 'DELETE still works, so the residue is removable; a new write is refused, and a package export '
+    + 'no longer carries the rows (it builds its collections from `PLURAL_TO_SINGULAR`), so delete '
+    + 'them rather than rely on an export.',
 };
