@@ -23,7 +23,9 @@
 
 import { describe, it, expect } from 'vitest';
 import { AuthzStoreUnavailableError, bindSecurityCatalogReader } from '@objectstack/core';
-import { DelegatedAdminGate } from './delegated-admin-gate.js';
+import { SchemaRegistry } from '@objectstack/objectql';
+import { DelegatedAdminGate, organizationBoundaryFailure } from './delegated-admin-gate.js';
+import { createPackageScopedSecurityCatalogReader } from './security-catalog-package-scope.js';
 import { bindTestSecurityCatalog } from './__tests__/security-catalog.testkit.js';
 
 const EAST_SCOPE = {
@@ -167,5 +169,40 @@ describe('DelegatedAdminGate — describeDelegableScope lists the catalog positi
   it('with no catalog bound, nothing is offered (fail closed) — a row is not a position', async () => {
     const report = await gateOver(makeQl()).describeDelegableScope(SETS.tenant_admin, { userId: 'u_admin' });
     expect(report.assignablePositions).toEqual([]);
+  });
+});
+
+describe('[ADR-0150 D3/D7] the organization boundary judges a position\'s set as the position resolves it', () => {
+  const P = 'com.acme.caller';
+  const Q = 'com.acme.other';
+  const manifest = (id: string, deps: string[] = []) => ({
+    id, name: id, version: '1.0.0', type: 'app', namespace: id.split('.').pop(),
+    ...(deps.length > 0 ? { dependencies: Object.fromEntries(deps.map((d) => [d, '^1.0.0'])) } : {}),
+  }) as never;
+  const rig = (pDeps: string[]) => {
+    const registry = new SchemaRegistry();
+    registry.logLevel = 'silent';
+    registry.installPackage(manifest(Q), 'code');
+    registry.installPackage(manifest(P, pDeps), 'code');
+    registry.registerItem('permission', { name: 'q_reader', objects: {} }, 'name' as never, Q);
+    registry.registerItem('position', { name: 'p_pos', permissionSets: ['q_reader'] }, 'name' as never, P);
+    return createPackageScopedSecurityCatalogReader(registry, { get: () => undefined, list: () => [] });
+  };
+
+  it('a set the position\'s package cannot reach cannot be shown inside, and the reason carries the refusal naming its holder', async () => {
+    const catalog = rig([]);
+    const position = await catalog.resolve('position', 'p_pos');
+    // The bare name alone is inside the boundary …
+    expect(await organizationBoundaryFailure(catalog, 'q_reader')).toBeNull();
+    // … but the position cannot resolve it (ADR-0150 D3 step 3), so it is refused, naming the holder.
+    const reason = await organizationBoundaryFailure(catalog, 'q_reader', { position });
+    expect(reason).toContain("permission set 'q_reader'");
+    expect(reason).toContain(Q);
+  });
+
+  it('the same set is inside once the position\'s package declares the dependency', async () => {
+    const catalog = rig([Q]);
+    const position = await catalog.resolve('position', 'p_pos');
+    expect(await organizationBoundaryFailure(catalog, 'q_reader', { position })).toBeNull();
   });
 });

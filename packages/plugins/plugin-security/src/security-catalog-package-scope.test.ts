@@ -181,11 +181,40 @@ describe('ADR-0150 D3/D7 — the environment\'s references resolve as a caller w
     expect((await grantedThrough(['p_pos'])).get('p_pos')).toEqual(['q_set', 'env_set']);
   });
 
-  it("the `everyone` anchor's composed bindings resolve as the environment's (ADR-0090 D5/D9)", async () => {
+  // The `everyone` anchor is declared by the security plugin (`sys`), but its
+  // `permissionSets` are composed at start by `declareEveryone`
+  // (`security-plugin-everyone-anchor.ts`): the deployment's baseline plus
+  // every package `isDefault` set an administrator accepted
+  // (`readAcceptedEveryoneSets`, `suggested-audience-bindings.ts`). That is the
+  // environment's binding, not the `sys` package's reference — read from `sys`
+  // it would refuse an app's accepted default (the showcase ships one,
+  // `showcase_member_default`) as outside the closure. The epic seat's reading.
+  it("the `everyone` anchor's composed bindings resolve as the environment's: an accepted package isDefault set still binds (ADR-0090 D5/D9)", async () => {
     install(P);
-    ship('permission', { name: 'p_default', label: 'an accepted package default' }, P);
+    ship('permission', { name: 'p_default', label: 'an accepted package default', isDefault: true }, P);
     ship('position', { name: 'everyone', permissionSets: ['sys_baseline', 'p_default'] }, SYS);
+    const anchor = await position('everyone');
+    expect((await catalog().resolveReference!('permission', 'p_default', { position: anchor }))).toMatchObject({
+      status: 'resolved',
+      entry: { packageId: P },
+    });
     expect((await grantedThrough(['everyone'])).get('everyone')).toEqual(['sys_baseline', 'p_default']);
+  });
+
+  it("a second package holding an anchor's set name is refused, naming both holders, and the anchor keeps the first", async () => {
+    install(P);
+    install(Q);
+    ship('permission', { name: 'p_default', label: 'first', isDefault: true }, P);
+    let refusal: unknown;
+    try {
+      ship('permission', { name: 'p_default', label: 'second', isDefault: true }, Q);
+    } catch (err) {
+      refusal = err;
+    }
+    expect(String((refusal as Error | undefined)?.message)).toContain(P);
+    expect(String((refusal as Error | undefined)?.message)).toContain(Q);
+    ship('position', { name: 'everyone', permissionSets: ['p_default'] }, SYS);
+    expect((await catalog().resolve('permission', 'p_default', { position: await position('everyone') }))?.definition.label).toBe('first');
   });
 });
 
