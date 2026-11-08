@@ -1,5 +1,5 @@
 ---
-'@objectstack/cli': minor
+'@objectstack/cli': patch
 ---
 
 feat(cli)!: `os migrate plan` / `apply` refuse a config whose AI plugin only `os serve` would mount, reading serve's own AI auto-inject rule
