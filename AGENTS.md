@@ -510,8 +510,9 @@ Even inside your own worktree, operate defensively:
    `Build & E2E UI`, `Live E2E UI` and `Dogfood Regression Gate`; a check outside those eleven is advisory
    ([why that matters](docs/agents/multi-agent-discipline.md#advisory-checks-ride-through)). A required context is
    matched by check-run name, so a rename detaches its gate silently — treat those eleven names as contract.
-   **Two speeds** — PR runs carry the fast set, queue runs add the dogfood shards; `main`'s scheduled and push runs
-   carry the full battery ([detail](docs/agents/multi-agent-discipline.md#two-speeds-which-runs-carry-which-battery)).
+   **Two speeds** — PR runs carry the fast set, queue runs add the dogfood shards; `main`'s scheduled runs carry the
+   full battery, and a push run carries it by running the main-only jobs and borrowing the rest from the green queue
+   runs of its commits ([detail](docs/agents/multi-agent-discipline.md#two-speeds-which-runs-carry-which-battery)).
    **Main-red:** a full-battery red is its lane's first work — triage files it under
    the main-red convention, the lane's next PR fixes it, and ⛔ no lane PR arms the queue meanwhile.
 

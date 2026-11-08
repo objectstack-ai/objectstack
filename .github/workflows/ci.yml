@@ -231,7 +231,7 @@ jobs:
     # re-reads the head commit's queue run. Do not rename it.
     name: Borrowed queue verdict
     needs: queue-verdict
-    if: needs.queue-verdict.outputs.covered == 'true'
+    if: ${{ success() && needs.queue-verdict.outputs.covered == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
