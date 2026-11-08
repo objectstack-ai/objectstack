@@ -1160,10 +1160,11 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
       },
       revoked_reason: {
         label: "취소 사유",
-        help: "키가 취소된 이유로, 누가 키를 복원할 수 있는지를 결정합니다. 관리자 비밀번호 재설정: 플랫폼 관리자만 키를 복원할 수 있습니다. 조직 멤버십 종료: 소유자가 조직을 떠났으며 아무도 키를 복원할 수 없고, 구성원이 새 키를 만듭니다. 키가 복원되면 지워집니다. API 키 목록에서 취소한 키는 비어 있습니다.",
+        help: "키가 취소된 이유로, 누가 키를 복원할 수 있는지를 결정합니다. 관리자 비밀번호 재설정: 플랫폼 관리자만 키를 복원할 수 있습니다. 조직 멤버십 종료: 소유자가 조직을 떠났으며 아무도 키를 복원할 수 없고, 구성원이 새 키를 만듭니다. 관리자에 의해 정지됨: 플랫폼 관리자가 본인 소유가 아닌 키를 취소했으며, 플랫폼 관리자만 키를 복원할 수 있습니다. 키가 복원되면 지워집니다. 소유자가 API 키 목록에서 취소한 키는 비어 있습니다.",
         options: {
           admin_password_reset: "관리자 비밀번호 재설정",
-          organization_membership_ended: "조직 멤버십 종료"
+          organization_membership_ended: "조직 멤버십 종료",
+          administrator_suspended: "관리자에 의해 정지됨"
         }
       },
       key: {
@@ -2635,6 +2636,54 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
       order_key: {
         label: "정렬 키",
         help: "@better-auth/scim이 관리하는 안정적 페이지 매김용 파생 키입니다. 직접 쓰지 마세요."
+      },
+      created_at: {
+        label: "생성 시각"
+      },
+      updated_at: {
+        label: "수정 시각"
+      }
+    },
+    _views: {
+      all: {
+        label: "전체"
+      }
+    }
+  },
+  sys_idp_group_mapping: {
+    label: "IdP 그룹 매핑",
+    pluralLabel: "IdP 그룹 매핑",
+    description: "ID 공급자 그룹을 그 구성원이 부여받는 권한 세트에 매핑합니다",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      source_kind: {
+        label: "출처 유형",
+        help: "그룹을 푸시하는 주체: SCIM 연결.",
+        options: {
+          scim: "SCIM 연결"
+        }
+      },
+      source_id: {
+        label: "출처 ID",
+        help: "그룹이 들어오는 SCIM 연결 ID(예: \"okta-prod\")."
+      },
+      group_external_id: {
+        label: "그룹 외부 ID",
+        help: "ID 공급자가 보내는 그룹의 externalId입니다. 이 값과 표시 이름 중 하나만 설정하세요."
+      },
+      group_display_name: {
+        label: "그룹 표시 이름",
+        help: "그룹의 displayName으로, 정확히 일치해야 합니다. 매핑에 외부 ID가 없을 때 사용됩니다."
+      },
+      permission_set: {
+        label: "권한 세트",
+        help: "그룹 구성원이 부여받는 권한 세트입니다. 관리자 세트는 거부됩니다."
+      },
+      organization_id: {
+        label: "조직",
+        help: "권한이 부여되는 조직, 즉 SCIM 연결을 소유한 조직입니다."
       },
       created_at: {
         label: "생성 시각"

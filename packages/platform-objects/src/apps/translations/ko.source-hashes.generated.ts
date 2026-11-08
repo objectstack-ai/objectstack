@@ -27,6 +27,7 @@ export const koGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "objects.sys_email.fields.message_id.label": "14cd089a4062f4b1",
   "objects.sys_email_template.fields.id.label": "00b0385c9c152888",
   "objects.sys_exchange_rate.fields.id.label": "00b0385c9c152888",
+  "objects.sys_idp_group_mapping.fields.id.label": "00b0385c9c152888",
   "objects.sys_job.fields.schedule_type.options.cron": "fd48d0e2cd59cab2",
   "objects.sys_job_queue.fields.status.options.dlq": "4aedfea31f7ea528",
   "objects.sys_metadata.fields.id.label": "00b0385c9c152888",
