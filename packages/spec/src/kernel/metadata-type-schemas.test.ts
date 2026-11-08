@@ -426,8 +426,8 @@ describe('the envelope invariant also covers UNREGISTERED_KIND_SCHEMAS', () => {
  *      escaping the invariant.
  *
  * What this deliberately does NOT assert: that every stack collection has a
- * map entry. `rag_pipeline` has no stack collection at all (#6242 row 2), and
- * whether more collections should bind is #2657's B/C decision — this pin
+ * map entry. (`rag_pipeline`, which had no stack collection at all, has left
+ * the URL-spelling contract with its retired `PLURAL_TO_SINGULAR` row.) Whether more collections should bind is #2657's B/C decision — this pin
  * holds the invariant for the entries that exist, nothing more.
  */
 const STACK_COLLECTION_OF: Record<string, string> = {

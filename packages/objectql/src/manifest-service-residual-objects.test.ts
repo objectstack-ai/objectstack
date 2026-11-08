@@ -446,7 +446,7 @@ describe('ADR-0130 D4 — the manifest service registers every other residual ty
     apps: 'app', pages: 'page', dashboards: 'dashboard', reports: 'report', actions: 'action',
     workflows: 'workflow', positions: 'position', permissions: 'permission', capabilities: 'capability',
     sharingRules: 'sharing_rule', apis: 'api', webhooks: 'webhook', agents: 'agent', tools: 'tool',
-    skills: 'skill', ragPipelines: 'rag_pipeline', hooks: 'hook', mappings: 'mapping',
+    skills: 'skill', hooks: 'hook', mappings: 'mapping',
     analyticsCubes: 'analytics_cube', emailTemplates: 'email_template', docs: 'doc', books: 'book',
   };
   const itemOf = (type: string) => ({ name: `acme_top_${type}`, label: `Top ${type}` });

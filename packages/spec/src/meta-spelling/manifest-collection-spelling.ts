@@ -90,7 +90,15 @@ export const PLURAL_TO_SINGULAR: Record<string, string> = {
   agents: 'agent',
   tools: 'tool',
   skills: 'skill',
-  ragPipelines: 'rag_pipeline',
+  // `ragPipelines: 'rag_pipeline'` was removed (ADR-0049 enforce-or-remove): no
+  // stack could declare the collection — `ObjectStackDefinitionSchema` never
+  // carried the key, so `defineStack` refused it — and nothing produced or read
+  // a `rag_pipeline` item. Like the `themes` row above, its absence moves
+  // `/meta/rag_pipeline` out of the generated `META_URL_TO_SINGULAR`, so the
+  // type gets `unrecognisedMetaTypeRefusal`'s verdict instead of the no-schema
+  // store-anything branch, and `GET /meta/types` stops advertising it as
+  // creatable. The D3 semantic entry `meta-type-rag-pipeline-retired` carries
+  // it to upgraders.
   hooks: 'hook',
   mappings: 'mapping',
   picklists: 'picklist',

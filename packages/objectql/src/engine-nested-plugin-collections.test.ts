@@ -174,7 +174,6 @@ describe('the two registration seams enumerate ONE collection list (#7049)', () 
     ['roles', 'ADR-0090 retired'],
     ['profiles', 'ADR-0088 retired'],
     ['policies', 'ADR-0088 retired'],
-    ['ragPipelines', 'not declared by ObjectStackDefinitionSchema'],
   ];
 
   const excluded = new Set(NOT_COMPARABLE.map(([k]) => k));
@@ -224,8 +223,10 @@ describe('the two registration seams enumerate ONE collection list (#7049)', () 
     // `views` left this list in #7163 — the only entry that was ever excluded
     // for a BEHAVIOUR difference rather than a retired-kind one. Every survivor
     // is a kind the schema rejects before either seam runs.
+    // `ragPipelines` left too: never declared by the stack schema, it was
+    // retired from the engine's list itself (ADR-0049), not merely excluded here.
     expect(NOT_COMPARABLE.map(([k]) => k)).toEqual([
-      'workflows', 'approvals', 'roles', 'profiles', 'policies', 'ragPipelines',
+      'workflows', 'approvals', 'roles', 'profiles', 'policies',
     ]);
     expect(NOT_COMPARABLE.map(([k]) => k)).not.toContain('views');
   });

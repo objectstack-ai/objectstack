@@ -38,13 +38,15 @@
  *  1. **statically declared** (`view`, `hook`, `agent`) — the flag comes off
  *     the registry entry, as it always did, in both the `true` and the `false`
  *     direction;
- *  2. **URL-map-only plugin kinds** (`webhook`, and its three siblings) — no
+ *  2. **URL-map-only plugin kinds** (`webhook`, and its two siblings) — no
  *     registry entry, IN the static spelling contract, still advertised and
  *     still mintable. This is the discriminating control: without it the change
  *     cannot show its narrowing is narrow;
  *  3. **withdrawn** (`policy`, `data`, `package`, `kind` — and, since commit 35ad101bc,
  *     `theme`, whose carrier retired out of the spelling contract while legacy
- *     stored rows can still hold the key live) — live `SchemaRegistry` keys,
+ *     stored rows can still hold the key live, and `rag_pipeline`, which left
+ *     the contract the same way when its listing row was retired) — live
+ *     `SchemaRegistry` keys,
  *     in NEITHER half of the static contract, advertised `false` and refused.
  *
  * Harness: the real `getMetaTypes()` and the real `saveMetaItem()` on one
@@ -191,6 +193,17 @@ const SAMPLE: Array<{
         creatable: false,
         item: { name: 'probe_theme', label: 'Probe', colors: { primary: '#3b82f6' } },
     },
+    {
+        // `rag_pipeline` moved from class 2 to class 3 exactly as `theme` did: its
+        // `ragPipelines` listing row retired out of the spelling contract (ADR-0049 —
+        // no stack could declare the collection), while a legacy environment's
+        // stored rows can still hold the key in the live set. Until then it was
+        // class 2's one kind with no schema at all.
+        type: 'rag_pipeline',
+        klass: 'withdrawn',
+        creatable: false,
+        item: { name: 'probe_rag_pipeline', label: 'Probe' },
+    },
     { type: 'policy', klass: 'withdrawn', creatable: false, item: { name: 'probe_policy', label: 'Probe' } },
     { type: 'data', klass: 'withdrawn', creatable: false, item: { name: 'probe_data', label: 'Probe' } },
     { type: 'package', klass: 'withdrawn', creatable: false, item: { name: 'probe_package', label: 'Probe' } },
@@ -261,17 +274,18 @@ describe('#8421 — the read door and the mint door agree, across all three clas
         }
     });
 
-    it('the four URL-map-only plugin kinds are ALL still advertised as creatable', async () => {
+    it('the three URL-map-only plugin kinds are ALL still advertised as creatable', async () => {
         // The blanket-flip guard, quantified rather than sampled. `webhook`
         // above is the one driven end-to-end through a write; the others have
         // no hand-written spec-valid body here, so they are pinned on the door
         // that this change actually moved — the advertisement. Breaking any of
         // them is the one outcome that would make this change worse than the
-        // defect it closes. (`theme` left the set at commit 35ad101bc.)
+        // defect it closes. (`theme` left the set at commit 35ad101bc, and
+        // `rag_pipeline` when its listing row was retired.)
         const { protocol } = makeProtocol();
         const listing = await protocol.getMetaTypes();
         for (const kind of [
-            'analytics_cube', 'connector', 'rag_pipeline', 'webhook',
+            'analytics_cube', 'connector', 'webhook',
         ]) {
             const entry = listing.entries.find((e: any) => e.type === kind);
             expect(entry, `${kind} must be listed`).toBeDefined();

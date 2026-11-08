@@ -180,6 +180,18 @@ describe('#8421 — an unrecognised `/meta` type is refused instead of minted', 
         expect(metaRows(rows).length).toBe(0);
     });
 
+    it('`rag_pipeline` is on the refused side too — its listing row was retired', async () => {
+        // The same exit as `theme`: `rag_pipeline` was a URL-map-only kind with no
+        // schema, so this door stored any JSON under it. Its `ragPipelines` fold
+        // left `PLURAL_TO_SINGULAR` (ADR-0049 — no stack could declare the
+        // collection), so it now earns the same refusal, and nothing is stored.
+        const { protocol, rows } = makeProtocol();
+        await expect(
+            protocol.saveMetaItem({ type: 'rag_pipeline', name: 'my_pipeline', item: { name: 'my_pipeline', label: 'Test' } }),
+        ).rejects.toMatchObject({ code: 'INVALID_REQUEST', status: 400 });
+        expect(metaRows(rows).length).toBe(0);
+    });
+
     it('names the offending type and why, per the 2026-08-12 refusal ruling', async () => {
         const { protocol } = makeProtocol();
         await expect(

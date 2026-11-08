@@ -194,7 +194,10 @@ const ARTIFACT_FIELD_TO_TYPE: Record<string, string> = {
     agents: 'agent',
     tools: 'tool',
     skills: 'skill',
-    ragPipelines: 'rag_pipeline',
+    // `ragPipelines: 'rag_pipeline'` removed (ADR-0049 enforce-or-remove), the
+    // fourth retirement of the `policies` shape: the stack schema declares no
+    // `ragPipelines` key, so the strict parse below refuses a definition that
+    // carries one and this entry could never match.
     hooks: 'hook',
     mappings: 'mapping',
     // Shared option lists. Registered as items here so the artifact boot

@@ -504,7 +504,7 @@ export class AppPlugin implements Plugin {
                 'objects', 'views', 'apps', 'pages', 'dashboards', 'reports',
                 'flows', 'workflows', 'triggers', 'agents', 'tools', 'skills',
                 'actions', 'permissions', 'positions', 'translations',
-                'sharingRules', 'ragPipelines', 'data', 'emailTemplates',
+                'sharingRules', 'data', 'emailTemplates',
                 'docs', 'books',
             ];
             const hasAppPayload = APP_CATEGORY_KEYS.some((k) => {

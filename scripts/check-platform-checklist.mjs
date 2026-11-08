@@ -924,7 +924,7 @@ function unreferencedRecipeMessage(area, recipe) {
 // This is also why keying on the CLOSED SET matters more than it looks. A
 // trailing-`s` heuristic would flag `/meta/positions` (a real fold, fine) and
 // also anything that merely LOOKS plural, while missing every camelCase
-// spelling (`sharingRules`, `analyticsCubes`, `ragPipelines`) that folds just
+// spelling (`sharingRules`, `analyticsCubes`, `assignmentRules`) that folds just
 // as much. Membership answers both directions exactly.
 //
 // Same refusal discipline as the trap table: an extractor that reads zero

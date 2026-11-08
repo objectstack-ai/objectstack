@@ -2406,6 +2406,21 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'legitimate data.',
   },
   {
+    id: 'meta-type-rag-pipeline-retired',
+    order: 122,
+    text:
+      'It also retires the `rag_pipeline` metadata type the platform listed and nothing could '
+      + 'declare (ADR-0049 enforce-or-remove): `ragPipelines` sat in `PLURAL_TO_SINGULAR`, the '
+      + 'engine\'s registered-collection list, the metadata plugin\'s artifact map and the '
+      + 'runtime\'s app-payload probe, while `ObjectStackDefinitionSchema` never carried the key, '
+      + 'so `defineStack` refused it and no producer wrote a `rag_pipeline` item. Retiring the '
+      + 'spelling row takes the type out of the `/meta` URL-spelling contract, as the `themes` row '
+      + 'did: `/meta/rag_pipeline` gets the unrecognised-type refusal instead of the no-schema '
+      + 'store-anything branch, and `GET /meta/types` stops advertising it as creatable. There is '
+      + 'no D2 conversion, because no stack source can hold the key; its D3 record is the '
+      + 'semantic entry `meta-type-rag-pipeline-retired`.',
+  },
+  {
     id: 'metadata-customization-protocol-retired',
     order: 20,
     text:

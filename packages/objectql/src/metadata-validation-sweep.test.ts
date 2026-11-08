@@ -15,10 +15,11 @@
  *      (#19586) the refusal must be the SCHEMA's, naming the broken field —
  *      never an author-time gate rule, which throws the same envelope.
  *
- * Types without a Zod schema in the central registry (today only
- * `rag_pipeline` among the URL-map kinds — `theme`/`webhook` and their
- * siblings all resolve schemas via `UNREGISTERED_KIND_SCHEMAS` since
- * #6245 / commit 2306a765c) are still expected to pass through unvalidated — that is
+ * Types without a Zod schema in the central registry (none among the URL-map
+ * kinds today — `webhook` and its siblings all resolve schemas via
+ * `UNREGISTERED_KIND_SCHEMAS` since #6245 / commit 2306a765c, and `rag_pipeline`,
+ * the last schema-less one, left the URL-spelling contract when its listing row
+ * was retired) are still expected to pass through unvalidated — that is
  * the documented fall-through, not a regression. We pin it explicitly so any
  * future coverage gap is visible in the report.
  *

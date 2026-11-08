@@ -4082,8 +4082,9 @@ const METADATA_ARRAY_KEYS = [
   // queue service, the assignment seam), so a declaration must reach it with
   // its package stamped, as every collection on this list does.
   'queues', 'assignmentRules',
-  // AI Protocol
-  'agents', 'tools', 'skills', 'ragPipelines',
+  // AI Protocol. (`ragPipelines` was retired from this list under ADR-0049:
+  // the stack schema never declared it, so no stack could ship one.)
+  'agents', 'tools', 'skills',
   // API Protocol
   'apis',
   // Data Extensions

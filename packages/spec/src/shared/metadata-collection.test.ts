@@ -290,7 +290,13 @@ describe('PLURAL_TO_SINGULAR / SINGULAR_TO_PLURAL', () => {
   it('should map irregular plural forms correctly', () => {
     expect(PLURAL_TO_SINGULAR['sharingRules']).toBe('sharing_rule');
     expect(PLURAL_TO_SINGULAR['analyticsCubes']).toBe('analytics_cube');
-    expect(PLURAL_TO_SINGULAR['ragPipelines']).toBe('rag_pipeline');
+  });
+
+  it('carries no `ragPipelines` row — no stack can declare that collection', () => {
+    // The row was retired (ADR-0049 enforce-or-remove): the stack schema never
+    // carried the key, so the fold advertised a collection nothing could author.
+    expect(Object.hasOwn(PLURAL_TO_SINGULAR, 'ragPipelines')).toBe(false);
+    expect(Object.hasOwn(SINGULAR_TO_PLURAL, 'rag_pipeline')).toBe(false);
   });
 
   it('should have a reverse map that is consistent', () => {

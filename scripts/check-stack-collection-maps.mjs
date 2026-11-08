@@ -58,8 +58,9 @@
 // place where the fourth instance of a twice-retired pattern could land back
 // unnoticed.
 //
-//   - `PLURAL_TO_SINGULAR` carries `ragPipelines`, which the schema does not
-//     declare.
+//   - `PLURAL_TO_SINGULAR` carried `ragPipelines`, which the schema does not
+//     declare (retired with its engine, artifact-map and probe rows under
+//     ADR-0049, so no waiver names it any more).
 //   - `metadataArrayKeys` still lists `workflows` / `approvals` / `roles` /
 //     `profiles` / `policies` -- kinds retired across ADR-0019, ADR-0020,
 //     ADR-0088 and ADR-0090.
@@ -524,15 +525,6 @@ const SITES = [
     },
     waivers: [
       {
-        direction: 'extra',
-        keys: ['ragPipelines'],
-        reason:
-          'DRIFT, recorded not blessed (#6242 row 2). `ragPipelines` is not declared by '
-          + 'ObjectStackDefinitionSchema, so this mapping cannot be reached from a parsed stack: '
-          + '`pluralToSingular` is called with keys that came OFF a stack. Inert, and removing it is a '
-          + 'behavioural change to a published spec export — its own diff, tracked in #6242.',
-      },
-      {
         direction: 'missing',
         keys: ['datasourceMapping', 'translations', 'objectExtensions', 'picklistExtensions', 'data'],
         reason:
@@ -607,7 +599,7 @@ const SITES = [
     waivers: [
       {
         direction: 'extra',
-        keys: ['workflows', 'approvals', 'roles', 'profiles', 'policies', 'ragPipelines', 'themes'],
+        keys: ['workflows', 'approvals', 'roles', 'profiles', 'policies', 'themes'],
         reason:
           'DRIFT — kinds retired across ADR-0019 / ADR-0020 / ADR-0088 / ADR-0090 / ADR-0049 (#10485 for '
           + '`themes`) that this loop still '
@@ -642,13 +634,13 @@ const SITES = [
     waivers: [
       {
         direction: 'extra',
-        keys: ['workflows', 'ragPipelines'],
+        keys: ['workflows'],
         reason:
-          'DRIFT — retired kinds still mapped, inert for the same reason as the ObjectQL loops: a parsed '
+          'DRIFT — a retired kind still mapped, inert for the same reason as the ObjectQL loops: a parsed '
           + 'artifact cannot carry the fields (#6242 row 4). `policies` left this row at #12894, removed '
           + 'from the map rather than re-waived: it was the THIRD entry retired here for one reason (after '
           + '`themes` and `roles`), and the map now carries the reason in place so a fourth reader does not '
-          + 'have to rediscover it.',
+          + 'have to rediscover it. `ragPipelines` was that fourth reader (ADR-0049), removed the same way.',
       },
       {
         direction: 'missing',
@@ -713,9 +705,9 @@ const SITES = [
     waivers: [
       {
         direction: 'extra',
-        keys: ['workflows', 'triggers', 'ragPipelines'],
+        keys: ['workflows', 'triggers'],
         reason:
-          'DRIFT — three retired kinds in a probe that can never see them. This is the SEVENTH enumeration '
+          'DRIFT — two retired kinds in a probe that can never see them. This is the SEVENTH enumeration '
           + 'of the set, found by writing this gate rather than by hand: the card that catalogued the drift '
           + 'listed six sites and did not have this one.',
       },

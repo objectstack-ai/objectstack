@@ -1588,7 +1588,7 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
         // Regression: plugin-registered types (no static registry entry)
         //
         // `theme`, `connector`, `sharing_rule`, `webhook`, `analytics_cube`,
-        // `rag_pipeline` have no `DEFAULT_METADATA_TYPE_REGISTRY` entry at all
+        // `rag_pipeline` had no `DEFAULT_METADATA_TYPE_REGISTRY` entry at all
         // — they reach `/meta` through the static URL-spelling contract's
         // manifest limb instead. `getMetaTypes()` advertises them as writable
         // and the write gate must agree, otherwise users see "writable" types
@@ -1634,10 +1634,11 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
         // SCHEMA (not a registry entry), and the old specimen body
         // (`tokens: {}` — an alias of `customVars`, with the required `colors`
         // missing) is spec-INVALID and now 422s. `analytics_cube` was bound in
-        // the same change. Of the six URL-map-only kinds, `rag_pipeline` is
-        // now the ONLY one that resolves no schema (it has no stack collection
-        // to take one from — #6242 row 2), so it carries the pure
-        // no-schema fall-through control below. Each newly-bound type's own
+        // the same change. Of the six URL-map-only kinds, `rag_pipeline` was
+        // then the ONLY one that resolved no schema (it has no stack collection
+        // to take one from — #6242 row 2), so it carried the pure
+        // no-schema fall-through control below (until its own retirement, next
+        // paragraph). Each newly-bound type's own
         // behaviour, door and 422 both, is pinned in the tests below.
         //
         // [commit 35ad101bc] `theme` then left the CONTRACT ITSELF (ADR-0049 — the
@@ -1646,18 +1647,44 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
         // kind at all: both halves of its old pair now earn the #8421
         // unrecognised refusal, pinned once below; `webhook` carries the
         // two-halves door pin for the class.
+        //
+        // `rag_pipeline` then left the contract the same way: its
+        // `ragPipelines` listing row was retired from `PLURAL_TO_SINGULAR`
+        // (ADR-0049 — no stack could ever declare the collection), so the
+        // no-schema fall-through control it carried here has no URL-map-only
+        // specimen left. The control below keeps its point — a kind with no
+        // static registry entry is still created through the plugin path — on
+        // `connector` with a spec-valid body, and `rag_pipeline`'s own exit is
+        // pinned as a CHANGED BEHAVIOUR case right after it.
         // ───────────────────────────────────────────────────────────────
 
         it('accepts brand-new plugin-registered type (no static registry entry)', async () => {
             mockEngine.findOne.mockResolvedValue(null);
 
             const result = await scoped.saveMetaItem({
-                type: 'rag_pipeline',
-                name: 'my_pipeline',
-                item: { name: 'my_pipeline', label: 'Test' },
+                type: 'connector',
+                name: 'my_plugin_kind_item',
+                item: { name: 'my_plugin_kind_item', label: 'Test', type: 'api' },
             });
 
             expect(result.success).toBe(true);
+        });
+
+        it('CHANGED BEHAVIOUR — `rag_pipeline` is no longer one of them (its listing row retired)', async () => {
+            mockEngine.findOne.mockResolvedValue(null);
+
+            // ADR-0112 — code AND status, never "it threw".
+            await expect(
+                scoped.saveMetaItem({
+                    type: 'rag_pipeline',
+                    name: 'my_pipeline',
+                    item: { name: 'my_pipeline', label: 'Test' },
+                }),
+            ).rejects.toMatchObject({
+                code: 'INVALID_REQUEST',
+                status: 400,
+            });
+            expect(mockEngine.insert).not.toHaveBeenCalled();
         });
 
         it('[#8421] CHANGED BEHAVIOUR — `policy` is no longer one of them', async () => {
@@ -1668,7 +1695,7 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
             // Its own case rather than an edit to the assertion above, so the
             // narrowing is visible to a reviewer instead of inferred from a
             // deleted line, and so the `theme` half above stays a pure control:
-            // if a future change breaks the six URL-map-only kinds, that case
+            // if a future change breaks the URL-map-only kinds, that case
             // goes red on its own rather than being masked by this one.
             mockEngine.findOne.mockResolvedValue(null);
 
