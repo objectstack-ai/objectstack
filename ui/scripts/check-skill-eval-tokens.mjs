@@ -132,6 +132,13 @@
  * `must_contain` would have the polarity backwards and would red on the entries
  * that are most carefully chosen. `--self-test` pins that direction.
  *
+ * One more refusal sits beside the shape check: an entry the case's OWN
+ * `expected_output` contains is a `forbids-own-answer` finding. The assertion
+ * matches anywhere, so an answer written like the reference answer fails it,
+ * even when it names the string only as the thing to avoid. The remedy is to
+ * narrow the entry to what a wrong answer writes (`fuzzy:`, not `fuzzy`), or drop
+ * it. Plain substring, case-sensitive: that is how the assertion is graded.
+ *
  * ## The baseline: declared, SHRINK-ONLY, and EMPTY at landing
  *
  * `KNOWN_UNTAUGHT_EVAL_TOKENS` is empty today, because the chosen oracle has no
@@ -405,9 +412,23 @@ export function analyze({ root, baseline = KNOWN_UNTAUGHT_EVAL_TOKENS }) {
           }
         }
 
-        // ⛔ `must_not_contain` stops at the shape check above and is NEVER
-        // scored against the guides. The header states why; the self-test pins
-        // that an entry absent from every guide does not red.
+        // A forbidden entry the case's own reference answer writes fails that
+        // answer: refused, so the entry is narrowed or dropped (header).
+        const expected = typeof item.expected_output === 'string' ? item.expected_output : '';
+        for (const token of Array.isArray(mustNotContain) ? mustNotContain : []) {
+          if (typeof token !== 'string' || token === '' || !expected.includes(token)) continue;
+          shapeFindings.push({
+            site: `${evalPath} eval ${item.id}`,
+            reason: 'forbids-own-answer',
+            detail:
+              `must_not_contain holds ${JSON.stringify(token)}, which this case's own expected_output ` +
+              'contains — narrow it to what a wrong answer writes, or drop it',
+          });
+        }
+
+        // ⛔ `must_not_contain` stops at the checks above and is NEVER scored
+        // against the guides. The header states why; the self-test pins that an
+        // entry absent from every guide does not red.
         if (!Array.isArray(mustContain)) continue;
         for (const token of mustContain) {
           if (typeof token !== 'string' || token === '') continue;
@@ -502,7 +523,8 @@ function report(result) {
   );
   console.log(
     `Oracle: ${ORACLE} — a token must occur as a WHOLE token (case-sensitive) somewhere in its own ` +
-      "bundle's markdown. `must_not_contain` is shape-checked only and is never scored against the guides.",
+      "bundle's markdown. `must_not_contain` is shape-checked, refused when its own case's expected_output " +
+      'contains it, and never scored against the guides.',
   );
   console.log(
     `Baseline: ${KNOWN_UNTAUGHT_EVAL_TOKENS.size} row(s) declared in KNOWN_UNTAUGHT_EVAL_TOKENS (⛔ SHRINK-ONLY).`,
@@ -690,6 +712,26 @@ export function selfTest() {
     t('a non-array assertion list is a SHAPE failure', badShape.shapeFindings.some((f) => f.reason === 'not-an-array'));
     t('the shape failures do not become token reds', badShape.red.length === 0, JSON.stringify(badShape.red.map((x) => x.key)));
 
+    // ── a forbidden entry its own reference answer writes ───────────────────
+    const ownAnswer = (must_not_contain) =>
+      analyze({
+        root: tree({
+          'skills/fixture/guides/alpha.md': 'taught\n',
+          'skills/fixture/evals/alpha.json': JSON.stringify({
+            skill_name: 'fixture',
+            evals: [{ id: 1, prompt: 'p', expected_output: 'Uses taught; no `fuzzy` knob.', files: [], assertions: { must_contain: ['taught'], must_not_contain } }],
+          }),
+        }),
+        baseline: new Set(),
+      }).shapeFindings;
+    const selfFailing = ownAnswer(['fuzzy', 'boost']);
+    t(
+      'an entry its own expected_output contains is REFUSED, and only that entry',
+      selfFailing.length === 1 && selfFailing[0].reason === 'forbids-own-answer' && selfFailing[0].detail.includes('"fuzzy"'),
+      JSON.stringify(selfFailing),
+    );
+    t('the narrowed entry (`fuzzy:`) passes against the same answer', ownAnswer(['fuzzy:', 'boost']).length === 0);
+
     // ── the preconditions: never 0 for "nothing checked" ────────────────────
     t(
       'a tree with NO bundle at all is a PRECONDITION, never a pass',
@@ -742,7 +784,8 @@ export function selfTest() {
   }
   console.log(
     `OK check-skill-eval-tokens self-test: ${cases.length} cases pass (the whole-token rule on all three ` +
-      'measured false positives, both oracles on the sibling-taught row, must_not_contain never scored, ' +
+      'measured false positives, both oracles on the sibling-taught row, must_not_contain never scored ' +
+      'against the guides but refused when its own expected_output writes it, ' +
       'the shrink-only baseline in both directions, and every precondition that must not read as a pass).',
   );
   return EXIT_CODES.verified;

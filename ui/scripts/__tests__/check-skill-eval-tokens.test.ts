@@ -237,6 +237,39 @@ describe('must_not_contain is never scored against the guides', () => {
       },
     );
   });
+
+  it("refuses an entry the case's own expected_output contains, and passes its narrowed form", () => {
+    const run = (mustNotContain: string[]) =>
+      withTree(
+        (write) => {
+          write('skills/fixture/guides/a.md', 'taughtToken\n');
+          write(
+            'skills/fixture/evals/a.json',
+            JSON.stringify({
+              skill_name: 'fixture',
+              evals: [
+                {
+                  id: 4,
+                  prompt: 'p',
+                  expected_output: 'Uses taughtToken; no `fuzzy` knob.',
+                  files: [],
+                  assertions: { must_contain: ['taughtToken'], must_not_contain: mustNotContain },
+                },
+              ],
+            }),
+          );
+        },
+        (root) => analyze({ root, baseline: new Set<string>() }),
+      );
+    const refused = run(['fuzzy', 'boost']);
+    expect(refused.shapeFindings).toHaveLength(1);
+    expect(refused.shapeFindings[0]).toMatchObject({
+      site: 'skills/fixture/evals/a.json eval 4',
+      reason: 'forbids-own-answer',
+    });
+    expect(refused.red).toEqual([]);
+    expect(run(['fuzzy:', 'boost']).shapeFindings).toEqual([]);
+  });
 });
 
 describe('the baseline is shrink-only', () => {
