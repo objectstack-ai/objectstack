@@ -42,6 +42,16 @@ import {
 } from './organization-ownership-apply.js';
 import { applyNotNullThroughDrift } from './organization-ownership-not-null.js';
 
+// The dynamic imports the plan's module graph reaches, loaded at collection,
+// never inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/driver-turso';
+import '@objectstack/metadata-protocol';
+import '@objectstack/platform-objects/plugin';
+import '@objectstack/plugin-security';
+import '@objectstack/rest';
+import '@objectstack/runtime';
+import '@objectstack/service-datasource';
+
 const ORG = 'org_default';
 const TABLES = ['crm_deal', 'crm_note', 'crm_task'] as const;
 
