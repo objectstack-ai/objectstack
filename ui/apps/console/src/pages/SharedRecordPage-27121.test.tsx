@@ -5,7 +5,9 @@
  * `fields` projection (objectstack#26991): each row carries the field's
  * authored label, a picklist value its authored option label, a currency
  * value its currency through `resolveFieldCurrency`, and a filled lookup a
- * neutral "Linked record" in place of its stored id (objectstack#31326). A key
+ * neutral "Linked record" in place of its stored id (objectstack#31326), a
+ * filled user field "Linked user" in place of its sys_user id
+ * (objectstack#31350). A key
  * with no `fields` entry, and an answer from a server that predates the
  * projection, keep the humanized label and the JSON-shape value.
  *
@@ -342,5 +344,86 @@ describe('SharedRecordPage — a lookup shows a neutral placeholder, never its s
     await screen.findByText('Shared opportunity');
     expect(cellOf('Opportunity Name').textContent).toBe('Renewal 2027');
     expect(cellOf('Record ID').textContent).toBe('opp_7');
+  });
+});
+
+/**
+ * objectstack#31350 — a user field stores a `sys_user` id, the same way a
+ * lookup stores its target's. The projection serves it as `type: 'user'`, and
+ * the page shows a neutral, localized "Linked user" for a filled one and the
+ * empty face for an empty one; the id never reaches the DOM, and nothing reads
+ * the user record.
+ */
+describe('SharedRecordPage — a user field shows a neutral placeholder, never its sys_user id (objectstack#31350)', () => {
+  /** A `ticket` as resolve hands it over: a filled and an empty user field, a multiple one, a lookup beside them. */
+  const TICKET = {
+    id: 'tkt_3',
+    subject: 'Printer on fire',
+    assignee: 'usr_7d41a0',
+    reviewer: null,
+    watchers: ['usr_w_alpha', 'usr_w_beta'],
+    backup: [],
+    account_id: 'acc_t_55',
+  };
+  const TICKET_FIELDS = {
+    id: { label: 'Record ID', type: 'text' },
+    subject: { label: 'Subject', type: 'text' },
+    assignee: { label: 'Assigned To', type: 'user', reference: 'sys_user' },
+    reviewer: { label: 'Reviewer', type: 'user', reference: 'sys_user' },
+    watchers: { label: 'Watchers', type: 'user', reference: 'sys_user', multiple: true },
+    backup: { label: 'Backup', type: 'user', reference: 'sys_user', multiple: true },
+    account_id: { label: 'Account', type: 'lookup', reference: 'account', displayField: 'name' },
+  };
+  const USER_IDS = ['usr_7d41a0', 'usr_w_alpha', 'usr_w_beta'];
+
+  it('a filled user field shows the placeholder, its id appears nowhere in the DOM, and only resolve is fetched', async () => {
+    const requested = shareServer(TICKET, TICKET_FIELDS, 'ticket');
+    renderLink();
+
+    await screen.findByText('Shared ticket');
+    expect(cellOf('Assigned To').textContent).toBe('Linked user');
+    expect(document.body.innerHTML).not.toContain('usr_7d41a0');
+    // No read of sys_user, the data source or /meta: one request, to resolve.
+    expect(requested).toEqual([RESOLVE_PATH]);
+  });
+
+  it('a multiple user field shows the placeholder, and none of its ids', async () => {
+    shareServer(TICKET, TICKET_FIELDS, 'ticket');
+    renderLink();
+
+    await screen.findByText('Shared ticket');
+    expect(cellOf('Watchers').textContent).toBe('Linked user');
+    for (const id of USER_IDS) expect(document.body.innerHTML).not.toContain(id);
+  });
+
+  it('an empty user field renders empty, as before', async () => {
+    shareServer(TICKET, TICKET_FIELDS, 'ticket');
+    renderLink();
+
+    await screen.findByText('Shared ticket');
+    expect(cellOf('Reviewer').textContent).toBe('—');
+    expect(cellOf('Backup').textContent).toBe('—');
+  });
+
+  it('the placeholder speaks the session language', async () => {
+    const zh = builtInLocales['zh-Hans'].sharedRecord.linkedUser;
+    // Guard: a real zh row, not an English copy.
+    expect(zh).not.toBe(builtInLocales.en.sharedRecord.linkedUser);
+    shareServer(TICKET, TICKET_FIELDS, 'ticket');
+    renderLink(undefined, 'zh');
+
+    await screen.findByText(builtInLocales['zh-Hans'].sharedRecord.sharedObject.replace('{{object}}', 'ticket'));
+    expect(cellOf('Assigned To').textContent).toBe(zh);
+    expect(document.body.innerHTML).not.toContain('usr_7d41a0');
+  });
+
+  it('a text field renders its value and a lookup keeps "Linked record" (control)', async () => {
+    shareServer(TICKET, TICKET_FIELDS, 'ticket');
+    renderLink();
+
+    await screen.findByText('Shared ticket');
+    expect(cellOf('Subject').textContent).toBe('Printer on fire');
+    expect(cellOf('Record ID').textContent).toBe('tkt_3');
+    expect(cellOf('Account').textContent).toBe('Linked record');
   });
 });

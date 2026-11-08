@@ -364,6 +364,7 @@ import './services/builtinComponents.js';
 import './console/cloud-connection/CloudConnectionPanel.js';
 import './console/connect/ConnectAgentWidget.js';
 import './console/connect/ManagedPersonAssistants.js';
+import './console/security/UserEffectiveAccess.js';
 // Generic product-page blocks — hero, stat, usage-bar, checklist, tile-grid
 // (objectui#12197).
 import './console/blocks/productBlocks.js';

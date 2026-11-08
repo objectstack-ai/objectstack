@@ -61,8 +61,8 @@ export interface RecycleBinRemovalOptions {
 /** How many entry ids one page of {@link emptyRecycleBin}'s fallback reads. */
 const EMPTY_PAGE_SIZE = 500;
 
-/** A `400 VALIDATION_ERROR` refusal of a recycle-bin call's own shape. */
-function recycleBinCallRefusal(message: string, developerMessage: string, object: string | undefined, param: string): Error {
+/** A `400 VALIDATION_ERROR` refusal of a recycle-bin call's own shape (`restore.ts` shares it). */
+export function recycleBinCallRefusal(message: string, developerMessage: string, object: string | undefined, param: string): Error {
   const err: any = new Error(message);
   err.developerMessage = developerMessage;
   err.code = 'VALIDATION_ERROR';

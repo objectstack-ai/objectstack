@@ -3998,6 +3998,7 @@ const zh = {
     sharedObject: '分享的 {{object}}',
     redactedFields: '部分字段已被所有者隐藏：{{fields}}',
     linkedRecord: '已关联记录',
+    linkedUser: '已关联用户',
   },
   publicForm: {
     submit: '提交',
@@ -4125,6 +4126,22 @@ const zh = {
       managedBody: '此人授权的 AI 助手。它们都以此人的权限操作，撤销会立即终止其访问。',
       managedEmpty: '此人还没有授权任何 AI 助手。',
       managedTruncated: '仅显示最新的部分，此人授权的助手还有更多。',
+    },
+  },
+  effectiveAccess: {
+    title: '实际生效的权限集',
+    body: '此人在你当前组织中实际生效的每个权限集，以及各自的来源。直接分配的权限集也列在下方，可以在那里移除。',
+    refused: '你无权查看此人实际生效的权限。',
+    unserved: '此服务器不提供实际生效权限的查询。',
+    loadFailed: '无法加载实际生效的权限：{{message}}',
+    empty: '此人在此组织中没有生效的权限集。',
+    originsLabel: '来源',
+    origin: {
+      direct: '直接分配',
+      position: '岗位：{{position}}',
+      default: '默认绑定',
+      derivedPlatformAdmin: '配置的平台管理员',
+      derivedAiAccess: '已开启 AI 访问',
     },
   },
   excelImport: {

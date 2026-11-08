@@ -117,13 +117,19 @@ export type MetadataEventSubject = MetadataEventSubjectOf<MetadataEventType>;
 /**
  * Data Event Types
  *
- * Triggered when data records are created, updated, or deleted.
+ * Triggered when data records are created, updated, deleted, or restored from
+ * the recycle bin.
  * Follows the pattern: `data.record.{action}`
  *
  * Only event names with a REAL producer are declared here — a subscriber must
  * not be able to wait on something that never fires (the same rule
  * `WebhookTriggerType` states for its own vocabulary). The engine's
- * `publishDataEvent` emits exactly these three.
+ * `publishDataEvent` emits exactly these four.
+ *
+ * `data.record.restored` (ADR-0148 D2) is `RECORD_RESTORED_EVENT`
+ * (`data/recycle-bin.zod.ts`): the engine's restore publishes it once per row
+ * it writes back. A restore is never a create, so a consumer keyed on
+ * `data.record.created` does not see it.
  *
  * REMOVED in 17.0.0 (#4673, ADR-0049 enforce-or-remove): `data.field.changed`.
  * Nothing in either repository ever emitted it, and `DataEventSchema` has no
@@ -139,6 +145,7 @@ export const DataEventType = z.enum([
   'data.record.created',
   'data.record.updated',
   'data.record.deleted',
+  'data.record.restored',
 ]);
 
 export type DataEventType = z.input<typeof DataEventType>;
