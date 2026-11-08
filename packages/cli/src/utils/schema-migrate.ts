@@ -1888,6 +1888,16 @@ export async function renderPendingSchemaWork(pending: PendingSchemaWork[]): Pro
         );
         continue;
       }
+      // [cloud#3652 D3] A declared rename: the old column renamed to the field
+      // that declares `renamedFrom`, its values kept. No row is rewritten.
+      if (p.kind === 'rename_columns') {
+        const renames = p.renames ?? p.columns.map((to) => ({ from: '?', to }));
+        console.log(
+          `    ${chalk.yellow('~')} ${chalk.yellow(p.table)} ` +
+          `${chalk.dim(`[${p.kind}: ${renames.map((r) => `${r.from} → ${r.to}`).join(', ')} — values carried, declared by renamedFrom]`)}`,
+        );
+        continue;
+      }
       const cost = p.kind === 'widen_datetime_columns' || p.kind === 'widen_time_columns'
         ? `${formatRows(p.rows)} row table rebuild`
         : `${formatRows(p.rows)} row update(s)`;
@@ -1926,7 +1936,7 @@ export async function summarizePendingSchemaWork(pending: PendingSchemaWork[]): 
   // Only mentioned when there is some, so the common in-sync summary is
   // unchanged — but never omitted when there is, which is the #3954 point.
   const isInPlaceSchemaWork = await loadIsInPlaceSchemaWork();
-  const inPlace = pending.filter((p) => isInPlaceSchemaWork(p.kind) && p.kind !== 'rebuild_table');
+  const inPlace = pending.filter((p) => isInPlaceSchemaWork(p.kind) && p.kind !== 'rebuild_table' && p.kind !== 'rename_columns');
   if (inPlace.length > 0) {
     const cols = inPlace.reduce((n, p) => n + p.columns.length, 0);
     const rows = inPlace.reduce((n, p) => n + (p.rows ?? 0), 0);
@@ -1935,6 +1945,9 @@ export async function summarizePendingSchemaWork(pending: PendingSchemaWork[]): 
   // [#30636] Named only when there are some, like the in-place count above.
   const rebuilds = pending.filter((p) => p.kind === 'rebuild_table').length;
   if (rebuilds > 0) parts.push(`${rebuilds} empty table(s) to rebuild`);
+  // [cloud#3652 D3] Named only when there are some, like the counts above.
+  const renamed = pending.filter((p) => p.kind === 'rename_columns').reduce((n, p) => n + p.columns.length, 0);
+  if (renamed > 0) parts.push(`${renamed} column(s) to carry by a declared rename`);
   const { refused } = await splitRefusedSchemaWork(pending);
   if (refused.length > 0) parts.push(`${refused.length} table(s) REFUSED`);
   return parts.join(', ');
