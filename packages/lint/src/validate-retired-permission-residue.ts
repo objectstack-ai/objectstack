@@ -113,8 +113,10 @@ export function retiredKeyPrescription(key: string): string | null {
 /**
  * [#22161] The `fix:` line, cut from the retirement's own prescription: its
  * "Delete the key" sentence up to its end, and up to its first ` — ` when the
- * whole sentence would run past 200 characters (both keys' do: the clause after
- * the dash, on what stays denied, is the explanation's). It cuts and never
+ * whole sentence would run past 200 characters (neither key's does: each
+ * prescription spells "Delete the key." as its own sentence, and the sentences
+ * after it, naming the recycle bin's grants `allowRestoreOwnDeleted` /
+ * `manageRecycleBin` (ADR-0148), are the explanation's). It cuts and never
  * rewrites, so the single-wording discipline above holds; a prescription with
  * no such sentence is returned whole rather than replaced by an invented line.
  */
