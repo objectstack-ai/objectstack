@@ -15,7 +15,7 @@ Metadata-protocol: none
 Both stay in their modules, which their package's own code still reads; only the entries stop publishing them:
 
 - `CollaborationTranslate` types the `t` that `CommentThread` and `PresenceAvatars` pass to their timestamp and status helpers.
-- `MobileDialogContentProps` is the props type of `MobileDialogContent`, whose published declaration already spells the props out in full.
+- `MobileDialogContentProps` is the props type of `MobileDialogContent`, and the props stay recoverable as `React.ComponentPropsWithoutRef<typeof MobileDialogContent>`.
 
 Every other name the two entries exported stays exported unchanged, among them `useCollaborationTranslation`, `COLLAB_DEFAULT_TRANSLATIONS`, `CommentThread`, `PresenceAvatars` and `MobileDialogContent`.
 
