@@ -369,3 +369,81 @@ describe('picklist — a stale served copy never stands in for the list', () => 
     expect(folded.fields[1]).toBe(body.fields[1]);
   });
 });
+
+/**
+ * [ADR-0150 D3/D4, child E6] A field's `picklist` resolves through the
+ * package-scoped resolver from the package that WROTE the reference: its own
+ * list, else the unique holder in its declared dependency closure (plus
+ * `sys`), else a refusal naming every candidate. Phase 1 keeps one holder per
+ * name, so what moves is the declared narrowing alone.
+ */
+describe('picklist — resolved from the package that writes the reference (ADR-0150 D3)', () => {
+  const ENV_LIST = { name: 'env_tier', label: 'Tier', options: [{ label: 'Gold', value: 'gold' }] };
+  const member = (picklist: string) => ({
+    name: 'pk_member',
+    label: 'Member',
+    fields: {
+      name: { name: 'name', label: 'Name', type: 'text' as const },
+      tier: { name: 'tier', label: 'Tier', type: 'select' as const, picklist },
+    },
+  });
+
+  it('D3 (a): a package field whose list only the environment holds is served with no options, and its values are refused', async () => {
+    const engine = await bootEngine();
+    // An environment-authored list: bound to no package (the bare slot).
+    engine.registry.registerItem('picklist', { ...ENV_LIST }, 'name');
+    engine.registerApp({ id: 'com.test.pkg', name: 'pkg', objects: [member('env_tier')] });
+
+    const field: any = engine.registry.getObject('pk_member')!.fields.tier;
+    expect(field.picklist).toBe('env_tier');
+    expect(field.options).toBeUndefined();
+    const verdict = engine.registry.picklistReferenceVerdict('env_tier', 'com.test.pkg');
+    expect(verdict).toMatchObject({ status: 'refused', reason: 'outside-closure', candidates: [{ kind: 'environment' }] });
+    const err = await refusal(engine.insert('pk_member', { name: 'M', tier: 'gold' }, sys));
+    expect(err.fields[0]).toMatchObject({ field: 'tier' });
+    // Named for the boot's warning (never a boot refusal), not as an unresolved reference.
+    expect(engine.registry.findUnresolvedPicklistReferences()).toEqual([]);
+    expect(engine.registry.findEnvironmentHeldPicklistReferences()).toEqual([
+      expect.objectContaining({ object: 'pk_member', field: 'tier', picklist: 'env_tier', packageId: 'com.test.pkg' }),
+    ]);
+  });
+
+  it('a package field whose list a package OUTSIDE its declared closure holds is refused, naming that package', async () => {
+    const engine = await bootEngine();
+    engine.registerApp({ id: 'com.test.lists', name: 'lists', picklists: [{ ...ENV_LIST }] });
+    engine.registerApp({ id: 'com.test.pkg', name: 'pkg', objects: [member('env_tier')] });
+
+    expect((engine.registry.getObject('pk_member')!.fields.tier as any).options).toBeUndefined();
+    const [unresolved] = engine.registry.findUnresolvedPicklistReferences();
+    expect(unresolved).toMatchObject({ object: 'pk_member', field: 'tier', packageId: 'com.test.pkg' });
+    expect(unresolved.refusal).toContain('package "com.test.lists"');
+  });
+
+  it('CONTROL — the same field, its package declaring the holder as a dependency, is served the list', async () => {
+    const engine = await bootEngine();
+    engine.registerApp({ id: 'com.test.lists', name: 'lists', picklists: [{ ...ENV_LIST }] });
+    engine.registerApp({
+      id: 'com.test.pkg', name: 'pkg', dependencies: { 'com.test.lists': '^1.0.0' }, objects: [member('env_tier')],
+    });
+    expect(values(engine.registry.getObject('pk_member')!.fields.tier)).toEqual(['gold']);
+    expect(engine.registry.findUnresolvedPicklistReferences()).toEqual([]);
+  });
+
+  it('CONTROL — a referrer with no package (a body only the environment writes) is served the environment\'s list, as before', async () => {
+    const engine = await bootEngine();
+    engine.registry.registerItem('picklist', { ...ENV_LIST }, 'name');
+    const body = member('env_tier');
+    // A body this registry never saw: no packaged layer wrote its reference.
+    const folded: any = engine.registry.foldObjectExtendersOnto('pk_member', body);
+    expect(values(folded.fields.tier)).toEqual(['gold']);
+    expect(engine.registry.resolvePicklistOptions('env_tier')!.map((o) => o.value)).toEqual(['gold']);
+  });
+
+  it('a package\'s `picklistExtensions` target resolves caller-less: it extends the one holder\'s list, dependency or not', async () => {
+    const engine = await bootEngine();
+    engine.registerApp(CORE);
+    engine.registerApp({ id: 'com.test.addon', name: 'addon', picklistExtensions: [HEALTHCARE_EXTENSION] });
+    expect(values(engine.registry.getObject('pk_account')!.fields.industry)).toEqual(['technology', 'finance', 'healthcare']);
+    expect(engine.registry.findOrphanPicklistExtensions()).toEqual([]);
+  });
+});
