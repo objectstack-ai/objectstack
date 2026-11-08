@@ -175,6 +175,7 @@ export const PARAM_VALUE_SHAPES: Readonly<Record<string, ParamValueShapeSpec>> =
   // Widget-hint-only pickers — reached via a field `widget:` override, never a
   // bare param `type`. Present for total FORM_FIELD_TYPES coverage only.
   'object-ref': { base: 'string', cardinality: 'scalar', widgetHintOnly: true, note: 'Object name string. Widget-hint only — not a declarable param type.' },
+  'shareable-object-ref': { base: 'string', cardinality: 'scalar', widgetHintOnly: true, note: 'Object name string (an object a sharing rule can take effect on). Widget-hint only — not a declarable param type.' },
   'filter-condition': { base: 'object', cardinality: 'scalar', widgetHintOnly: true, note: 'Filter/criteria object. Widget-hint only — not a declarable param type.' },
   'recipient-picker': { base: 'string', cardinality: 'scalar', widgetHintOnly: true, note: 'Recipient id string. Widget-hint only — not a declarable param type.' },
   'position-ref': { base: 'string', cardinality: 'scalar', widgetHintOnly: true, note: 'Position name string. Widget-hint only — not a declarable param type.' },

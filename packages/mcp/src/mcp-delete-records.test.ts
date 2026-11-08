@@ -653,6 +653,57 @@ describe('MCP delete_records: many records of one object in one confirmed call (
       });
       expect([...rows.keys()]).toEqual(['t2', 't3', 't4', 't5']);
     });
+
+    it('[#31246] a CODED sandboxed refusal is grouped under its code with the body\'s sentence, never the wrapper naming the hook', async () => {
+      const sentence = 'This task is approved and cannot be deleted.';
+      // The `SandboxError` the QuickJS runner raises for a body's
+      // `throw Object.assign(new Error(sentence), { code, status })`.
+      rows.get('t3')!.throws = Object.assign(new Error(`hook 'dlr_task_guard' threw: Error: ${sentence}`), {
+        name: 'SandboxError',
+        innerMessage: sentence,
+        code: 'RECORD_LOCKED',
+        status: 409,
+      });
+
+      const result = await callTool(bridge, 'delete_records', {
+        objectName: OBJECT,
+        recordIds: ['t1', 't3', 't6'],
+        [AI_ACTION_CONFIRMATION_MEMBER]: true,
+      });
+
+      expect(result.isError, result.content[0]?.text).toBeFalsy();
+      expect(parsed(result)).toMatchObject({
+        attempted: 3,
+        deleted: 2,
+        refused: 1,
+        refusals: [{ code: 'RECORD_LOCKED', status: 409, reason: sentence, count: 1, recordIds: ['t3'] }],
+      });
+      expect(result.content[0]!.text).not.toContain('dlr_task_guard');
+    });
+
+    it('[#31269] a sandboxed body that CRASHED with a declared code is a fault, answered as the same crash with no code', async () => {
+      const crash = (extra: Record<string, unknown> = {}) => Object.assign(
+        new Error("hook 'dlr_task_guard' threw: TypeError: boom"),
+        { name: 'SandboxError', innerMessage: 'TypeError: boom' },
+        extra,
+      );
+      const run = async (thrown: Error) => {
+        rows.get('t3')!.throws = thrown;
+        return callTool(bridge, 'delete_records', {
+          objectName: OBJECT,
+          recordIds: ['t3', 't6'],
+          [AI_ACTION_CONFIRMATION_MEMBER]: true,
+        });
+      };
+
+      const coded = await run(crash({ code: 'RECORD_LOCKED', status: 409 }));
+      expect(coded.isError).toBe(true);
+      const { error, progress } = parsed(coded);
+      expect(error.code).toBeUndefined();
+      expect(error.status).toBeUndefined();
+      expect(progress).toMatchObject({ attempted: 1, deleted: 0, refused: 0, stoppedAt: 't3', notAttempted: 1 });
+      expect(coded).toEqual(await run(crash()));
+    });
   });
 
   it('the long-lived server the stdio transport serves refuses, previews and deletes the same way', async () => {

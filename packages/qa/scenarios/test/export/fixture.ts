@@ -136,6 +136,8 @@ export class FakeApp implements AppHarness {
   installed: Record<string, unknown> | undefined;
   /** Seed rows this app refuses, `object/id`. */
   refuse = new Set<string>();
+  /** Every API key this app issues is this prefix + the persona's id (`admin` for the admin). */
+  keyPrefix = 'key-';
   signedIn = 0;
   async signInAdmin() {
     this.signedIn++;
@@ -147,10 +149,10 @@ export class FakeApp implements AppHarness {
     return 'org';
   }
   async createPersona(persona: string, permissionSet: string): Promise<PersonaAccount> {
-    return { persona, userId: `u-${persona}`, email: `${persona}@scenario.test`, apiKey: `key-${persona}`, permissionSet: { name: permissionSet, assigned: true } };
+    return { persona, userId: `u-${persona}`, email: `${persona}@scenario.test`, apiKey: `${this.keyPrefix}${persona}`, permissionSet: { name: permissionSet, assigned: true } };
   }
   async adminApiKey() {
-    return 'key-admin';
+    return `${this.keyPrefix}admin`;
   }
   async insertRow(object: string, row: Record<string, unknown>): Promise<HttpAnswer> {
     if (this.refuse.has(`${object}/${String(row.id)}`)) return { ok: false, status: 400, body: {}, code: 'VALIDATION_FAILED', message: 'refused by the double' };
@@ -259,6 +261,8 @@ export async function runCrm(
     modes?: Array<'scratch' | 'template'>;
     /** Seed rows every booted app refuses, `object/id`. */ refuse?: string[];
     /** The package source the record states; default published 18.3.0. */ packages?: PackageSource;
+    /** The prefix of every API key the booted apps issue; default `key-`. */ keyPrefix?: string;
+    /** Wraps the scripted model (e.g. to send its turns through another driver); the recording records what this answers. */ wrap?: (scripted: AgentDriver) => AgentDriver;
   } = {},
 ): Promise<FixtureRun> {
   const scenario = loadCrm();
@@ -266,6 +270,7 @@ export async function runCrm(
   const fresh = () => {
     const app = new FakeApp();
     for (const r of opts.refuse ?? []) app.refuse.add(r);
+    if (opts.keyPrefix !== undefined) app.keyPrefix = opts.keyPrefix;
     return app;
   };
   let current = fresh();
@@ -275,7 +280,8 @@ export async function runCrm(
     current = fresh();
     return boot(dir);
   };
-  const driver = new RecordingDriver(new ScriptedDriver(scenario, ops, () => current));
+  const scripted = new ScriptedDriver(scenario, ops, () => current);
+  const driver = new RecordingDriver(opts.wrap ? opts.wrap(scripted) : scripted);
   const cardRun = await runCard(scenario, driver, ops, { modes: opts.modes ?? ['scratch', 'template'], admin: ADMIN, ...(opts.iterateRun === false ? { iterateRun: false } : {}) });
   const date = opts.date ?? '2026-11-06';
   const packages = opts.packages ?? { source: 'published', versions: ['18.3.0'] };

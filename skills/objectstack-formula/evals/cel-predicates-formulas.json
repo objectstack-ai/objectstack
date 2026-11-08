@@ -14,10 +14,10 @@
     {
       "id": 2,
       "prompt": "Translate this Salesforce validation rule into ObjectStack: AND(ISBLANK(po_number), amount > 10000, NOT(ISPICKVAL(status, 'draft'))).",
-      "expected_output": "By the legacy → CEL table, `P`isBlank(record.po_number) && record.amount > 10000 && record.status != 'draft'``; a `script` validation is inverted (it FAILS when true, so keep the failing condition), and `record.amount > 10000` on a nullable field needs an explicit `record.amount != null &&` guard or the publish gate rejects it.",
+      "expected_output": "By the legacy → CEL table plus the null guard, `P`isBlank(record.po_number) && record.amount != null && record.amount > 10000 && record.status != 'draft'``; a `script` validation is inverted (it FAILS when true, so keep the failing condition), and `record.amount > 10000` on a nullable field needs the explicit `record.amount != null &&` guard or the publish gate rejects it.",
       "files": [],
       "assertions": {
-        "must_contain": ["isBlank(", "&&", "record.", "P`"],
+        "must_contain": ["isBlank(", "&&", "record.amount != null", "P`"],
         "must_not_contain": ["{record.", "ISBLANK(record."]
       }
     },

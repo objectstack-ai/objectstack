@@ -838,6 +838,7 @@
       {
         "id": "sales_rep",
         "role": "Sales rep, team east, owner of Cedar Logistics and Bluebird Outfitters — e03",
+        "record": {"object": "employee", "id": "e03"},
         "hidden": {"objects": ["payment"], "fields": [{"object": "product", "field": "unit_cost"}]},
         "scope": [
           {"object": "account", "field": "owner", "value": "e03"},
@@ -850,6 +851,7 @@
       {
         "id": "sales_manager",
         "role": "Sales manager, team east — e01",
+        "record": {"object": "employee", "id": "e01"},
         "hidden": {"fields": [{"object": "payment", "field": "bank_reference"}]},
         "scope": [
           {"object": "account", "field": "owner.team", "value": "east"},

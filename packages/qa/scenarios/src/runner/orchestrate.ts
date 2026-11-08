@@ -31,7 +31,7 @@
  * else; this module only gathers what the graders take.
  */
 
-import { applyExpectDelta, type LoadedScenario } from '../loader.js';
+import { applyExpectDelta, truthsOver, type LoadedScenario } from '../loader.js';
 import { isProbedOperation, scenarioNamespace, type CardTitle } from '../schema.js';
 import {
   gradeCardAnswer,
@@ -130,7 +130,7 @@ export interface BuildHalf {
 export interface QuestionResult {
   question: string;
   persona: string | null;
-  /** Why this turn was not asked: it reads a row the seed could not load ({@link seedDependence}). Not measured, never a fail. */
+  /** Why this turn was not asked: its expected answer changes without the rows the seed could not load ({@link seedDependence}). Not measured, never a fail. */
   notMeasured?: string;
   grade?: PersonaRunGrade;
   turn?: TurnSummary;
@@ -161,6 +161,12 @@ export interface RunHalf {
     refused: Array<{ object: string; id: string; fields?: string[]; code?: string; message?: string }>;
     /** Handles a user-handle field named that no persona holds, each loaded as the admin user (`u_tia`). */
     handlesAsAdmin?: string[];
+    /**
+     * The fields the seed rewrote, `object.field`: each a declared user-handle
+     * field (`run.userHandleFields`) whose handle text a row was loaded with a
+     * user's id in place of. Absent when the seed rewrote none.
+     */
+    rewritten?: string[];
     /** Lookup values the second pass set, per `object.field` ({@link seedPlan}); absent when nothing waited. */
     secondPass?: Record<string, number>;
   };
@@ -327,8 +333,12 @@ type Operation = Card['run']['operations'][number];
  * whose declared lookup (`expect.lookups`) names a row that is out — a contact
  * of a refused account, whether or not the app refused it too. Then:
  *
- *   - a question is not measured when its `object` has a row that is out: its
- *     truth was computed over rows the app does not hold;
+ *   - a question turn (the question over all rows, or as one persona) is not
+ *     measured when its expected answer changes once the rows out are taken
+ *     from the seed: its truth is computed again over the rest, by the
+ *     loader's own rules ({@link truthsOver}), and compared. A turn whose
+ *     answer the rows out never feed (a persona whose scope excludes them, a
+ *     count they do not move) is asked and graded as usual;
  *   - an operation is not measured when its `target`, a lookup value it writes,
  *     or a post-state row (`id`, or a lookup value in its `values`) names a row
  *     that is out.
@@ -337,9 +347,14 @@ type Operation = Card['run']['operations'][number];
  * in neither passed nor total.
  */
 export function seedDependence(
-  card: Card,
+  scenario: LoadedScenario,
   refused: ReadonlyArray<{ object: string; id: string }>,
-): { out: Map<string, string>; question(q: Question): string | undefined; operation(op: Operation): string | undefined } {
+): {
+  out: Map<string, string>;
+  question(q: Question, persona: string | null): string | undefined;
+  operation(op: Operation): string | undefined;
+} {
+  const { card } = scenario;
   /** `object/id` → the refused row it hangs off, as `object id`. */
   const out = new Map<string, string>(refused.map((r) => [`${r.object}/${r.id}`, `${r.object} ${r.id}`]));
   const lookups = card.expect.lookups ?? [];
@@ -367,14 +382,25 @@ export function seedDependence(
     }
     return undefined;
   };
+  /** Every truth over the seed less the rows out, computed once and only when a row is out. */
+  let without: Pick<LoadedScenario, 'truths' | 'personaTruths'> | undefined;
+  const truthsWithout = () =>
+    (without ??= truthsOver(
+      card,
+      Object.fromEntries(Object.entries(card.run.seed).map(([object, rows]) => [object, rows.filter((r) => !out.has(`${object}/${r.id}`))])),
+    ));
   return {
     out,
-    question: (q) => {
-      for (const row of card.run.seed[q.object] ?? []) {
-        const w = why(q.object, row.id);
-        if (w) return w;
-      }
-      return undefined;
+    question: (q, persona) => {
+      if (out.size === 0) return undefined;
+      const want = persona === null ? scenario.truths[q.id] : scenario.personaTruths[q.id]?.[persona];
+      const rest = truthsWithout();
+      const got = persona === null ? rest.truths[q.id] : rest.personaTruths[q.id]?.[persona];
+      if (got !== undefined && JSON.stringify(got) === JSON.stringify(want)) return undefined;
+      const roots = [...new Set(out.values())].join(', ');
+      return got === undefined
+        ? `seed: its expected answer is not defined without ${roots}, which the app refused`
+        : `seed: its expected answer changes without ${roots}, which the app refused`;
     },
     operation: (op) => {
       const direct = (op.target !== undefined ? why(op.object, op.target) : undefined) ?? viaLookups(op.object, op.values);
@@ -543,6 +569,7 @@ export async function seedApp(
           const userId = acct?.userId ?? app.adminUserId();
           body[k] = userId;
           body.owner_id = userId;
+          seed.rewritten = [...new Set([...(seed.rewritten ?? []), `${object}.${k}`])].sort();
           if (!acct) seed.handlesAsAdmin = [...new Set([...(seed.handlesAsAdmin ?? []), v])].sort();
         }
       }
@@ -599,13 +626,13 @@ export async function runHalf(
 
     const keyOf = (persona: string | null) => (persona === null ? adminKey : accounts.find((a) => a.persona === persona)!.apiKey);
     // A refused seed row makes what reads it not measured — never a fail of the app's answer.
-    const dependence = seedDependence(card, half.seed.refused);
+    const dependence = seedDependence(scenario, half.seed.refused);
 
     for (const q of card.run.questions) {
-      const notMeasured = dependence.question(q);
       for (const persona of [null, ...(q.personas ?? [])]) {
         if (persona === null && q.personas?.length) continue; // a persona-scoped question is asked as its personas
         const res: QuestionResult = { question: q.id, persona };
+        const notMeasured = dependence.question(q, persona);
         if (notMeasured) {
           half.questions.push({ ...res, notMeasured });
           continue;
