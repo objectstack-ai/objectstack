@@ -423,6 +423,100 @@ function declareFederationSweep(cell: Cell, build: () => SqlDriver): void {
           });
         }
       });
+
+      // ── #31390: a SYS_GUID() key is filtered and written by its uuid text ──
+      describe('RAW(16) uuid keys: filtered, written and looked up by the uuid they read as', () => {
+        const ACCT = { table: 'OSFC_UACCT', object: 'fc_uacct' };
+        const ORD = { table: 'OSFC_UORD', object: 'fc_uord' };
+        const ORDER_ID = '0f8fad5b-d9cb-469f-a165-70867728950e';
+        let accounts: string[] = [];
+
+        beforeAll(async () => {
+          await dropRemote(knex, cell, ORD.table);
+          await dropRemote(knex, cell, ACCT.table);
+          await knex.raw(`CREATE TABLE "${ACCT.table}" ("ACCT_ID" RAW(16) DEFAULT SYS_GUID() PRIMARY KEY, "NAME" VARCHAR2(100))`);
+          await knex.raw(
+            `CREATE TABLE "${ORD.table}" ("ORD_ID" RAW(16) PRIMARY KEY, "ACCT_REF" RAW(16), ` +
+              `"LEGACY_REF" VARCHAR2(36), "NOTE" VARCHAR2(100))`,
+          );
+          await knex.raw(`INSERT INTO "${ACCT.table}" ("NAME") VALUES ('first')`);
+          await knex.raw(`INSERT INTO "${ACCT.table}" ("NAME") VALUES ('second')`);
+          (driver as any).registerExternalObject({
+            name: ACCT.object,
+            external: { remoteName: ACCT.table, columnMap: { ACCT_ID: 'id', NAME: 'name' } },
+            fields: { name: { type: 'text' } },
+          });
+          (driver as any).registerExternalObject({
+            name: ORD.object,
+            external: {
+              remoteName: ORD.table,
+              columnMap: { ORD_ID: 'id', ACCT_REF: 'account', LEGACY_REF: 'legacy_account', NOTE: 'note' },
+            },
+            fields: {
+              account: { type: 'lookup', reference: ACCT.object },
+              legacy_account: { type: 'lookup', reference: ACCT.object },
+              note: { type: 'text' },
+            },
+          });
+          const read = await driver.find(ACCT.object, { orderBy: [{ field: 'name', order: 'asc' }] }, BYPASS);
+          accounts = read.map((r) => String(r.id));
+        }, 60_000);
+
+        afterAll(async () => {
+          await dropRemote(knex, cell, ORD.table).catch(() => {});
+          await dropRemote(knex, cell, ACCT.table).catch(() => {});
+        });
+
+        it('the SYS_GUID keys read as lowercase hyphenated uuids', () => {
+          expect(accounts).toHaveLength(2);
+          for (const id of accounts) expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+        });
+
+        it('create writes the key and the lookup by their uuid text, and answers the stored row', async () => {
+          const row = await driver.create(
+            ORD.object,
+            { id: ORDER_ID.toUpperCase(), account: accounts[0], legacy_account: accounts[0], note: 'n1' },
+            BYPASS,
+          );
+          expect(row).toMatchObject({ id: ORDER_ID, account: accounts[0], legacy_account: accounts[0], note: 'n1' });
+        });
+
+        it('eq / $in on the lookup, and eq on the key, answer the row', async () => {
+          expect((await driver.find(ORD.object, { where: { account: accounts[0] } }, BYPASS)).map((r) => r.id)).toEqual([ORDER_ID]);
+          expect((await driver.find(ORD.object, { where: { account: { $in: [accounts[1]!, accounts[0]!] } } }, BYPASS)).map((r) => r.id))
+            .toEqual([ORDER_ID]);
+          expect((await driver.find(ORD.object, { where: { account: accounts[1] } }, BYPASS))).toEqual([]);
+          expect((await driver.find(ORD.object, { where: { id: ORDER_ID } }, BYPASS)).map((r) => r.note)).toEqual(['n1']);
+          // The control: the VARCHAR2 column compares text, as it always did.
+          expect((await driver.find(ORD.object, { where: { legacy_account: accounts[0] } }, BYPASS)).map((r) => r.id)).toEqual([ORDER_ID]);
+        });
+
+        it('the lookup round-trips: the value read off the order finds its account by key', async () => {
+          const [order] = await driver.find(ORD.object, { where: { id: ORDER_ID } }, BYPASS);
+          const [account] = await driver.find(ACCT.object, { where: { id: String(order!.account) } }, BYPASS);
+          expect(account).toMatchObject({ id: accounts[0], name: 'first' });
+        });
+
+        it('update by key rewrites the lookup, and delete by key removes the row', async () => {
+          const updated = await driver.update(ORD.object, ORDER_ID, { account: accounts[1] }, BYPASS);
+          expect(updated).toMatchObject({ id: ORDER_ID, account: accounts[1] });
+          expect(await driver.delete(ORD.object, ORDER_ID, BYPASS)).toBe(true);
+          expect(await driver.find(ORD.object, { where: { id: ORDER_ID } }, BYPASS)).toEqual([]);
+        });
+
+        it('a comparand that is not uuid text is INVALID_FILTER; a written one is VALIDATION_ERROR', async () => {
+          const filterErr = await driver
+            .find(ORD.object, { where: { account: 'not-a-uuid' } }, BYPASS)
+            .then(() => null, (e: unknown) => e as WireBearingError);
+          expect(filterErr?.code).toBe('INVALID_FILTER');
+          expect(filterErr?.status).toBe(400);
+          const writeErr = await driver
+            .create(ORD.object, { id: ORDER_ID, account: 'acct-17' }, BYPASS)
+            .then(() => null, (e: unknown) => e as WireBearingError);
+          expect(writeErr?.code).toBe('VALIDATION_ERROR');
+          expect(writeErr?.status).toBe(400);
+        });
+      });
     }
   });
 }

@@ -7,7 +7,12 @@
 //   node scripts/ci/scheduled-full-run.mjs --check-concurrency
 //   node scripts/ci/scheduled-full-run.mjs --release-gate --release-commit <sha> [--require-distance-zero] [--json]
 //   node scripts/ci/scheduled-full-run.mjs --snapshot-commit --from <sha> [--json]
+//   node scripts/ci/scheduled-full-run.mjs --queue-verdict --before <sha> --after <sha>
 //   node scripts/ci/scheduled-full-run.mjs --self-test
+//
+// Half 4 (#31519) is the probe a `push` run of ci.yml asks first: when the merge
+// queue already ran every pushed commit green on its first parent, the push
+// borrows that verdict and runs only what the queue never runs. See HALF 4.
 //
 // Half 3 (#22998) is the READER the full battery gained when PR and queue runs
 // became the fast set: release.yml's `full-battery` job runs `--release-gate`
@@ -53,7 +58,9 @@
 // makes two groups compare equal or unequal for a reason nobody wrote down.
 
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdtempSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
@@ -972,12 +979,17 @@ export function renderSnapshotCardBody({ identity, kind, reason, runUrl, commit,
 // later `main` head tested a different tree. ⚠️ A `push` run's Test Core is
 // affected-only (#16467), so a push run is a narrower verdict than a scheduled
 // one; the ruled rule reads both events, and that narrowing is recorded on
-// #22998 rather than decided here.
+// #22998 rather than decided here. A push run that BORROWED the queue's
+// verdict (HALF 4, #31519) is read through the borrowed path in
+// `releaseGateVerdict`.
 
 // The workflows whose full-battery runs the release reads, by file (the API's
 // stable key) and by the name a reader sees.
 export const RELEASE_GATE_WORKFLOWS = Object.freeze([
-  Object.freeze({ file: 'ci.yml', name: 'CI' }),
+  // `borrows`: a `push` run of this workflow may carry its verdict BORROWED
+  // from the merge queue (HALF 4, #31519). Such a run is read through the
+  // borrowed path in `releaseGateVerdict`; lint.yml has no probe.
+  Object.freeze({ file: 'ci.yml', name: 'CI', borrows: true }),
   Object.freeze({ file: 'lint.yml', name: 'Lint & Type Check' }),
   // `Spec Shape Gate` (spec-shape-gate.yml) was the third row: objectui `main`
   // compiled hourly against the spec built from the commit. It retired with
@@ -1046,7 +1058,28 @@ export function selectFullBatteryRun({ history, runs, workflowFile }) {
 // of 2026-11-05: "green at that commit" holds literally). With it, a deciding
 // run on an ANCESTOR of the release commit refuses too, naming its distance;
 // without it the rule is the stable lane's, unchanged.
-export function releaseGateVerdict({ history, runsByWorkflow, workflows = RELEASE_GATE_WORKFLOWS, requireDistanceZero = false }) {
+//
+// A BORROWED PUSH VERDICT (#31519). A `push` run of a `borrows` workflow whose
+// queue-verdict probe found every pushed commit covered runs only the main-only
+// jobs and borrows the rest from the queue (HALF 4). Its own `success` is then
+// not the whole battery, so when such a run decides, the gate re-reads the
+// queue run it borrowed from: the newest `merge_group` run of the workflow on
+// the SAME sha must be completed, `success`, and built on that commit's first
+// parent, which `history` already holds. `borrowRecords` carries what the live
+// half read for each deciding push run, keyed by run id:
+//
+//   { record: 'full' }                       the run has no borrowed-verdict job
+//                                            (a full push run): read as before;
+//   { record: 'borrowed', queueRuns: [...] } the job ran: the queue run decides;
+//   { error: '...' }                         the read failed: refused.
+//
+// A deciding push run with NO entry refuses too and is listed in `pending`, so
+// the live half reads exactly those runs and asks again; nothing defaults a
+// push run to `full`. Only the head commit's queue run is re-read here. The
+// earlier commits of a multi-commit push were judged by the probe when it ran,
+// and its job is the record that they were: the gate reads that record, it
+// does not re-walk the push.
+export function releaseGateVerdict({ history, runsByWorkflow, workflows = RELEASE_GATE_WORKFLOWS, requireDistanceZero = false, borrowRecords }) {
   const releaseCommit = history?.[0] ?? '';
   if (!releaseCommit) {
     return {
@@ -1055,12 +1088,15 @@ export function releaseGateVerdict({ history, runsByWorkflow, workflows = RELEAS
       refusals: ['no first-parent history was read, so no run can be placed at or before the release commit'],
       chosen: [],
       distanceZero: false,
+      pending: [],
     };
   }
+  const recordOf = (id) => (borrowRecords instanceof Map ? borrowRecords.get(id) : borrowRecords?.[id]);
   const lines = [];
   const refusals = [];
   const chosenRows = [];
-  for (const { file, name } of workflows) {
+  const pending = [];
+  for (const { file, name, borrows } of workflows) {
     const chosen = selectFullBatteryRun({ history, runs: runsByWorkflow?.[file], workflowFile: file });
     if (!chosen) {
       refusals.push(
@@ -1070,6 +1106,25 @@ export function releaseGateVerdict({ history, runsByWorkflow, workflows = RELEAS
       continue;
     }
     const { run, distance } = chosen;
+    const where = `run ${run.id} (${run.event}, attempt ${run.run_attempt ?? 1}) on ${String(run.head_sha).slice(0, 10)}, ${distance} first-parent commit(s) before the release commit`;
+    let borrowedFrom = null;
+    if (borrows === true && run.event === 'push') {
+      const record = recordOf(run.id);
+      if (record === undefined) {
+        pending.push({ file, runId: run.id, headSha: String(run.head_sha) });
+        refusals.push(`${name}: push run ${run.id}'s borrowed-verdict record was not read -- ${where}`);
+      } else if (record?.error !== undefined || !['full', 'borrowed'].includes(record?.record)) {
+        refusals.push(`${name}: push run ${run.id}'s borrowed-verdict record could not be read (${record?.error ?? 'no record'}) -- ${where}`);
+      } else if (record.record === 'borrowed') {
+        const queueRun = decidingQueueRun(record.queueRuns, run.head_sha, file);
+        const why = queueRunVerdict(queueRun, { sha: String(run.head_sha), parent: history[distance + 1] });
+        if (why) {
+          refusals.push(`${name}: push run ${run.id} borrowed its verdict from the merge queue, and ${why} -- ${where}`);
+        } else {
+          borrowedFrom = queueRun.id;
+        }
+      }
+    }
     chosenRows.push({
       file,
       name,
@@ -1079,9 +1134,10 @@ export function releaseGateVerdict({ history, runsByWorkflow, workflows = RELEAS
       headSha: String(run.head_sha),
       distance,
       conclusion: run.conclusion,
+      borrowedFrom,
     });
-    const where = `run ${run.id} (${run.event}, attempt ${run.run_attempt ?? 1}) on ${String(run.head_sha).slice(0, 10)}, ${distance} first-parent commit(s) before the release commit`;
-    lines.push(`${name}: ${run.conclusion} -- ${where}`);
+    const borrowed = borrowedFrom === null ? '' : `, borrowed from queue run ${borrowedFrom}`;
+    lines.push(`${name}: ${run.conclusion} -- ${where}${borrowed}`);
     if (run.conclusion !== 'success') {
       refusals.push(`${name}: the newest full-battery run at or before the release commit concluded ${run.conclusion} -- ${where}`);
     }
@@ -1090,7 +1146,7 @@ export function releaseGateVerdict({ history, runsByWorkflow, workflows = RELEAS
     }
   }
   const distanceZero = chosenRows.length === workflows.length && chosenRows.every((row) => row.distance === 0);
-  return { ok: refusals.length === 0, lines, refusals, chosen: chosenRows, distanceZero };
+  return { ok: refusals.length === 0, lines, refusals, chosen: chosenRows, distanceZero, pending };
 }
 
 // The machine-readable record of one verdict: what `--release-gate --json`
@@ -1115,10 +1171,16 @@ export function releaseGateRecord(verdict, { releaseCommit, requireDistanceZero 
 // offset, so the selection and the gate can never disagree about a commit.
 // A newer commit whose battery is red or unread is passed over (it is not a
 // green run); null when no commit in the window qualifies.
-export function selectSnapshotCommit({ history, runsByWorkflow, workflows = RELEASE_GATE_WORKFLOWS }) {
+//
+// An offset whose verdict lists `pending` borrowed-verdict records stops the
+// walk and returns them (`{ pending, offset }`), so the live half reads them
+// and asks again: passing over that commit would pick an older one for want of
+// a read, never because its battery is red.
+export function selectSnapshotCommit({ history, runsByWorkflow, workflows = RELEASE_GATE_WORKFLOWS, borrowRecords }) {
   const window = history ?? [];
   for (let offset = 0; offset < window.length; offset += 1) {
-    const verdict = releaseGateVerdict({ history: window.slice(offset), runsByWorkflow, workflows, requireDistanceZero: true });
+    const verdict = releaseGateVerdict({ history: window.slice(offset), runsByWorkflow, workflows, requireDistanceZero: true, borrowRecords });
+    if (verdict.pending.length > 0) return { pending: verdict.pending, offset };
     if (verdict.ok && verdict.distanceZero) return { commit: window[offset], offset, verdict };
   }
   return null;
@@ -1205,6 +1267,8 @@ export function readFirstParentHistory(releaseCommit, window = RELEASE_GATE_WIND
   return git(['rev-list', '--first-parent', `--max-count=${window}`, releaseCommit]).split('\n').filter(Boolean);
 }
 
+const apiHeaders = (token) => ({ Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' });
+
 // ONE READ OF THE LISTING, RETRIED ONLY WHEN THE FAILURE IS TRANSIENT (#24741).
 // One HTTP 502 on `lint.yml`'s `schedule` listing used to refuse a publish as
 // NOT MEASURED with no second attempt: release run 39230668843, whose every
@@ -1232,12 +1296,7 @@ export async function readRuns({ repo, token, file, event, pages = RELEASE_GATE_
     const url =
       `https://api.github.com/repos/${repo}/actions/workflows/${file}/runs` +
       `?branch=main&event=${event}&status=completed&per_page=100&page=${page}`;
-    const read = await readBoard(
-      fetchImpl,
-      url,
-      { headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' } },
-      budget
-    );
+    const read = await readBoard(fetchImpl, url, { headers: apiHeaders(token) }, budget);
     if (!read.ok) throw readFailure(`GET ${url}`, read, budget.policy);
     // An OK answer without the array is an answer about the endpoint, not a
     // blip: final, and never retried.
@@ -1266,10 +1325,15 @@ export async function runReleaseGate({ releaseCommit, repo, token, readHistory =
   const budget = boardReadBudget({ sleep });
   let history;
   let runsByWorkflow;
+  let verdict;
   try {
     if (!repo || !token) throw new Error('GITHUB_REPOSITORY and GITHUB_TOKEN are both required');
     history = readHistory(releaseCommit);
     runsByWorkflow = await readFullBattery({ repo, token, fetchImpl, budget });
+    ({ result: verdict } = await withBorrowRecords(
+      (borrowRecords) => releaseGateVerdict({ history, runsByWorkflow, requireDistanceZero, borrowRecords }),
+      (wanted) => readBorrowRecord({ repo, token, ...wanted, fetchImpl, budget })
+    ));
   } catch (error) {
     return {
       exit: EXIT_PREREQUISITE_NOT_MET,
@@ -1277,7 +1341,6 @@ export async function runReleaseGate({ releaseCommit, repo, token, readHistory =
       verdict: null,
     };
   }
-  const verdict = releaseGateVerdict({ history, runsByWorkflow, requireDistanceZero });
   const lines = verdict.lines.map((line) => `scheduled-full-run --release-gate: ${line}`);
   if (verdict.ok) {
     const at = requireDistanceZero ? 'ON' : 'at or before';
@@ -1295,10 +1358,15 @@ export async function runSnapshotCommit({ from, repo, token, readHistory = readF
   const budget = boardReadBudget({ sleep });
   let history;
   let runsByWorkflow;
+  let selection;
   try {
     if (!repo || !token) throw new Error('GITHUB_REPOSITORY and GITHUB_TOKEN are both required');
     history = readHistory(from);
     runsByWorkflow = await readFullBattery({ repo, token, fetchImpl, budget });
+    ({ result: selection } = await withBorrowRecords(
+      (borrowRecords) => selectSnapshotCommit({ history, runsByWorkflow, borrowRecords }),
+      (wanted) => readBorrowRecord({ repo, token, ...wanted, fetchImpl, budget })
+    ));
   } catch (error) {
     return {
       exit: EXIT_PREREQUISITE_NOT_MET,
@@ -1307,7 +1375,6 @@ export async function runSnapshotCommit({ from, repo, token, readHistory = readF
       record: { ok: false, from: String(from ?? ''), commit: null, offset: null, workflows: [] },
     };
   }
-  const selection = selectSnapshotCommit({ history, runsByWorkflow });
   if (!selection) {
     return {
       exit: EXIT_FINDINGS,
@@ -1329,6 +1396,314 @@ export async function runSnapshotCommit({ from, repo, token, readHistory = readF
     selection,
     record: { ok: true, from: String(from), commit, offset, workflows: verdict.chosen.map((row) => ({ ...row })) },
   };
+}
+
+// ---------------------------------------------------------------------------
+// HALF 4 -- a push run borrows the queue's verdict (#31519)
+// ---------------------------------------------------------------------------
+//
+// Every commit that reaches `main` through the merge queue was tested there
+// first: its `merge_group` run of ci.yml ran on the SAME sha, so on the same
+// tree and the same ci.yml. Measured over the 136 `CI` push runs of
+// 2026-11-07T13:00Z to 2026-11-08T13:00Z, every one ran on a sha with a green
+// queue run, and each commit's queue run was built on that commit's first
+// parent (208 of 208 commits). Re-running that battery on the push bought one
+// signal: a flaky shard reading red the second time.
+//
+// So a `push` run asks first (`--queue-verdict`, ci.yml's `queue-verdict` job)
+// and runs only what the queue did not:
+//
+//   1. THE COMMITS. The compare of `github.event.before...after`, walked by
+//      first parent from `after` back to `before`. A zero `before`, a compare
+//      that is not `ahead` (a force-push), a commit the walk cannot find, a
+//      merge commit, or more than QUEUE_VERDICT_COMMIT_CAP commits: NOT
+//      COVERED. The window's largest push carried 5.
+//   2. EACH COMMIT'S QUEUE RUN. The newest `merge_group` run of ci.yml whose
+//      head is the commit (`run_started_at`, then id, so a re-run decides),
+//      in any state. It must be completed, `success`, and built on the
+//      commit's first parent: the ref `gh-readonly-queue/main/pr-N-<base>`
+//      names the base, and only that base makes the queue's affected set the
+//      one this commit's own diff selects.
+//   3. THE VERDICT. COVERED only when every commit has such a run. Anything
+//      else -- a missing run, a red or running one, another base, a refused
+//      or unparseable read, a crash -- is NOT COVERED, and the push runs its
+//      whole battery as before. ⛔ There is no third answer: the probe fails
+//      toward running, never toward skipping.
+//
+// A covered push still runs the main-only jobs (THE TWO SPEEDS in ci.yml),
+// and its `borrowed-verdict` job (`Borrowed queue verdict`) is the run's
+// record that it borrowed: the release gate (HALF 3) reads that job and
+// re-reads the head commit's queue run. `testUiFullGreen` answers ci.yml's
+// Test UI question (#31519 Q2 = B): the head's queue run ran all sixteen
+// `Test UI (k/16)` shards green. Whether those shards ran the WHOLE suite is
+// the `borrowed-verdict` job's half, from the queue's own selector.
+
+// The two ci.yml job ids and the record job's display name, which the release
+// gate finds the record by (`borrowedVerdictWiring` pins all three).
+export const QUEUE_VERDICT_JOB = 'queue-verdict';
+export const BORROWED_VERDICT_JOB = 'borrowed-verdict';
+export const BORROWED_VERDICT_JOB_NAME = 'Borrowed queue verdict';
+// The most commits one push may carry and still borrow. Five in the measured
+// window; a larger push is a rare event and runs in full.
+export const QUEUE_VERDICT_COMMIT_CAP = 20;
+// The merge queue's ref for an entry, which carries the base it was built on.
+export const QUEUE_REF = /^gh-readonly-queue\/main\/pr-\d+-([0-9a-f]{40})$/;
+// ci.yml's Test UI matrix: a renamed or resized matrix makes this read false,
+// and Test UI then runs on the push -- the safe direction.
+export const TEST_UI_SHARDS = 16;
+const TEST_UI_SHARD_NAME = /^Test UI \((\d+)\/16\)$/;
+const SHA_RE = /^[0-9a-f]{40}$/;
+const short = (sha) => String(sha ?? '').slice(0, 10);
+
+// The base sha a queue run's ref names, or null.
+export function queueRunBase(run) {
+  const m = QUEUE_REF.exec(String(run?.head_branch ?? ''));
+  return m ? m[1] : null;
+}
+
+// The `merge_group` run of `workflowFile` that decides for `sha`: the newest
+// one, in any state, so a newer red attempt is never outvoted by an older green.
+export function decidingQueueRun(runs, sha, workflowFile = 'ci.yml') {
+  const candidates = (runs ?? []).filter(
+    (run) =>
+      run?.event === 'merge_group' &&
+      run?.head_sha === sha &&
+      (run?.path === undefined || String(run.path).endsWith(`/${workflowFile}`))
+  );
+  candidates.sort((a, b) => startedAt(b).localeCompare(startedAt(a)) || Number(b.id) - Number(a.id));
+  return candidates[0] ?? null;
+}
+
+// Why `run` does not cover commit `sha` with first parent `parent`, or null
+// when it does.
+export function queueRunVerdict(run, { sha, parent }) {
+  if (!run) return `no merge_group run of the workflow is on ${short(sha)}`;
+  if (!SHA_RE.test(String(parent ?? ''))) return `the first parent of ${short(sha)} is not known here, so queue run ${run.id}'s base cannot be checked`;
+  if (run.status !== 'completed') return `queue run ${run.id} on ${short(sha)} is ${run.status}, not completed`;
+  if (run.conclusion !== 'success') return `queue run ${run.id} on ${short(sha)} concluded ${run.conclusion}`;
+  const base = queueRunBase(run);
+  if (base !== parent) {
+    return `queue run ${run.id} on ${short(sha)} was built on ${base ? short(base) : `the unreadable ref '${run.head_branch}'`}, not on the commit's first parent ${short(parent)}`;
+  }
+  return null;
+}
+
+// Rule 1: the pushed commits, head first, from the compare API's answer.
+// `{ commits: [{ sha, parent }], reason }`; `reason` is null when walkable.
+export function pushedCommits({ before, after, compare, cap = QUEUE_VERDICT_COMMIT_CAP }) {
+  const refuse = (reason) => ({ commits: [], reason });
+  if (!SHA_RE.test(String(after ?? ''))) return refuse(`the pushed head '${after ?? ''}' is not a 40-hex sha`);
+  if (!SHA_RE.test(String(before ?? '')) || /^0+$/.test(before)) {
+    return refuse(`the push names no previous head (before '${before ?? ''}'), so its commits cannot be walked`);
+  }
+  if (before === after) return refuse('the push moved no commit');
+  if (compare?.status !== 'ahead') return refuse(`the compare of before...after reads '${compare?.status}', not 'ahead'`);
+  const count = Number(compare.ahead_by);
+  if (!Number.isInteger(count) || count > cap) return refuse(`the push carries ${compare.ahead_by} commit(s), over the cap of ${cap}`);
+  const bySha = new Map((compare.commits ?? []).map((c) => [c?.sha, c]));
+  const commits = [];
+  for (let at = after; at !== before; ) {
+    if (commits.length >= cap) return refuse(`the first-parent walk from ${short(after)} passes ${cap} commits before it reaches ${short(before)}`);
+    const commit = bySha.get(at);
+    if (!commit) return refuse(`commit ${short(at)} is not in the compare of before...after, so the walk never reaches ${short(before)}`);
+    const parents = Array.isArray(commit.parents) ? commit.parents : [];
+    if (parents.length !== 1) return refuse(`commit ${short(at)} has ${parents.length} parents; only a single-parent commit is borrowed`);
+    commits.push({ sha: at, parent: String(parents[0]?.sha ?? '') });
+    at = commits.at(-1).parent;
+  }
+  return { commits, reason: null };
+}
+
+// Rules 2 and 3 over the walked commits. `queueRunsBySha` maps each sha to the
+// `merge_group` listing read for it. `rows` is one `{ sha, parent, runId }`
+// per commit judged so far.
+export function queueVerdict({ commits, queueRunsBySha, workflowFile = 'ci.yml' }) {
+  const rows = [];
+  if (!Array.isArray(commits) || commits.length === 0) return { covered: false, reason: 'no pushed commit was walked', rows };
+  for (const { sha, parent } of commits) {
+    const run = decidingQueueRun(queueRunsBySha?.get(sha), sha, workflowFile);
+    const why = queueRunVerdict(run, { sha, parent });
+    if (why) return { covered: false, reason: why, rows };
+    rows.push({ sha, parent, runId: run.id });
+  }
+  return { covered: true, reason: null, rows };
+}
+
+// All sixteen `Test UI (k/16)` shards of one run's latest attempt concluded
+// `success`. A skipped shard (the queue's ui filter said no) is not a run one.
+export function testUiFullGreen(jobs) {
+  const green = new Set();
+  for (const job of jobs ?? []) {
+    const m = TEST_UI_SHARD_NAME.exec(String(job?.name ?? ''));
+    if (m && job.conclusion === 'success') green.add(Number(m[1]));
+  }
+  for (let shard = 1; shard <= TEST_UI_SHARDS; shard += 1) if (!green.has(shard)) return false;
+  return true;
+}
+
+// The record a push run's jobs carry: `borrowed` when its record job ran.
+export function borrowedRecordOf(jobs) {
+  const job = (jobs ?? []).find((j) => j?.name === BORROWED_VERDICT_JOB_NAME);
+  return job && job.conclusion !== 'skipped' ? 'borrowed' : 'full';
+}
+
+// The wiring the borrowed path depends on, read from ci.yml as TEXT: the probe
+// runs on push only and runs this mode; the record job keeps its name (the
+// gate finds it by name, so a rename would read every push as a full run) and
+// runs only on a covered push; every read of `covered` compares with the
+// literal 'true', so an empty output (a probe that died) means the full
+// battery; and no main-only job reads it at all.
+// Each opens with the two pr-event terms check-expected-skips derives a
+// PR / queue skip from (it reads no push term and no needs output); the
+// last term is the one that decides, so the behaviour is the push term's.
+const PR_EVENT_TERMS = "github.event_name != 'pull_request' && github.event_name != 'merge_group'";
+export const QUEUE_VERDICT_IF = `${PR_EVENT_TERMS} && github.event_name == 'push'`;
+export const BORROWED_VERDICT_IF = `\${{ success() && ${PR_EVENT_TERMS} && needs.${QUEUE_VERDICT_JOB}.outputs.covered == 'true' }}`;
+export const MAIN_ONLY_JOBS = Object.freeze(['temporal-conformance', 'dogfood-verify', 'ui-published-artifacts']);
+export function borrowedVerdictWiring(ciYamlText) {
+  const findings = [];
+  const where = '.github/workflows/ci.yml';
+  const blocks = jobBlocks(ciYamlText);
+  const code = (block) => (block ?? []).filter((line) => !/^\s*#/.test(line));
+  const jobIf = (block) => (code(block).find((line) => /^ {4}if:/.test(line)) ?? '').replace(/^ {4}if:\s*/, '').trim();
+  const probe = blocks.get(QUEUE_VERDICT_JOB);
+  if (!probe) {
+    findings.push(`${where} has no \`${QUEUE_VERDICT_JOB}\` job`);
+  } else {
+    if (jobIf(probe) !== QUEUE_VERDICT_IF) findings.push(`${where} job \`${QUEUE_VERDICT_JOB}\`'s if: is '${jobIf(probe)}', not '${QUEUE_VERDICT_IF}'`);
+    if (!code(probe).some((line) => /node scripts\/ci\/scheduled-full-run\.mjs --queue-verdict\b/.test(line))) {
+      findings.push(`${where} job \`${QUEUE_VERDICT_JOB}\` never runs \`scripts/ci/scheduled-full-run.mjs --queue-verdict\``);
+    }
+  }
+  const record = blocks.get(BORROWED_VERDICT_JOB);
+  if (!record) {
+    findings.push(`${where} has no \`${BORROWED_VERDICT_JOB}\` job`);
+  } else {
+    if (!code(record).some((line) => line === `    name: ${BORROWED_VERDICT_JOB_NAME}`)) {
+      findings.push(`${where} job \`${BORROWED_VERDICT_JOB}\` is not named '${BORROWED_VERDICT_JOB_NAME}', the name the release gate reads`);
+    }
+    if (jobIf(record) !== BORROWED_VERDICT_IF) findings.push(`${where} job \`${BORROWED_VERDICT_JOB}\`'s if: is '${jobIf(record)}', not '${BORROWED_VERDICT_IF}'`);
+  }
+  const lines = String(ciYamlText).split('\n').filter((line) => !/^\s*#/.test(line));
+  for (const line of lines) {
+    for (const m of line.matchAll(/needs\.queue-verdict\.outputs\.covered(\s*(==|!=)\s*'([^']*)')?/g)) {
+      if (m[3] !== 'true') findings.push(`${where} reads the probe's \`covered\` other than against the literal 'true': ${line.trim()}`);
+    }
+  }
+  for (const id of MAIN_ONLY_JOBS) {
+    if (!blocks.has(id)) findings.push(`${where} has no main-only job \`${id}\``);
+    else if (code(blocks.get(id)).some((line) => line.includes(QUEUE_VERDICT_JOB))) {
+      findings.push(`${where} main-only job \`${id}\` reads the queue verdict; the queue never runs it, so a push must`);
+    }
+  }
+  return findings;
+}
+
+// -- The live half of the probe. ---------------------------------------------
+
+async function readApi({ url, token, fetchImpl, budget, field }) {
+  const read = await readBoard(fetchImpl, url, { headers: apiHeaders(token) }, budget);
+  if (!read.ok) throw readFailure(`GET ${url}`, read, budget.policy);
+  if (!Array.isArray(read.body?.[field])) throw new Error(`GET ${url} answered no ${field} array`);
+  return read.body;
+}
+
+export async function readRunJobs({ repo, token, runId, fetchImpl = fetch, budget = boardReadBudget(), pages = 3 }) {
+  const jobs = [];
+  for (let page = 1; page <= pages; page += 1) {
+    const url = `https://api.github.com/repos/${repo}/actions/runs/${runId}/jobs?filter=latest&per_page=100&page=${page}`;
+    const batch = (await readApi({ url, token, fetchImpl, budget, field: 'jobs' })).jobs;
+    jobs.push(...batch);
+    if (batch.length < 100) return jobs;
+  }
+  throw new Error(`run ${runId} lists more than ${pages * 100} jobs`);
+}
+
+export async function readQueueRuns({ repo, token, sha, file = 'ci.yml', fetchImpl = fetch, budget = boardReadBudget() }) {
+  const url = `https://api.github.com/repos/${repo}/actions/workflows/${file}/runs?event=merge_group&head_sha=${sha}&per_page=20`;
+  return (await readApi({ url, token, fetchImpl, budget, field: 'workflow_runs' })).workflow_runs;
+}
+
+// One deciding push run's record for the release gate. A failed read is a
+// record too, `{ error }`, which the verdict refuses.
+export async function readBorrowRecord({ repo, token, runId, headSha, file, fetchImpl = fetch, budget = boardReadBudget() }) {
+  try {
+    if (borrowedRecordOf(await readRunJobs({ repo, token, runId, fetchImpl, budget })) === 'full') return { record: 'full' };
+    return { record: 'borrowed', queueRuns: await readQueueRuns({ repo, token, sha: headSha, file, fetchImpl, budget }) };
+  } catch (error) {
+    return { error: error.message };
+  }
+}
+
+// Asks `decide(records)` until its answer lists no `pending` record, reading
+// each pending one once. Every round reads at least one new record, so it ends;
+// the cap turns a runaway into NOT MEASURED rather than a slow gate.
+export const BORROW_RECORD_READS = 50;
+export async function withBorrowRecords(decide, readRecord, cap = BORROW_RECORD_READS) {
+  const records = new Map();
+  for (;;) {
+    const result = decide(records);
+    const pending = (result?.pending ?? []).filter((wanted) => !records.has(wanted.runId));
+    if ((result?.pending ?? []).length === 0) return { result, records };
+    if (pending.length === 0) throw new Error('a borrowed-verdict record was read and is still pending');
+    for (const wanted of pending) {
+      if (records.size >= cap) throw new Error(`more than ${cap} borrowed-verdict records would be read`);
+      records.set(wanted.runId, await readRecord(wanted));
+    }
+  }
+}
+
+// The probe, as one answer. It never throws and never exits non-zero on a
+// decided outcome: every failure is `covered: false` with its reason.
+export async function runQueueVerdict({ before, after, repo, token, fetchImpl = fetch, sleep } = {}) {
+  const budget = boardReadBudget({ sleep });
+  const notCovered = (reason, rows = []) => ({ covered: false, reason, rows, headRun: null, uiFullGreen: false });
+  try {
+    if (!repo || !token) throw new Error('GITHUB_REPOSITORY and GITHUB_TOKEN are both required');
+    const early = pushedCommits({ before, after, compare: { status: 'ahead', ahead_by: 0, commits: [] } });
+    if (early.reason && !early.reason.startsWith('commit ')) return notCovered(early.reason);
+    const compareUrl = `https://api.github.com/repos/${repo}/compare/${before}...${after}?per_page=100`;
+    const compare = await readApi({ url: compareUrl, token, fetchImpl, budget, field: 'commits' });
+    const walk = pushedCommits({ before, after, compare });
+    if (walk.reason) return notCovered(walk.reason);
+    const queueRunsBySha = new Map();
+    for (const { sha } of walk.commits) queueRunsBySha.set(sha, await readQueueRuns({ repo, token, sha, fetchImpl, budget }));
+    const verdict = queueVerdict({ commits: walk.commits, queueRunsBySha });
+    if (!verdict.covered) return notCovered(verdict.reason, verdict.rows);
+    const headRun = verdict.rows[0].runId;
+    let uiFullGreen = false;
+    let uiNote = '';
+    try {
+      uiFullGreen = testUiFullGreen(await readRunJobs({ repo, token, runId: headRun, fetchImpl, budget }));
+    } catch (error) {
+      uiNote = error.message;
+    }
+    return { covered: true, reason: null, rows: verdict.rows, headRun, uiFullGreen, uiNote };
+  } catch (error) {
+    return notCovered(`the queue's verdict could not be read (${error.message})`);
+  }
+}
+
+// The probe's lines and its GITHUB_OUTPUT body.
+export function renderQueueVerdict(result) {
+  const lines = [];
+  for (const row of result.rows) lines.push(`queue-verdict: ${short(row.sha)} (parent ${short(row.parent)}) -- queue run ${row.runId}, success`);
+  if (result.covered) {
+    lines.push(
+      `queue-verdict: COVERED -- every pushed commit has a green queue run on its first parent; this push runs the main-only jobs ` +
+        `and borrows the rest. Test UI on the head's queue run: ${result.uiFullGreen ? `all ${TEST_UI_SHARDS} shards green` : `not all ${TEST_UI_SHARDS} shards green${result.uiNote ? ` (${result.uiNote})` : ''}`}.`
+    );
+  } else {
+    lines.push(`queue-verdict: NOT COVERED -- ${result.reason}. This push runs its whole battery.`);
+  }
+  const output = [
+    `covered=${result.covered ? 'true' : 'false'}`,
+    `reason=${String(result.reason ?? '').replace(/\s+/g, ' ')}`,
+    `runs=${result.rows.map((row) => row.runId).join(',')}`,
+    `head_run=${result.headRun ?? ''}`,
+    `ui_full_green=${result.uiFullGreen ? 'true' : 'false'}`,
+  ];
+  return { lines, output: `${output.join('\n')}\n` };
 }
 
 function argValue(argv, flag) {
@@ -1358,6 +1733,21 @@ async function releaseGate(argv) {
   process.exit(exit);
 }
 
+async function queueVerdictCli(argv) {
+  const result = await runQueueVerdict({
+    before: argValue(argv, '--before'),
+    after: argValue(argv, '--after'),
+    repo: process.env.GITHUB_REPOSITORY ?? '',
+    token: process.env.GITHUB_TOKEN ?? '',
+  });
+  const { lines, output } = renderQueueVerdict(result);
+  for (const line of lines) console.log(line);
+  if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, output);
+  if (process.env.GITHUB_STEP_SUMMARY) {
+    appendFileSync(process.env.GITHUB_STEP_SUMMARY, `### Queue verdict\n\n${lines.map((line) => `- ${line}`).join('\n')}\n`);
+  }
+}
+
 async function snapshotCommit(argv) {
   const { exit, lines, record } = await runSnapshotCommit({
     from: argValue(argv, '--from'),
@@ -1384,8 +1774,10 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'release gate: release.yml wiring': 6,
   'release gate: distance zero and the snapshot commit, machine-readable': 11,
   'the next snapshot card: identity, case and body': 13,
+  'release gate: a borrowed push verdict': 15,
+  'queue verdict: the push probe': 17,
 });
-const SELF_TEST_BATTERY_FLOOR = 9;
+const SELF_TEST_BATTERY_FLOOR = 11;
 const UNATTRIBUTED_BATTERY = '(no battery open)';
 
 // Returned by `selfTest()` only after its verdict is printed, so a `return`
@@ -2928,7 +3320,7 @@ async function selfTest() {
     const r = releaseGateRecord(v, { releaseCommit: H[0], requireDistanceZero: true });
     const keys = Object.keys(r).join();
     const row = Object.keys(r.workflows[0]).join();
-    if (keys !== 'ok,releaseCommit,requireDistanceZero,distanceZero,workflows,refusals' || row !== 'file,name,runId,event,attempt,headSha,distance,conclusion') {
+    if (keys !== 'ok,releaseCommit,requireDistanceZero,distanceZero,workflows,refusals' || row !== 'file,name,runId,event,attempt,headSha,distance,conclusion,borrowedFrom') {
       throw new Error(`record: unexpected shape ${keys} / ${row}`);
     }
     if (!r.ok || !r.distanceZero || r.releaseCommit !== H[0] || r.workflows.length !== 2) throw new Error(`record: wrong values ${JSON.stringify(r)}`);
@@ -2976,6 +3368,391 @@ async function selfTest() {
         throw new Error(`cli: ${args[0]} --json printed ${JSON.stringify(res.stdout)} (exit ${res.status}); stdout must be one JSON record`);
       }
     }
+  });
+
+  battery('release gate: a borrowed push verdict');
+  // A covered push run of CI (HALF 4) carries the `Borrowed queue verdict`
+  // job; when such a run decides, the gate re-reads the head commit's queue
+  // run. `qrun(id, headIndex, conclusion, extra)` is a `merge_group` run of
+  // ci.yml built, by default, on that commit's first parent in `H`.
+  const qrun = (id, headIndex, conclusion, extra = {}) => ({
+    id,
+    path: '.github/workflows/ci.yml',
+    event: 'merge_group',
+    status: 'completed',
+    conclusion,
+    head_sha: H[headIndex],
+    head_branch: `gh-readonly-queue/main/pr-7-${extra.base ?? H[headIndex + 1]}`,
+    run_started_at: `2026-10-12T0${id % 10}:00:00Z`,
+    run_attempt: 1,
+    ...extra,
+  });
+  const pushRun = (id, headIndex, conclusion = 'success') => run(id, headIndex, conclusion, { event: 'push' });
+  const lintGreen = (headIndex = 0) => ({ ...run(12, headIndex, 'success'), path: '.github/workflows/lint.yml' });
+  const borrowedVerdict = (ciRuns, records, extra = {}) =>
+    releaseGateVerdict({ history: H, runsByWorkflow: { 'ci.yml': ciRuns, 'lint.yml': [lintGreen()] }, borrowRecords: records, ...extra });
+  const borrowed = (...queueRuns) => new Map([[11, { record: 'borrowed', queueRuns }]]);
+  await check(() => {
+    // Borrowed, and the head's queue run is green on the commit's first parent:
+    // PASS, and the record row names the queue run.
+    const v = borrowedVerdict([pushRun(11, 0)], borrowed(qrun(21, 0, 'success')));
+    if (!v.ok || v.chosen[0].borrowedFrom !== 21 || !v.lines[0].includes('borrowed from queue run 21') || v.pending.length !== 0) {
+      throw new Error(`borrowed: a green queue run on the right base must pass, naming it: ${JSON.stringify(v)}`);
+    }
+    const row = releaseGateRecord(v, { releaseCommit: H[0] }).workflows[0];
+    if (row.borrowedFrom !== 21) throw new Error('borrowed: the --json record row does not name the queue run');
+  });
+  await check(() => {
+    // The NEWEST queue attempt decides: a red one over an older green refuses,
+    // naming both the push run and the queue run.
+    const v = borrowedVerdict([pushRun(11, 0)], borrowed(qrun(21, 0, 'success'), qrun(22, 0, 'failure')));
+    if (v.ok || !v.refusals.some((r) => r.includes('push run 11') && r.includes('queue run 22') && r.includes('concluded failure'))) {
+      throw new Error(`borrowed: a newer red queue attempt was outvoted: ${v.refusals.join(' | ')}`);
+    }
+  });
+  await check(() => {
+    // THE NO-QUEUE-RUN CASE: borrowed, and no merge_group run on the sha.
+    const v = borrowedVerdict([pushRun(11, 0)], borrowed());
+    if (v.ok || !v.refusals.some((r) => r.includes('no merge_group run of the workflow is on'))) {
+      throw new Error(`borrowed: no queue run on the sha must refuse: ${v.refusals.join(' | ')}`);
+    }
+    // ...and a merge_group run on ANOTHER sha, or a push run on this one, is no queue run.
+    const other = borrowedVerdict([pushRun(11, 0)], borrowed(qrun(23, 1, 'success'), { ...pushRun(24, 0), head_branch: 'main' }));
+    if (other.ok || !other.refusals.some((r) => r.includes('no merge_group run'))) throw new Error('borrowed: another sha or event was read as the queue run');
+  });
+  await check(() => {
+    // The queue run was built on another base: its affected set is not this commit's.
+    const v = borrowedVerdict([pushRun(11, 0)], borrowed(qrun(21, 0, 'success', { base: H[2] })));
+    if (v.ok || !v.refusals.some((r) => r.includes('was built on') && r.includes(H[2].slice(0, 10)))) {
+      throw new Error(`borrowed: a queue run on another base must refuse: ${v.refusals.join(' | ')}`);
+    }
+    const unreadable = borrowedVerdict([pushRun(11, 0)], borrowed({ ...qrun(21, 0, 'success'), head_branch: 'main' }));
+    if (unreadable.ok || !unreadable.refusals.some((r) => r.includes('unreadable ref'))) throw new Error('borrowed: a queue run without a queue ref passed');
+  });
+  await check(() => {
+    // A queue run still in progress, and one past the window's end, refuse too.
+    const running = borrowedVerdict([pushRun(11, 0)], borrowed({ ...qrun(21, 0, null), status: 'in_progress' }));
+    if (running.ok || !running.refusals.some((r) => r.includes('is in_progress'))) throw new Error('borrowed: an in-progress queue run passed');
+    const edge = releaseGateVerdict({
+      history: H.slice(0, 1),
+      runsByWorkflow: { 'ci.yml': [pushRun(11, 0)], 'lint.yml': [lintGreen()] },
+      borrowRecords: borrowed(qrun(21, 0, 'success')),
+    });
+    if (edge.ok || !edge.refusals.some((r) => r.includes('first parent') && r.includes('not known'))) throw new Error('borrowed: a parent outside the window passed');
+  });
+  await check(() => {
+    // A push run WITHOUT the record job is a full push run: read as before.
+    const v = borrowedVerdict([pushRun(11, 0)], new Map([[11, { record: 'full' }]]));
+    if (!v.ok || v.chosen[0].borrowedFrom !== null) throw new Error(`borrowed: a full push run must read as before: ${JSON.stringify(v)}`);
+  });
+  await check(() => {
+    // Nothing defaults a push run to full: no record means pending AND refused,
+    // and a record that is an error refuses naming the error.
+    const v = borrowedVerdict([pushRun(11, 0)], new Map());
+    if (v.ok || v.pending.length !== 1 || v.pending[0].runId !== 11 || v.pending[0].headSha !== H[0] || v.pending[0].file !== 'ci.yml') {
+      throw new Error(`borrowed: an unread record must be pending and refused: ${JSON.stringify(v)}`);
+    }
+    const noRecords = borrowedVerdict([pushRun(11, 0)], undefined);
+    if (noRecords.ok || noRecords.pending.length !== 1) throw new Error('borrowed: a verdict asked with no records read a push run as full');
+    const failed = borrowedVerdict([pushRun(11, 0)], new Map([[11, { error: 'HTTP 404' }]]));
+    if (failed.ok || !failed.refusals.some((r) => r.includes('could not be read (HTTP 404)'))) throw new Error('borrowed: an error record passed');
+    // lint.yml does not borrow: its push run needs no record.
+    const lintPush = releaseGateVerdict({
+      history: H,
+      runsByWorkflow: { 'ci.yml': [run(1, 0, 'success')], 'lint.yml': [{ ...lintGreen(), event: 'push' }] },
+      borrowRecords: new Map(),
+    });
+    if (!lintPush.ok || lintPush.pending.length !== 0) throw new Error('borrowed: a workflow that does not borrow asked for a record');
+  });
+  await check(() => {
+    // Distance: a borrowed push ON the release commit is distance zero; one a
+    // commit back is distance 1, read on that commit's own first parent.
+    const zero = borrowedVerdict([pushRun(11, 0)], borrowed(qrun(21, 0, 'success')), { requireDistanceZero: true });
+    if (!zero.ok || !zero.distanceZero) throw new Error(`borrowed: a borrowed push at distance 0 is not distance zero: ${zero.refusals.join(' | ')}`);
+    const back = releaseGateVerdict({
+      history: H,
+      runsByWorkflow: { 'ci.yml': [pushRun(11, 1)], 'lint.yml': [lintGreen()] },
+      borrowRecords: borrowed(qrun(21, 1, 'success')),
+    });
+    if (!back.ok || back.chosen[0].distance !== 1 || back.chosen[0].borrowedFrom !== 21 || back.distanceZero) {
+      throw new Error(`borrowed: a borrowed push one commit back: ${JSON.stringify(back)}`);
+    }
+  });
+  await check(() => {
+    // The snapshot walk stops at an unread record rather than passing the commit over.
+    const pend = selectSnapshotCommit({ history: H, runsByWorkflow: { 'ci.yml': [pushRun(11, 0)], 'lint.yml': [lintGreen()] }, borrowRecords: new Map() });
+    if (pend?.pending?.[0]?.runId !== 11 || pend.offset !== 0) throw new Error(`borrowed: the snapshot walk passed an unread record over: ${JSON.stringify(pend)}`);
+    const picked = selectSnapshotCommit({ history: H, runsByWorkflow: { 'ci.yml': [pushRun(11, 0)], 'lint.yml': [lintGreen()] }, borrowRecords: borrowed(qrun(21, 0, 'success')) });
+    if (picked?.commit !== H[0]) throw new Error('borrowed: the snapshot did not pick a borrowed-green commit');
+  });
+
+  // -- The live half of the borrowed path, on a stub transport.
+  const stubApi = (route) => {
+    const calls = [];
+    const fetchImpl = async (url) => {
+      calls.push(url);
+      const r = route(url);
+      if (r === undefined) throw new Error(`stub transport: unexpected URL ${url}`);
+      if (r.throws) throw r.throws;
+      const status = r.status ?? 200;
+      return { ok: status >= 200 && status < 300, status, headers: { get: () => null }, json: async () => r.body };
+    };
+    return { calls, fetchImpl };
+  };
+  const recordJob = { name: BORROWED_VERDICT_JOB_NAME, conclusion: 'success' };
+  const liveRoute = ({ ciRuns, jobs = [recordJob], jobsStatus = 200, queueRuns = [qrun(21, 0, 'success')] }) => (url) => {
+    const listing = /\/actions\/workflows\/([^/]+)\/runs\?branch=main&event=([a-z_]+)&status=completed/.exec(url);
+    if (listing) {
+      const [, file, event] = listing;
+      const runs = file === 'ci.yml' ? ciRuns : [lintGreen()];
+      return { body: { workflow_runs: runs.filter((r) => r.event === event) } };
+    }
+    if (/\/actions\/runs\/\d+\/jobs\?filter=latest&per_page=100&page=1$/.test(url)) return { status: jobsStatus, body: { total_count: jobs.length, jobs } };
+    if (/\/actions\/workflows\/ci\.yml\/runs\?event=merge_group&head_sha=[0-9a-f]{40}&per_page=20$/.test(url)) return { body: { workflow_runs: queueRuns } };
+    return undefined;
+  };
+  const liveGate = async (route, extra = {}) => {
+    const { calls, fetchImpl } = stubApi(route);
+    const result = await runReleaseGate({ releaseCommit: H[0], repo: 'o/r', token: 't', readHistory: () => H, fetchImpl, sleep: async () => {}, ...extra });
+    return { ...result, calls };
+  };
+  await check(async () => {
+    // Borrowed, end to end: one jobs read, one merge_group read, PASS.
+    const g = await liveGate(liveRoute({ ciRuns: [pushRun(11, 0)] }));
+    const jobsReads = g.calls.filter((u) => u.includes('/actions/runs/11/jobs'));
+    const queueReads = g.calls.filter((u) => u.includes('event=merge_group'));
+    if (g.exit !== 0 || g.verdict.chosen[0].borrowedFrom !== 21 || jobsReads.length !== 1 || queueReads.length !== 1 || !queueReads[0].includes(`head_sha=${H[0]}`)) {
+      throw new Error(`borrowed live: exit ${g.exit}, ${jobsReads.length} jobs read(s), ${queueReads.length} queue read(s): ${g.lines.join(' | ')}`);
+    }
+  });
+  await check(async () => {
+    // A push run without the record job: read as before, and NO merge_group read.
+    const g = await liveGate(liveRoute({ ciRuns: [pushRun(11, 0)], jobs: [{ name: 'Test Core', conclusion: 'success' }, { ...recordJob, name: 'Borrowed queue verdicts' }] }));
+    if (g.exit !== 0 || g.verdict.chosen[0].borrowedFrom !== null || g.calls.some((u) => u.includes('event=merge_group'))) {
+      throw new Error(`borrowed live: a full push run read a queue run or refused (exit ${g.exit})`);
+    }
+    // A record job that was SKIPPED (a push that was not covered) is a full run too.
+    const skipped = await liveGate(liveRoute({ ciRuns: [pushRun(11, 0)], jobs: [{ ...recordJob, conclusion: 'skipped' }] }));
+    if (skipped.exit !== 0 || skipped.calls.some((u) => u.includes('event=merge_group'))) throw new Error('borrowed live: a skipped record job read as borrowed');
+  });
+  await check(async () => {
+    // The jobs read fails: REFUSED (exit 1, naming the read), not passed and not NOT MEASURED.
+    const g = await liveGate(liveRoute({ ciRuns: [pushRun(11, 0)], jobsStatus: 404 }));
+    if (g.exit !== EXIT_FINDINGS || !g.lines.some((l) => l.startsWith('::error::release refused') && l.includes('could not be read') && l.includes('HTTP 404'))) {
+      throw new Error(`borrowed live: a failed jobs read must refuse: exit ${g.exit}, ${g.lines.join(' | ')}`);
+    }
+  });
+  await check(async () => {
+    // A schedule run decides: unchanged, and no jobs or queue read at all.
+    const g = await liveGate(liveRoute({ ciRuns: [run(1, 0, 'success'), pushRun(11, 1)] }));
+    if (g.exit !== 0 || g.calls.some((u) => u.includes('/jobs') || u.includes('event=merge_group'))) {
+      throw new Error(`borrowed live: a schedule-decided gate read a push run's record (exit ${g.exit})`);
+    }
+  });
+  await check(async () => {
+    // Borrowed with a red head queue run, live: refused naming both runs.
+    const g = await liveGate(liveRoute({ ciRuns: [pushRun(11, 0)], queueRuns: [qrun(21, 0, 'success'), qrun(22, 0, 'failure')] }));
+    if (g.exit !== EXIT_FINDINGS || !g.lines.some((l) => l.includes('push run 11') && l.includes('queue run 22'))) {
+      throw new Error(`borrowed live: a red head queue run passed (exit ${g.exit})`);
+    }
+    // The snapshot lane reads the same record and names the borrowed-green commit.
+    const { fetchImpl } = stubApi(liveRoute({ ciRuns: [pushRun(11, 0)] }));
+    const snap = await runSnapshotCommit({ from: H[0], repo: 'o/r', token: 't', readHistory: () => H, fetchImpl, sleep: async () => {} });
+    if (snap.exit !== 0 || snap.record.commit !== H[0] || snap.record.workflows[0].borrowedFrom !== 21) {
+      throw new Error(`borrowed live: the snapshot lane did not read the record (exit ${snap.exit})`);
+    }
+  });
+  await check(async () => {
+    // FIRING CONTROL for the read loop: every round reads only what is pending.
+    let reads = 0;
+    const { result } = await withBorrowRecords(
+      (records) => (records.has(1) ? { ok: true, pending: [] } : { pending: [{ runId: 1 }] }),
+      async () => {
+        reads += 1;
+        return { record: 'full' };
+      }
+    );
+    if (!result.ok || reads !== 1) throw new Error(`borrowed: the read loop read ${reads} record(s)`);
+    if (!(await threwAsync(() => withBorrowRecords(() => ({ pending: [{ runId: 1 }] }), async () => ({ record: 'full' }))))) {
+      throw new Error('borrowed: a record that stays pending after its read looped or passed');
+    }
+  });
+
+  battery('queue verdict: the push probe');
+  // Three pushed commits, head first: Q[0] <- Q[1] <- Q[2] <- BEFORE.
+  const qsha = (n) => n.toString(16).repeat(40).slice(0, 40);
+  const Q = [qsha(10), qsha(11), qsha(12)];
+  const BEFORE = qsha(13);
+  const parentOf = (i) => (i + 1 < Q.length ? Q[i + 1] : BEFORE);
+  const compareBody = (extra = {}) => ({
+    status: 'ahead',
+    ahead_by: Q.length,
+    commits: [...Q].reverse().map((s, k) => ({ sha: s, parents: [{ sha: parentOf(Q.length - 1 - k) }] })),
+    ...extra,
+  });
+  const queueOf = (i, conclusion = 'success', extra = {}) => ({
+    id: 500 + i,
+    path: '.github/workflows/ci.yml',
+    event: 'merge_group',
+    status: 'completed',
+    conclusion,
+    head_sha: Q[i],
+    head_branch: `gh-readonly-queue/main/pr-${40 + i}-${extra.base ?? parentOf(i)}`,
+    run_started_at: '2026-11-08T10:00:00Z',
+    ...extra,
+  });
+  const uiJobs = (green = TEST_UI_SHARDS) =>
+    Array.from({ length: TEST_UI_SHARDS }, (_, k) => ({ name: `Test UI (${k + 1}/16)`, conclusion: k < green ? 'success' : 'skipped' }));
+  const probeRoute = ({ compare = compareBody(), compareStatus = 200, queue = (i) => [queueOf(i)], queueStatus = 200, jobs = uiJobs(), jobsStatus = 200 } = {}) => (url) => {
+    if (url === `https://api.github.com/repos/o/r/compare/${BEFORE}...${Q[0]}?per_page=100`) return { status: compareStatus, body: compare };
+    const listing = /\/actions\/workflows\/ci\.yml\/runs\?event=merge_group&head_sha=([0-9a-f]{40})&per_page=20$/.exec(url);
+    if (listing) return { status: queueStatus, body: { workflow_runs: queue(Q.indexOf(listing[1])) } };
+    if (/\/actions\/runs\/500\/jobs\?filter=latest&per_page=100&page=1$/.test(url)) return { status: jobsStatus, body: { jobs } };
+    return undefined;
+  };
+  const probe = async (route = probeRoute(), extra = {}) => {
+    const { calls, fetchImpl } = stubApi(route);
+    const result = await runQueueVerdict({ before: BEFORE, after: Q[0], repo: 'o/r', token: 't', fetchImpl, sleep: async () => {}, ...extra });
+    return { ...result, calls, rendered: renderQueueVerdict(result) };
+  };
+  await check(async () => {
+    // Every commit covered: COVERED, one row per commit head first, and the
+    // head's queue run ran all sixteen Test UI shards green.
+    const p = await probe();
+    if (!p.covered || p.rows.map((r) => r.runId).join() !== '500,501,502' || p.headRun !== 500 || !p.uiFullGreen) {
+      throw new Error(`probe: three green commits must be covered: ${JSON.stringify(p)}`);
+    }
+    if (!p.rendered.output.includes('covered=true\n') || !p.rendered.output.includes('runs=500,501,502\n') || !p.rendered.output.includes('ui_full_green=true\n')) {
+      throw new Error(`probe: the outputs of a covered push: ${p.rendered.output}`);
+    }
+  });
+  // ⭐ THE THREE DELIBERATE REDS the seat named: a missing, a red and a
+  // wrong-base queue run each mean NOT COVERED, so the push runs in full.
+  await check(async () => {
+    const p = await probe(probeRoute({ queue: (i) => (i === 2 ? [] : [queueOf(i)]) }));
+    if (p.covered || !p.reason.includes(`no merge_group run of the workflow is on ${Q[2].slice(0, 10)}`) || !p.rendered.output.includes('covered=false\n')) {
+      throw new Error(`probe: a commit with no queue run was covered: ${JSON.stringify(p)}`);
+    }
+  });
+  await check(async () => {
+    const p = await probe(probeRoute({ queue: (i) => (i === 1 ? [queueOf(i, 'success', { run_started_at: '2026-11-08T09:00:00Z' }), queueOf(i, 'failure', { id: 601 })] : [queueOf(i)]) }));
+    if (p.covered || !p.reason.includes('queue run 601') || !p.reason.includes('concluded failure')) {
+      throw new Error(`probe: a red (newest) queue run was covered: ${JSON.stringify(p)}`);
+    }
+  });
+  await check(async () => {
+    const p = await probe(probeRoute({ queue: (i) => [queueOf(i, 'success', i === 0 ? { base: BEFORE } : {})] }));
+    if (p.covered || !p.reason.includes('was built on') || !p.reason.includes(BEFORE.slice(0, 10))) {
+      throw new Error(`probe: a queue run on another base was covered: ${JSON.stringify(p)}`);
+    }
+  });
+  await check(async () => {
+    // Still running, and cancelled.
+    const running = await probe(probeRoute({ queue: (i) => [queueOf(i, null, i === 0 ? { status: 'in_progress' } : {})] }));
+    if (running.covered || !running.reason.includes('is in_progress')) throw new Error('probe: an in-progress queue run was covered');
+    const cancelled = await probe(probeRoute({ queue: (i) => [queueOf(i, i === 0 ? 'cancelled' : 'success')] }));
+    if (cancelled.covered || !cancelled.reason.includes('concluded cancelled')) throw new Error('probe: a cancelled queue run was covered');
+  });
+  await check(async () => {
+    // A zero (or missing) `before`: not covered, and nothing is read.
+    for (const before of ['0'.repeat(40), '', 'not-a-sha']) {
+      const p = await probe(probeRoute(), { before });
+      if (p.covered || p.calls.length !== 0 || !p.reason.includes('previous head')) throw new Error(`probe: before '${before}' was walked: ${JSON.stringify(p)}`);
+    }
+    const noHead = await probe(probeRoute(), { after: '' });
+    if (noHead.covered || noHead.calls.length !== 0) throw new Error('probe: a push with no head sha was walked');
+  });
+  await check(async () => {
+    // Over the cap, a force-push (not `ahead`), a merge commit, a walk that
+    // never reaches `before`: not covered.
+    const over = await probe(probeRoute({ compare: compareBody({ ahead_by: QUEUE_VERDICT_COMMIT_CAP + 1 }) }));
+    if (over.covered || !over.reason.includes('over the cap')) throw new Error('probe: a push over the cap was covered');
+    const forced = await probe(probeRoute({ compare: compareBody({ status: 'diverged' }) }));
+    if (forced.covered || !forced.reason.includes("'diverged'")) throw new Error('probe: a diverged compare was covered');
+    const merge = compareBody();
+    merge.commits[1] = { ...merge.commits[1], parents: [...merge.commits[1].parents, { sha: BEFORE }] };
+    const merged = await probe(probeRoute({ compare: merge }));
+    if (merged.covered || !merged.reason.includes('2 parents')) throw new Error('probe: a merge commit was covered');
+    const gap = compareBody();
+    gap.commits.splice(1, 1);
+    const lost = await probe(probeRoute({ compare: gap }));
+    if (lost.covered || !lost.reason.includes('not in the compare')) throw new Error('probe: a broken walk was covered');
+    if (pushedCommits({ before: BEFORE, after: Q[0], compare: compareBody(), cap: 2 }).reason === null) throw new Error('probe: the walk ignored its cap');
+  });
+  await check(async () => {
+    // The API refusing: a 403 on the compare, a 500 that outlives its retries
+    // on a listing, an answer with no array, a crash. Each is NOT COVERED.
+    const forbidden = await probe(probeRoute({ compareStatus: 403 }));
+    if (forbidden.covered || !forbidden.reason.includes('could not be read') || !forbidden.reason.includes('HTTP 403')) throw new Error('probe: a 403 compare was covered');
+    const flaky = await probe(probeRoute({ queueStatus: 500 }));
+    if (flaky.covered || !flaky.reason.includes('HTTP 500')) throw new Error('probe: a 500 listing was covered');
+    const shapeless = await probe(probeRoute({ compare: { status: 'ahead', ahead_by: 3 } }));
+    if (shapeless.covered || !shapeless.reason.includes('no commits array')) throw new Error('probe: a compare without commits was covered');
+    const crash = await probe(() => ({ throws: new Error('boom') }));
+    if (crash.covered || !crash.reason.includes('boom')) throw new Error('probe: a crashed transport was covered');
+    const unauth = await probe(probeRoute(), { token: '' });
+    if (unauth.covered || unauth.calls.length !== 0) throw new Error('probe: a probe with no token read or was covered');
+  });
+  await check(async () => {
+    // Test UI: 15 of 16 green shards, or an unreadable jobs list, still covers
+    // the push but keeps Test UI running on it.
+    const partial = await probe(probeRoute({ jobs: uiJobs(15) }));
+    if (!partial.covered || partial.uiFullGreen || !partial.rendered.output.includes('ui_full_green=false\n')) throw new Error('probe: 15 of 16 Test UI shards read as all green');
+    const unread = await probe(probeRoute({ jobsStatus: 404 }));
+    if (!unread.covered || unread.uiFullGreen) throw new Error('probe: an unread Test UI jobs list read as all green');
+    if (testUiFullGreen([...uiJobs(), { name: 'Test UI (1/8)', conclusion: 'success' }]) !== true || testUiFullGreen(uiJobs().slice(1)) !== false) {
+      throw new Error('probe: testUiFullGreen counted the wrong shards');
+    }
+  });
+  await check(() => {
+    // The deciding queue run: newest by start then id, merge_group of ci.yml only.
+    const runs = [queueOf(0, 'failure'), queueOf(0, 'success', { id: 700, run_started_at: '2026-11-08T11:00:00Z' }), { ...queueOf(0, 'success', { id: 800, run_started_at: '2026-11-08T12:00:00Z' }), event: 'push' }, { ...queueOf(0, 'success', { id: 900, run_started_at: '2026-11-08T12:00:00Z' }), path: '.github/workflows/lint.yml' }];
+    if (decidingQueueRun(runs, Q[0])?.id !== 700) throw new Error(`probe: decidingQueueRun picked ${decidingQueueRun(runs, Q[0])?.id}`);
+    if (queueRunBase({ head_branch: `gh-readonly-queue/main/pr-9-${BEFORE}` }) !== BEFORE || queueRunBase({ head_branch: 'gh-readonly-queue/next/pr-9-' + BEFORE }) !== null) {
+      throw new Error('probe: queueRunBase read a ref it should not');
+    }
+  });
+  await check(() => {
+    // The rendered reason is ONE output line whatever the reason holds.
+    const { output } = renderQueueVerdict({ covered: false, reason: 'a\nb', rows: [], headRun: null, uiFullGreen: false });
+    if (output.split('\n').filter(Boolean).length !== 5 || !output.includes('reason=a b\n')) throw new Error(`probe: the outputs are not five lines: ${output}`);
+  });
+  await check(() => {
+    // The CLI: with no token it decides NOT COVERED, exits 0 and writes the outputs.
+    const self = fileURLToPath(import.meta.url);
+    const out = join(mkdtempSync(join(tmpdir(), 'queue-verdict-')), 'out');
+    const env = { ...process.env, GITHUB_TOKEN: '', GITHUB_REPOSITORY: 'o/r', GITHUB_OUTPUT: out, GITHUB_STEP_SUMMARY: '' };
+    const res = spawnSync(process.execPath, [self, '--queue-verdict', '--before', BEFORE, '--after', Q[0]], { encoding: 'utf8', env });
+    const written = existsSync(out) ? readFileSync(out, 'utf8') : '';
+    if (res.status !== 0 || !res.stdout.includes('NOT COVERED') || !written.includes('covered=false\n')) {
+      throw new Error(`probe cli: exit ${res.status}, stdout ${JSON.stringify(res.stdout)}, outputs ${JSON.stringify(written)}`);
+    }
+  });
+  // -- The ci.yml wiring the borrowed path depends on.
+  const ciYml = readFileSync(fileURLToPath(new URL('../../.github/workflows/ci.yml', import.meta.url)), 'utf8');
+  await check(() => {
+    const findings = borrowedVerdictWiring(ciYml);
+    if (findings.length > 0) throw new Error(`wiring: the checked-in ci.yml: ${findings.join(' | ')}`);
+  });
+  await check(() => {
+    const cut = ciYml.replace(`    name: ${BORROWED_VERDICT_JOB_NAME}\n`, '    name: Borrowed verdict\n');
+    if (cut === ciYml) throw new Error('wiring: the record job name anchor did not match, so this case tests nothing');
+    if (!borrowedVerdictWiring(cut).some((f) => f.includes('the name the release gate reads'))) throw new Error('wiring: a renamed record job passed');
+  });
+  await check(() => {
+    const cut = ciYml.replace("    if: always() && needs.queue-verdict.outputs.covered != 'true'\n", "    if: always() && needs.queue-verdict.outputs.covered == 'false'\n");
+    if (cut === ciYml) throw new Error("wiring: the != 'true' anchor did not match, so this case tests nothing");
+    if (!borrowedVerdictWiring(cut).some((f) => f.includes("literal 'true'"))) throw new Error("wiring: a covered read against 'false' passed");
+  });
+  await check(() => {
+    const cut = ciYml.replace(/(\n {2}temporal-conformance:\n(?:.*\n)*? {4}needs: )filter\n/, '$1[filter, queue-verdict]\n');
+    if (cut === ciYml) throw new Error('wiring: the temporal-conformance needs: anchor did not match, so this case tests nothing');
+    if (!borrowedVerdictWiring(cut).some((f) => f.includes('main-only job `temporal-conformance`'))) throw new Error('wiring: a main-only job reading the probe passed');
+  });
+  await check(() => {
+    const cut = ciYml.replace(`    if: ${QUEUE_VERDICT_IF}\n`, "    if: github.event_name != 'pull_request'\n");
+    if (cut === ciYml) throw new Error("wiring: the probe's if: anchor did not match, so this case tests nothing");
+    if (!borrowedVerdictWiring(cut).some((f) => f.includes(`\`${QUEUE_VERDICT_JOB}\`'s if:`))) throw new Error('wiring: a probe off push-only passed');
   });
 
   // -- The floor. Evaluated before the verdict, so the success line can only be
@@ -3070,10 +3847,16 @@ async function main() {
     return;
   }
 
+  if (argv.includes('--queue-verdict')) {
+    await queueVerdictCli(argv);
+    return;
+  }
+
   console.error(
     'usage: scheduled-full-run.mjs --check-concurrency\n' +
       '       scheduled-full-run.mjs --release-gate --release-commit <sha> [--require-distance-zero] [--json]\n' +
       '       scheduled-full-run.mjs --snapshot-commit --from <sha> [--json]\n' +
+      '       scheduled-full-run.mjs --queue-verdict --before <sha> --after <sha>\n' +
       '       scheduled-full-run.mjs --self-test'
   );
   process.exit(1);

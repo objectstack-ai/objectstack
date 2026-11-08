@@ -426,6 +426,64 @@ before this rule, turn on `allowJit` for that provider.
 
 ---
 
+## Grant permission sets from IdP groups
+
+An SSO provider, OIDC or SAML, can decide what its users may do from the groups
+the identity provider sends at sign-in. It uses the same group mappings
+(`sys_idp_group_mapping`) as a
+[SCIM connection](/docs/permissions/authentication#scim-connection-credentials):
+one mapping model, two sources.
+
+**Where the groups come from.** Set the provider's own claim mapping to fill
+`groups`: `mapping.extraFields.groups` names the OIDC claim or the SAML attribute
+that carries the user's groups, for example `extraFields: { groups: 'groups' }`
+in `oidcConfig.mapping` (or `samlConfig.mapping`) when the provider is registered
+through `POST /api/v1/auth/sso/register`. The **Setup → SSO Providers** form does
+not set it. The value may be one string or a list of strings. A provider whose
+mapping fills no `groups` signs users in as before.
+
+**Saving a mapping.** A platform administrator saves one mapping per group and
+permission set through `POST /api/v1/auth/admin/scim/set-group-mapping`, naming
+the provider with `providerId`:
+
+```bash
+curl -X POST http://localhost:3000/api/v1/auth/admin/scim/set-group-mapping \
+  -H 'Content-Type: application/json' -H "Authorization: Bearer $ADMIN_SESSION" \
+  -d '{ "providerId": "okta", "groupDisplayName": "Sales", "permissionSet": "sales_rep" }'
+# → { success, data: { mappingId, created, providerId, permissionSet, organizationId, reprojected: false, … } }
+```
+
+- Name the source with exactly one of `connectionId` (a SCIM connection) or
+  `providerId` (an SSO provider). Name the group with exactly one of
+  `groupExternalId` (matched against the group's id, such as an Entra ID group
+  object id) or `groupDisplayName` (matched against its exact name).
+- The grant's organization is the provider's own organization. An unknown
+  provider, or one that belongs to no organization, is refused
+  `400 VALIDATION_FAILED` on `providerId`. With SSO off the save is refused `503`.
+- Only an ordinary permission set inside that organization can be granted. An
+  administrator set, or any set outside the organization boundary, is refused
+  `400 VALIDATION_FAILED` on `permissionSet`, and nothing is stored. With no
+  security service to judge the boundary, the save is refused `503`.
+- `POST /api/v1/auth/admin/scim/delete-group-mapping` with `{ "mappingId": "…" }`
+  removes a mapping, and at once the grants of that set its provider made in
+  that organization, unless another of the provider's mappings still names the
+  set.
+
+**At every sign-in.** The user's grants follow the IdP's groups. A mapped group
+grants its set in the provider's organization, and a group the user has left
+loses its set at their next sign-in. A sign-in with no groups claim removes the
+grants that provider made earlier. The boundary is judged again before every
+grant. Only grants the provider itself made are ever removed: a grant made by
+hand or through SCIM is never touched. A saved mapping applies at each member's
+next sign-in, because a provider sends groups only when someone signs in; use
+SCIM when a group change must take effect between sign-ins.
+
+**When applying the mappings fails**, the sign-in still succeeds and the failure
+is logged at `error`. The user keeps the grants of their previous sign-in until
+the next one applies the mappings again.
+
+---
+
 ## Verify configuration
 
 Restart the server (`pnpm dev`), then:
