@@ -524,8 +524,12 @@ function errorResultFromThrown(err: unknown, request: string, objectName?: strin
  * The runtime dispatcher drops those `details` from the wire, so serving them
  * here would disclose on MCP what REST withholds. `code`, `message` and
  * `status` are what every boundary serves.
+ *
+ * [#31605] Exported for the tool-call interceptor, which answers a throw from
+ * a host's interceptor as the tools' own catches answer one; not on the
+ * package entry.
  */
-function errorResultWithCode(err: unknown) {
+export function errorResultWithCode(err: unknown) {
   const envelope = thrownRefusalEnvelope(err);
   return envelope ? codedErrorResult({ ...envelope }) : errorResult(messageOf(err));
 }
@@ -813,7 +817,14 @@ function landedWriteResultOrError(
   return textResult(earned);
 }
 
-function codedErrorResult(error: {
+/**
+ * The coded-refusal envelope every MCP tool error with a code answers with:
+ * `isError: true`, text `{ "error": { code, message, status, … } }`.
+ * [#31605] Exported for the tool-call interceptor's refusal
+ * (`tool-call-interceptor.ts`), so a host's deny reaches the client in the
+ * envelope the tools' own refusals use; not on the package entry.
+ */
+export function codedErrorResult(error: {
   code?: string;
   message: string;
   status?: number;

@@ -166,6 +166,11 @@ export async function handleMcpRequest(deps: DomainHandlerDeps, body: any, conte
             // undefined = not scope-limited (API key / session); an array
             // narrows the registered tool families inside the MCP runtime.
             ...(grantedScopes ? { toolOptions: { grantedScopes } } : {}),
+            // [#31605] Who this request was admitted as: the resolved
+            // ExecutionContext and the environment it was dispatched for. A
+            // host-installed tool-call interceptor reads every call's
+            // principal from these two and from nothing the request carries.
+            caller: { executionContext: ec, environmentId: context.environmentId },
         });
     } catch (err: any) {
         return { handled: true, response: deps.errorFromThrown(err, 500) };
