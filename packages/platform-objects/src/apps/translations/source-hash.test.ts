@@ -29,6 +29,7 @@ import { fr } from './fr.js';
 import { ptBR } from './pt-BR.js';
 import { ru } from './ru.js';
 import { de } from './de.js';
+import { ko } from './ko.js';
 import { zhCNSourceHashes } from './zh-CN.source-hashes.js';
 import { jaJPSourceHashes } from './ja-JP.source-hashes.js';
 import { esESSourceHashes } from './es-ES.source-hashes.js';
@@ -38,6 +39,7 @@ import { frSourceHashes } from './fr.source-hashes.js';
 import { ptBRSourceHashes } from './pt-BR.source-hashes.js';
 import { ruSourceHashes } from './ru.source-hashes.js';
 import { deSourceHashes } from './de.source-hashes.js';
+import { koSourceHashes } from './ko.source-hashes.js';
 import { SetupAppTranslations } from './setup.translation.js';
 import {
   collectFilledFromHashes,
@@ -57,6 +59,7 @@ import { frGeneratedSourceHashes } from './fr.source-hashes.generated.js';
 import { ptBRGeneratedSourceHashes } from './pt-BR.source-hashes.generated.js';
 import { ruGeneratedSourceHashes } from './ru.source-hashes.generated.js';
 import { deGeneratedSourceHashes } from './de.source-hashes.generated.js';
+import { koGeneratedSourceHashes } from './ko.source-hashes.generated.js';
 
 // A source bundle and a translation of it, at one nav leaf per app so the
 // per-locale independence claim has something to be independent about.
@@ -211,6 +214,7 @@ describe('the shipped bundles', () => {
     ['pt-BR', ptBR, ptBRSourceHashes],
     ['ru', ru, ruSourceHashes],
     ['de', de, deSourceHashes],
+    ['ko', ko, koSourceHashes],
   ] as const;
 
   // ⭐ The acceptance criterion, applied to the real data: B introduces NO new
@@ -414,6 +418,7 @@ describe('the committed provenance companions', () => {
     'pt-BR': ptBRGeneratedSourceHashes,
     ru: ruGeneratedSourceHashes,
     de: deGeneratedSourceHashes,
+    ko: koGeneratedSourceHashes,
   } as const;
 
   // ⚠️ Deliberately NOT asserted here: "no shipped leaf is stale". That claim

@@ -295,8 +295,10 @@ if (isEntrypoint(import.meta.url)) {
             '    some other commit would answer a question nobody asked, and answer it\n' +
             '    confidently. Name a commit that exists in this clone, or pass none.\n'
           : base.shallow
-            ? '    This clone is SHALLOW. In CI, give the checkout `fetch-depth: 0`; locally,\n' +
-              '    run `git fetch --no-tags origin main` (or `git fetch --unshallow`).\n'
+            ? '    This clone is SHALLOW. In CI, run the step\n' +
+              "    `Fetch this commit's history and the base branch` before this gate (ci.yml), or give the\n" +
+              '    checkout `fetch-depth: 0` (lint.yml); locally, run `git fetch --no-tags origin main`\n' +
+              '    (or `git fetch --unshallow`).\n'
             : '    Fetch the base branch (`git fetch --no-tags origin main`) and re-run.\n') +
         '    A failure, not a skip: report-only means this gate declines to fail on its\n' +
         '    FINDINGS, never that it passes without looking (objectstack#4928, objectui#4690).',
