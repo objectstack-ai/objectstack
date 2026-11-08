@@ -90,4 +90,10 @@ describe('sys_notification_preference topic / channel help (#25346)', () => {
         expect(templateFields.channel?.widget).toBeUndefined();
         expect(templateFields.channel?.type).toBe('text');
     });
+
+    it('quiet_hours declares the quiet-hours widget and stays a json field (#31426)', () => {
+        expect(fields.quiet_hours?.widget).toBe('quiet-hours');
+        expect(fields.quiet_hours?.type).toBe('json');
+        expect(fields.quiet_hours?.required).toBe(false);
+    });
 });
