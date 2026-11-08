@@ -2048,6 +2048,14 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
         label: "SAML-Konfiguration",
         help: "JSON: entryPoint, cert, identifierFormat, mapping (von better-auth verwaltet)"
       },
+      allow_idp_initiated: {
+        label: "Vom IdP initiierte Anmeldung zulassen",
+        help: "Eine Anmeldung akzeptieren, die beim Identitätsanbieter beginnt (eine unaufgeforderte SAML-Antwort oder ein OIDC-Callback ohne state) statt in diesem System. Standardmäßig deaktiviert: Eine vom IdP initiierte SAML-Antwort ist an keine Anfrage gebunden, die dieses System gestellt hat. Ändern Sie dies mit „Anmeldeoptionen bearbeiten“."
+      },
+      allow_jit: {
+        label: "Just-in-Time-Bereitstellung zulassen",
+        help: "Bei der Zielgruppenrichtlinie „Nur auf Einladung“ ein Konto für eine Person anlegen, die sich ohne Konto oder Einladung über diesen Anbieter anmeldet. Standardmäßig deaktiviert: Eine solche Person wird abgewiesen. Andere Richtlinien stellen wie bisher bereit. Ändern Sie dies mit „Anmeldeoptionen bearbeiten“."
+      },
       user_id: {
         label: "Registriert von",
         help: "Benutzer, der diesen Anbieter registriert hat"
@@ -2168,6 +2176,10 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
         label: "SSO-Anbieter löschen",
         description: "Diesen SSO-Anbieter löschen? Benutzer seiner Domäne können sich dann nicht mehr darüber anmelden.",
         successMessage: "SSO-Anbieter gelöscht"
+      },
+      edit_sso_sign_in_options: {
+        label: "Anmeldeoptionen bearbeiten",
+        successMessage: "Anmeldeoptionen gespeichert"
       }
     }
   },
