@@ -25,5 +25,5 @@
 - ⛔ 不派 `os-dev`、不改产品代码、不开 PR;§3 清单修订同断言缺陷立卡交该项车道。
 - 抽出的缺陷卡照常进分诊首触,⛔ 不定级、不入队;安全发现只照 `../security-findings.md`。
 - 波次(发版候选全量、维护者点名目标)仍由维护者手动触发;本席只跑 §6 两条例行。
-- 技能与 RUNNER 文本归 `domain:skills`;本席见文本问题以 `finding` 报,⛔ 不自改。
+- 技能文本归 `domain:skills`、RUNNER 归 `domain:devx`;本席见文本问题以 `finding` 报,⛔ 不自改。
 - GitHub 写只走 checklist-test §4 写入门;推维护者只限需其出手,⛔ 无周报聊天表。
