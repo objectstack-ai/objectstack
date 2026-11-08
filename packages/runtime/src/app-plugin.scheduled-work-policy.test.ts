@@ -33,6 +33,8 @@ import {
 import { AppPlugin } from './app-plugin.js';
 import { scheduleAppArtifactJobs } from './app-artifact-handlers.js';
 import { withScheduledWorkOn } from './scheduled-work.test-support.js';
+// Paid at collection, not inside a case's clock: `AppPlugin` reaches it through a dynamic import.
+import '@objectstack/metadata';
 
 // The deployment switch is ON, as the hosted runtime sets it: what turns a
 // kernel's jobs off below is the host's per-kernel policy, nothing else.
