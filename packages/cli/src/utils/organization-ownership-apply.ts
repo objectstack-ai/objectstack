@@ -182,11 +182,14 @@ import type { DeclaredSharingRuleSkip } from '@objectstack/plugin-sharing';
  * empty, a delete selects only mirrors — so a second run writes nothing the
  * first one wrote. On top of that, each step that finishes is recorded in the
  * ceremony's checkpoint ({@link CeremonyLedgerPort}) and is not run again: a
- * run interrupted inside step N resumes at step N. Two steps run again when
- * checkpointed: `history-renumber` (below), and `attribution` whenever the
+ * run interrupted inside step N resumes at step N. Steps that run again when
+ * checkpointed include `history-renumber` (below); `attribution` whenever the
  * plan derives an owner for rows still NULL — a row the operator made
  * attributable since, or one an earlier run found no Default Organization
- * for. A step that stops on a
+ * for; and `not-null` whenever the run has a schema door, so a table it left
+ * nullable (not declared by that run's composition, or held by a NULL row
+ * since resolved) receives NOT NULL, while a column already NOT NULL is never
+ * rebuilt. A step that stops on a
  * blocker stops the ceremony there — fate order is the contract — and the
  * report names the blocker and its remedy.
  *
@@ -4152,6 +4155,33 @@ export async function applyOrganizationOwnership(opts: ApplyOptions): Promise<Or
       checkpoint.completed[step] = { at: now().toISOString(), summary: again.summary };
       await opts.ledger.write(checkpoint, { complete: false, blocking: 0, advisory: 0 });
       run.columns.clear();
+      continue;
+    }
+    // `not-null` runs again even when checkpointed, whenever the run has a
+    // schema door: a table the step left nullable — the composition an earlier
+    // run booted declared no object for it (`not-declared`), or a NULL row held
+    // it until the operator resolved it by hand — receives NOT NULL on the
+    // re-run each of those advice lines names. The door answers
+    // `already-not-null` for a column an earlier run tightened, so a run with
+    // nothing left to tighten stays `checkpointed`, exactly as before; one
+    // whose NOT NULL fails is no longer recorded as done, as on a first run.
+    if (done && step === 'not-null' && opts.notNull) {
+      const again = await RUNNERS[step](run);
+      if (again.status !== 'done') {
+        steps.push(again);
+        delete checkpoint.completed[step];
+        await opts.ledger.write(checkpoint, { complete: false, blocking: 0, advisory: 0 });
+        stopped = true;
+        continue;
+      }
+      if (Number(again.summary.applied ?? 0) > 0) {
+        steps.push(again);
+        checkpoint.completed[step] = { at: now().toISOString(), summary: again.summary };
+        await opts.ledger.write(checkpoint, { complete: false, blocking: 0, advisory: 0 });
+        run.columns.clear();
+        continue;
+      }
+      steps.push({ step, status: 'checkpointed', summary: done.summary, blockers: [], notes: again.notes });
       continue;
     }
     if (done) {
