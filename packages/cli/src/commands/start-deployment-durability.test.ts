@@ -16,11 +16,10 @@ import {
   isDefaultedDatabase,
   missingDurableVariables,
   readDurabilityCheckSignal,
-  refusesMintedAuthSecret,
+  declaresReplicasSharingState,
   sqliteFileOf,
   writeDeploymentFindingsChannel,
 } from './start.js';
-import { declaresMultiNode } from '@objectstack/service-cluster';
 
 describe('the image switch', () => {
   it.each([
@@ -142,27 +141,22 @@ describe('the channel to the server process', () => {
 });
 
 describe('a declared multi-replica start on the redis cluster driver mints no sign-in secret of its own', () => {
-  // The facts as the call site reads them: the declaration through the
-  // split-brain guard's own reader, the driver as `OS_CLUSTER_DRIVER` spells it.
-  const facts = (env: Record<string, string | undefined>) => ({
-    multiNode: declaresMultiNode(env),
-    clusterDriver: env.OS_CLUSTER_DRIVER,
+  const asks = (env: Record<string, string | undefined>) => declaresReplicasSharingState(env as NodeJS.ProcessEnv);
+
+  it('refuses when several replicas are declared over the redis driver, by either declaration', async () => {
+    expect(await asks({ OS_CLUSTER_REPLICAS: '3', OS_CLUSTER_DRIVER: 'redis' })).toBe(true);
+    expect(await asks({ OS_EXPECT_MULTI_NODE: 'true', OS_CLUSTER_DRIVER: ' redis ' })).toBe(true);
   });
 
-  it('refuses when several replicas are declared over the redis driver, by either declaration', () => {
-    expect(refusesMintedAuthSecret(facts({ OS_CLUSTER_REPLICAS: '3', OS_CLUSTER_DRIVER: 'redis' }))).toBe(true);
-    expect(refusesMintedAuthSecret(facts({ OS_EXPECT_MULTI_NODE: 'true', OS_CLUSTER_DRIVER: ' redis ' }))).toBe(true);
+  it('CONTROL: a single node keeps minting, on the redis driver too', async () => {
+    expect(await asks({})).toBe(false);
+    expect(await asks({ OS_CLUSTER_DRIVER: 'redis' })).toBe(false);
+    expect(await asks({ OS_CLUSTER_REPLICAS: '1', OS_CLUSTER_DRIVER: 'redis' })).toBe(false);
   });
 
-  it('CONTROL: a single node keeps minting, on the redis driver too', () => {
-    expect(refusesMintedAuthSecret(facts({}))).toBe(false);
-    expect(refusesMintedAuthSecret(facts({ OS_CLUSTER_DRIVER: 'redis' }))).toBe(false);
-    expect(refusesMintedAuthSecret(facts({ OS_CLUSTER_REPLICAS: '1', OS_CLUSTER_DRIVER: 'redis' }))).toBe(false);
-  });
-
-  it('CONTROL: replicas declared over the memory driver, or none named, keep the boot they had', () => {
-    expect(refusesMintedAuthSecret(facts({ OS_CLUSTER_REPLICAS: '3', OS_CLUSTER_DRIVER: 'memory' }))).toBe(false);
-    expect(refusesMintedAuthSecret(facts({ OS_CLUSTER_REPLICAS: '3' }))).toBe(false);
+  it('CONTROL: replicas declared over the memory driver, or none named, keep the boot they had', async () => {
+    expect(await asks({ OS_CLUSTER_REPLICAS: '3', OS_CLUSTER_DRIVER: 'memory' })).toBe(false);
+    expect(await asks({ OS_CLUSTER_REPLICAS: '3' })).toBe(false);
   });
 
   it('the refusal is one line naming OS_AUTH_SECRET and how to generate it, and carries no value', () => {

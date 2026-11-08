@@ -368,19 +368,13 @@ export default class Start extends Command {
     // Minting one below is right for a single node and wrong for replicas:
     // each mints its own into its own home, and a session signed on one is
     // refused on the others. Asked only when the operator set none, and before
-    // anything is generated, so the refusal writes no secret. The declaration
-    // and the driver are the pair `planCacheAdapter` (`@objectstack/service-cache`)
-    // switches on: `declaresMultiNode`, read from the module that owns it, and
-    // the driver the `serve` child composes its cluster service from.
-    if (operatorAuthSecret === undefined || operatorAuthSecret.trim().length === 0) {
-      const { declaresMultiNode } = await import('@objectstack/service-cluster');
-      if (refusesMintedAuthSecret({
-        multiNode: declaresMultiNode(process.env),
-        clusterDriver: process.env.OS_CLUSTER_DRIVER,
-      })) {
-        process.stderr.write(`${MULTI_REPLICA_AUTH_SECRET_REFUSAL}\n`);
-        process.exit(1);
-      }
+    // anything is generated, so the refusal writes no secret.
+    if (
+      (operatorAuthSecret === undefined || operatorAuthSecret.trim().length === 0)
+      && await declaresReplicasSharingState(process.env)
+    ) {
+      process.stderr.write(`${MULTI_REPLICA_AUTH_SECRET_REFUSAL}\n`);
+      process.exit(1);
     }
 
     const persistedAuthSecret = operatorAuthSecret === undefined ? readOrCreateAuthSecret(homeDir) : undefined;
@@ -694,24 +688,25 @@ export async function resolveStartDatabase(opts: {
 }
 
 /**
- * The cluster driver whose replicas share state, so whose deployment must
- * share one sign-in secret too: the driver `planCacheAdapter`
- * (`@objectstack/service-cache`) shares one cache over.
+ * Whether this deployment runs replicas that share state, so must share one
+ * sign-in secret too: several replicas declared (`OS_EXPECT_MULTI_NODE=true` /
+ * `OS_CLUSTER_REPLICAS` > 1, the split-brain guard's `declaresMultiNode`) over
+ * the redis cluster driver. Both are required, the rule every multi-replica
+ * change keeps (cloud#3814 R3): a single node keeps minting into
+ * `<home>/auth-secret`, and a declaration over any other driver keeps the boot
+ * it had.
+ *
+ * ⛔ Not a second copy of that rule. It is asked of the one pre-boot form that
+ * exists, `sharesCloudBindingCredential` (`OS_CLUSTER_DRIVER` in place of the
+ * cluster service's driver, trimmed as the `serve` child trims it before
+ * composing that service), from a package this command already declares. The
+ * CLI declares no cluster package of its own: those ship with the host app
+ * (`serve-cluster-host-resolution.test.ts` says why). Lazy, so oclif's
+ * import-every-command startup does not pay for it.
  */
-const SHARED_CLUSTER_DRIVER = 'redis';
-
-/**
- * Whether `os start` refuses to mint its own sign-in secret: the deployment
- * declares several replicas (`declaresMultiNode` from
- * `@objectstack/service-cluster`, the split-brain guard's reading) over the
- * redis cluster driver. Both are required (cloud ADR-0010 path A): a single
- * node keeps minting into `<home>/auth-secret`, and a declaration over any
- * other driver keeps today's boot. The caller asks only when the operator set
- * no secret. `clusterDriver` is `OS_CLUSTER_DRIVER` as written, trimmed the way
- * the `serve` child trims it before composing the cluster service.
- */
-export function refusesMintedAuthSecret(facts: { multiNode: boolean; clusterDriver: string | undefined }): boolean {
-  return facts.multiNode && facts.clusterDriver?.trim() === SHARED_CLUSTER_DRIVER;
+export async function declaresReplicasSharingState(env: NodeJS.ProcessEnv): Promise<boolean> {
+  const { sharesCloudBindingCredential } = await import('@objectstack/cloud-connection');
+  return sharesCloudBindingCredential(env, env.OS_CLUSTER_DRIVER);
 }
 
 /**

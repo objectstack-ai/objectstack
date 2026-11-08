@@ -649,9 +649,6 @@ importers:
       '@objectstack/service-cache':
         specifier: workspace:*
         version: link:../services/service-cache
-      '@objectstack/service-cluster':
-        specifier: workspace:*
-        version: link:../services/service-cluster
       '@objectstack/service-datasource':
         specifier: workspace:*
         version: link:../services/service-datasource
