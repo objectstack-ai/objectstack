@@ -92,13 +92,8 @@ export default defineStack({
   //   • automation  — AutomationServicePlugin (flow engine + node executors).
   //   • approvals   — ApprovalsServicePlugin, so the `approval` flow node
   //                   (ADR-0019) is contributed to the engine.
-  //   • messaging   — MessagingServicePlugin, so the `notify` node delivers to
-  //                   the inbox channel (`sys_inbox_message` rows) instead of
-  //                   degrading to a logged no-op.
   //   • triggers    — record-change + schedule FlowTrigger plugins, so the
   //                   autolaunched / schedule flows below actually auto-fire.
-  //   • job         — JobServicePlugin, the timing backend the schedule trigger
-  //                   delegates to (interval / cron jobs).
   //   • marketplace — PackageServicePlugin (sys_packages store). Enables the AI
   //                   blueprint flow to auto-create a writable "app package" home
   //                   (ADR-0033 zero-package app building) and the Studio package
@@ -106,7 +101,11 @@ export default defineStack({
   //   • mailbox     — MailboxServicePlugin: the inbound-mail objects
   //                   (`sys_mailbox`, `sys_mail_message`, `sys_mail_association`)
   //                   and their read gates, served through the data API.
-  requires: ['ui', 'automation', 'approvals', 'messaging', 'triggers', 'job', 'marketplace', 'webhooks', 'realtime', 'mailbox'],
+  // Not listed: `messaging` (the `notify` node's inbox delivery) and `job` (the
+  // timing backend the schedule trigger delegates to) are always-on core
+  // capabilities that every boot mounts, listed or not. Only a
+  // `--preset minimal` boot drops them; there, list both.
+  requires: ['ui', 'automation', 'approvals', 'triggers', 'marketplace', 'webhooks', 'realtime', 'mailbox'],
 
   // Concrete connectors for the `connector_action` node. The baseline engine
   // ships the dispatch node + an empty registry; these plugins populate it.

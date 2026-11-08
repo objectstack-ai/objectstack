@@ -160,9 +160,9 @@ export const ReassignWizardFlow = defineFlow({
  * recipient + message to the messaging service, which fans out to the user's
  * channels (inbox by default). The `notify` node ships in every automation
  * engine; delivery is backed by `@objectstack/service-messaging`
- * (`MessagingServicePlugin`). Without that plugin the node degrades to a
- * logged no-op instead of failing the flow — install it and this flow starts
- * landing inbox rows with no edit.
+ * (`MessagingServicePlugin`), always-on: every boot mounts it unless
+ * `--preset minimal` drops it. Without that plugin the node degrades to a
+ * logged no-op instead of failing the flow.
  */
 export const TaskAssignedNotifyFlow = defineFlow({
   name: 'showcase_task_assigned_notify',
@@ -420,8 +420,9 @@ export const TaskCompletedSlackFlow = defineFlow({
  * switch or the posture, so a finding here would be false for the default
  * deployment.
  *
- * Install `requires: ['automation', 'triggers', 'job', 'messaging']` for the
- * binding machinery this example demonstrates.
+ * Install `requires: ['automation', 'triggers']` for the binding machinery
+ * this example demonstrates (`job` and `messaging` are always-on; list them
+ * too only under `--preset minimal`).
  */
 export const ScheduledDigestFlow = defineFlow({
   name: 'showcase_scheduled_digest',
@@ -643,8 +644,8 @@ export const ShowcaseMcpConnectorEchoFlow = defineFlow({
  * resumed by an external `resume(runId)` (it never silently no-ops).
  *
  * A short demo delay keeps it observable in-session; a production reminder would
- * use e.g. `timerDuration: 'P3D'`. Install
- * `requires: ['automation', 'triggers', 'job', 'messaging']`.
+ * use e.g. `timerDuration: 'P3D'`. Install `requires: ['automation', 'triggers']`
+ * (`job` and `messaging` are always-on; list them too only under `--preset minimal`).
  */
 export const TaskFollowUpFlow = defineFlow({
   name: 'showcase_task_follow_up',
