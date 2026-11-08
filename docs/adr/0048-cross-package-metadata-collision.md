@@ -286,8 +286,8 @@ package — stays covered by the `naming/namespace-prefix` lint in `os lint`.
 > environment item under a package's name is the ADR-0005 overlay. ⛔ Nor is the
 > email service's built-in template bundle: an app's same-named template
 > overrides it by contract (ADR-0131 D6), so that package holds no template name
-> and is refused none. Every other type, a `tool` among them, an action bound to an object among them, keeps
-> §3.4 as written. See
+> and is refused none. Every other type keeps §3.4 as written, among them a
+> `tool` and an action bound to an object. See
 > [Addendum (2026-11-06)](#addendum-2026-11-06-bare-names-resolved-without-a-package-hold-one-package--34-narrowed).
 
 ### 3.5 Namespace rename-on-install is deferred (non-goal)
