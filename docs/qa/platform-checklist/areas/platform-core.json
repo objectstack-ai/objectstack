@@ -946,7 +946,7 @@
       "title": "Package lifecycle: disable stops serving, enable restores, uninstall de-registers, commits grow per publish and revert restores the prior published shape",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["seeded admin (admin@objectos.ai / admin123)"],
@@ -965,7 +965,7 @@
         "disable: PATCH /api/v1/packages/:id/disable → capture; then GET /api/v1/data/<probe_object> and the probe routes → now 404/403 (stopped serving); /meta/app no longer lists its nav",
         "enable: PATCH /api/v1/packages/:id/enable → capture; the object/nav/routes serve again (restore)",
         "commits grow per publish: GET /api/v1/packages/:id/commits before and after a second publish — the list grows by exactly one entry; capture both listings",
-        "revert restores the prior published shape: change the probe (e.g. add a field) and publish, then POST /api/v1/packages/:id/commits/:commitId/revert (or POST /api/v1/packages/:id/revert) → GET the /published shape and confirm it is back to the prior commit",
+        "revert restores the prior published shape: change the probe (e.g. add a field) and publish, then POST /api/v1/packages/:id/commits/:commitId/revert (or POST /api/v1/packages/:id/revert) → GET /api/v1/meta/TYPE/NAME of the changed item and confirm it is back to the prior commit (there is no package-level published read: GET /api/v1/packages/ID/published answers 404 ENDPOINT_NOT_FOUND)",
         "uninstall: DELETE /api/v1/packages/:id → capture; GET /api/v1/meta no longer lists the probe object/kinds and GET /api/v1/packages no longer lists the package",
         "both-sides deny: attempt PATCH /disable and DELETE against a READ-ONLY code package (a platform package or the showcase's own) → refused server-side (ADR-0070); capture the refusal"
       ],
@@ -995,15 +995,15 @@
           "evidence": "the two commit listings"
         },
         {
-          "clause": "revert RESTORES the prior published shape: POST /packages/:id/commits/:commitId/revert (or /revert) returns the published metadata to the prior commit, and a subsequent /published read matches the pre-change shape",
+          "clause": "revert RESTORES the prior published shape: POST /packages/:id/commits/:commitId/revert (or /revert) returns the published metadata to the prior commit, and a subsequent GET /api/v1/meta/TYPE/NAME read matches the pre-change shape",
           "oracle": "api",
-          "verify": "the pre-change /published read equals the post-revert /published read",
-          "evidence": "the pre/post published reads"
+          "verify": "the pre-change GET /api/v1/meta/TYPE/NAME read equals the post-revert one",
+          "evidence": "the pre/post meta reads"
         },
         {
-          "clause": "the disabled package's surface is gone from the console — its nav entry is absent and a stale deep-link to its object shows a named not-found inside the shell, never a dead white page",
+          "clause": "the disabled package's surface is gone from the console — its nav entry is absent and a stale deep-link to its object shows a named not-found state, not a white page (the app-level one is a full-screen named state, 'This app can't be opened')",
           "oracle": "screenshot",
-          "verify": "screenshot the console after disable (nav absent), then open BOTH stale deep-link shapes captured before the disable — the probe object's list, /_console/apps/APP/OBJECT, and one of its records, /_console/apps/APP/OBJECT/record/ID, APP being the probe app — and screenshot each: each shows a named not-found inside the shell",
+          "verify": "screenshot the console after disable (nav absent), then open BOTH stale deep-link shapes captured before the disable — the probe object's list, /_console/apps/APP/OBJECT, and one of its records, /_console/apps/APP/OBJECT/record/ID, APP being the probe app — and screenshot each: each shows a named not-found state, not a white page",
           "evidence": "the nav screenshot + one screenshot per deep-link shape"
         },
         {
@@ -1044,6 +1044,12 @@
           "date": "2026-10-31",
           "change": "steps[0] names the spellings the probe drafts need and acceptance[5].verify names both deep-link shapes. Checklist-accuracy finding of QA run #27441 (18.3.0 wave 3, parked on anchor #27377; slice S4, #28338): steps[0]'s \"nav entry\" did not say it is an app item, nor that the probe object needs the package namespace prefix (validateObjectNamespacePrefix) or which values sharingModel takes (OWDModel); acceptance[5] named one stale deep-link where the console routes two, the object list and the record (ui/packages/app-shell/src/console/AppContent.tsx). The clauses are unchanged. Re-read at 3fd80337",
           "ref": "#27441"
+        },
+        {
+          "revision": 4,
+          "date": "2026-11-08",
+          "change": "steps[5] and acceptance[4] compare GET /api/v1/meta/TYPE/NAME before and after the revert: GET /api/v1/packages/ID/published answers 404 ENDPOINT_NOT_FOUND. acceptance[5] asks for a named not-found state, not a white page: the app-level not-found is a full-screen named state ('This app can't be opened'). Checklist-accuracy findings of QA run #31486 (owed:weekly, at 0647dabb). Read at base 4894cfe1",
+          "ref": "#31499"
         }
       ]
     },
