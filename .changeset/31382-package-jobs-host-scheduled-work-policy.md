@@ -1,6 +1,6 @@
 ---
-'@objectstack/runtime': minor
-'@objectstack/types': minor
+'@objectstack/runtime': patch
+'@objectstack/types': patch
 '@objectstack/trigger-schedule': patch
 ---
 
