@@ -29,7 +29,7 @@ import { ADMIN_FULL_ACCESS } from '@objectstack/spec/identity';
 import { AuthManager } from './auth-manager.js';
 import { authIdentityObjects } from './manifest.js';
 import { createTenancyService } from './tenancy-service.js';
-import { mintScimConnectionCredential } from './scim-connection-service.js';
+import { mintScimConnectionCredential, revokeScimConnectionCredential } from './scim-connection-service.js';
 import { runDeleteIdpGroupMapping, runSetIdpGroupMapping, type IdpGroupMappingAdminDeps } from './idp-group-mapping-admin.js';
 import { createScimGroupProjection, scimGroupProjectionReason, type OrganizationBoundaryJudge } from './scim-group-projection.js';
 import { bindTestSecurityCatalog } from './__tests__/security-catalog.testkit.js';
@@ -126,6 +126,7 @@ interface Harness {
   door: IdpGroupMappingAdminDeps;
   send: (method: string, path: string, body?: unknown) => Promise<Response>;
   judge: OrganizationBoundaryJudge;
+  credentialId: string;
 }
 
 async function boot(): Promise<Harness> {
@@ -139,7 +140,7 @@ async function boot(): Promise<Harness> {
     plugins: { scim: true, organization: true },
     organizationBoundary: async () => judge,
   } as never);
-  const { token } = await mintScimConnectionCredential(engine as never, SECRET, { connectionId: CONNECTION, organizationId: ORG });
+  const { token, credentialId } = await mintScimConnectionCredential(engine as never, SECRET, { connectionId: CONNECTION, organizationId: ORG });
   const door: IdpGroupMappingAdminDeps = {
     getDataEngine: () => manager.getDataEngine() as never,
     isScimEnabled: () => manager.isScimWired(),
@@ -159,7 +160,7 @@ async function boot(): Promise<Harness> {
         ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
       }),
     );
-  return { engine, manager, token, door, send, judge };
+  return { engine, manager, token, credentialId, door, send, judge };
 }
 
 const ADMIN = { id: 'usr_platform_admin' };
@@ -431,5 +432,29 @@ describe('SCIM group push → mapped permission set', () => {
     // Through the vendor as well: the push lands, and grants nothing.
     await pushGroup(h, { displayName: 'Sales', externalId: 'okta-grp-sales' }, [gina.scimId]);
     expect(await grantsOf(h, gina.userId)).toEqual([]);
+  });
+  it('(S4) a revoked credential does not count: revoke in one organization, mint in another, and the save lands in the new one', async () => {
+    const h = await boot();
+    const ORG_B = 'org_scim_30959_b';
+    expect((await revokeScimConnectionCredential(h.engine as never, h.credentialId)).outcome).toBe('revoked');
+    await mintScimConnectionCredential(h.engine as never, SECRET, { connectionId: CONNECTION, organizationId: ORG_B });
+
+    const saved = await saveMapping(h, { connectionId: CONNECTION, groupExternalId: 'okta-grp-sales', permissionSet: SALES });
+
+    expect(saved.status, JSON.stringify(saved.body)).toBe(200);
+    expect((saved.body as { data: { organizationId: string } }).data.organizationId).toBe(ORG_B);
+    const rows = (await h.engine.find('sys_idp_group_mapping', {}, SYSTEM)) as Array<Record<string, unknown>>;
+    expect(rows.map((r) => r.organization_id)).toEqual([ORG_B]);
+  });
+
+  it('(S4) a connection whose every credential is revoked is refused at save', async () => {
+    const h = await boot();
+    await revokeScimConnectionCredential(h.engine as never, h.credentialId);
+    const refused = await saveMapping(h, { connectionId: CONNECTION, groupExternalId: 'okta-grp-sales', permissionSet: SALES });
+    expect(refused.status).toBe(400);
+    const error = (refused.body as { error: { code: string; fields: Array<{ field: string; code: string }> } }).error;
+    expect(error.code).toBe('VALIDATION_FAILED');
+    expect(error.fields.map((f) => [f.field, f.code])).toEqual([['connectionId', 'rule_violation']]);
+    expect(await h.engine.find('sys_idp_group_mapping', {}, SYSTEM)).toEqual([]);
   });
 });
