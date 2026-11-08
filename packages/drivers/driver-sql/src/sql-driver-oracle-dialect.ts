@@ -45,15 +45,15 @@
  *    SESSION's zone when it is compared with one — Thin otherwise opens the
  *    session in the process zone.
  *
- * The read half — a zone-less column presented as the UTC instant its wall
- * clock names — is the select-list wrap in `oracleTemporalSelect` (see
- * `sql-driver-filter-helpers.ts`), because a value node-oracledb has already
- * materialised in the process zone cannot be repaired after the fact.
+ *  - every zone-less column READ is presented as the UTC instant its wall
+ *    clock names ({@link oracleWallClockAsUtc}), exact on every host whose
+ *    process zone has no daylight-saving gap (`TZ=UTC` above all).
  */
 
 import knex, { type Knex } from 'knex';
 
 import type { SqlDialectName } from './schema-drift.js';
+import { withheldFilterError } from './sql-driver-top-level.js';
 
 /** The knex client spellings this module serves — `SqlDriver.ORACLE_CLIENTS`' only member. */
 export const ORACLE_KNEX_CLIENT = 'oracledb';
@@ -93,6 +93,68 @@ function rowLimitingClause(this: any, query: string): string {
   return out;
 }
 
+/** The node-oracledb type constants this module reads off the loaded driver. */
+interface OracleTypeConstants {
+  DB_TYPE_DATE?: unknown;
+  DB_TYPE_TIMESTAMP?: unknown;
+  DB_TYPE_RAW?: unknown;
+  DB_TYPE_TIMESTAMP_TZ?: unknown;
+}
+
+/**
+ * A zone-less value node-oracledb Thin materialised in the PROCESS zone, read
+ * back as the UTC instant its wall clock names.
+ *
+ * Thin builds the `Date` with the local constructor
+ * (`new Date(y, m - 1, d, h, mi, s, ms)`), so the local getters return the
+ * stored wall clock exactly — for every wall clock that EXISTS in the process
+ * zone. The one loss is a daylight-saving spring-forward gap: a stored
+ * `02:30` on the night New York skips `02:00–03:00` is constructed as `03:30`
+ * before this function sees it. Thin offers no hook ahead of that constructor
+ * (a fetch type of `TIMESTAMP WITH TIME ZONE` is refused, NJS-119; one of
+ * `… LOCAL TIME ZONE` converts client-side through the same local `Date` —
+ * both measured), so the documented remedy is a host whose process zone has
+ * no gap, `TZ=UTC`, under which this function is the identity.
+ */
+export function oracleWallClockAsUtc(value: unknown): unknown {
+  if (!(value instanceof Date) || Number.isNaN(value.getTime())) return value;
+  return new Date(Date.UTC(
+    value.getFullYear(), value.getMonth(), value.getDate(),
+    value.getHours(), value.getMinutes(), value.getSeconds(), value.getMilliseconds(),
+  ));
+}
+
+/**
+ * A `RAW(16)` value as the canonical lowercase, hyphenated UUID text — the
+ * `uuid` column class `@objectstack/spec`'s type matrix assigns `RAW(16)`
+ * (`SYS_GUID()` keys). Any other `RAW` width stays the `Buffer` node-oracledb
+ * returns.
+ */
+export function oracleRaw16AsUuid(value: unknown): unknown {
+  if (!(value instanceof Uint8Array) || value.length !== 16) return value;
+  const hex = Buffer.from(value).toString('hex');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+/**
+ * The `fetchTypeHandler` every statement this client runs is executed with
+ * (unless a caller passed its own): zone-less `DATE` / `TIMESTAMP` columns
+ * through {@link oracleWallClockAsUtc}, `RAW(16)` through
+ * {@link oracleRaw16AsUuid}. Every other column is fetched as node-oracledb
+ * fetches it.
+ */
+function oracleFetchTypeHandler(driver: OracleTypeConstants) {
+  return (metaData: { dbType?: unknown; byteSize?: number }) => {
+    if (metaData.dbType === driver.DB_TYPE_DATE || metaData.dbType === driver.DB_TYPE_TIMESTAMP) {
+      return { converter: oracleWallClockAsUtc };
+    }
+    if (metaData.dbType === driver.DB_TYPE_RAW && metaData.byteSize === 16) {
+      return { converter: oracleRaw16AsUuid };
+    }
+    return undefined;
+  };
+}
+
 let cachedClient: (new (config: Knex.Config) => unknown) | undefined;
 
 /**
@@ -119,9 +181,17 @@ export function oracleFederationClient(): new (config: Knex.Config) => unknown {
       return compiler;
     }
 
+    _query(connection: unknown, obj: { options?: Record<string, unknown> }): unknown {
+      const driver = this.driver as OracleTypeConstants | undefined;
+      if (driver && !obj.options?.fetchTypeHandler) {
+        obj.options = { ...obj.options, fetchTypeHandler: oracleFetchTypeHandler(driver) };
+      }
+      return super._query(connection, obj);
+    }
+
     prepBindings(bindings: unknown[]): unknown[] {
       const prepared = super.prepBindings(bindings) as unknown[];
-      const driver = this.driver as { DB_TYPE_TIMESTAMP_TZ?: unknown } | undefined;
+      const driver = this.driver as OracleTypeConstants | undefined;
       if (!driver?.DB_TYPE_TIMESTAMP_TZ) return prepared;
       return prepared.map((value) =>
         value instanceof Date ? { val: value, type: driver.DB_TYPE_TIMESTAMP_TZ } : value,
@@ -162,6 +232,76 @@ export function withOracleFederationClient(knexConfig: Record<string, any>): Rec
     },
   };
   return out;
+}
+
+/**
+ * A canonical UTC instant (`canonicalUtcDatetime`'s text) as the value an
+ * Oracle statement binds: a JavaScript `Date`, which the federation client
+ * sends as `TIMESTAMP WITH TIME ZONE` at `+00:00`. Oracle parses no text into
+ * a `DATE` / `TIMESTAMP` without an NLS format mask, and binding text against
+ * one raises ORA-01861 (measured on 23ai). A value that is not canonical text
+ * (an unparseable comparand the canonicaliser passed through) is returned
+ * unchanged, so Oracle refuses it rather than this line guessing.
+ */
+export function oracleInstantBinding(canonical: unknown): unknown {
+  if (typeof canonical !== 'string') return canonical;
+  const ms = Date.parse(canonical);
+  return Number.isNaN(ms) || !/Z$/.test(canonical) ? canonical : new Date(ms);
+}
+
+/**
+ * A calendar day (`YYYY-MM-DD`) as an Oracle binding: the instant of its UTC
+ * midnight, which a `DATE` column compares against at `00:00:00` in the
+ * UTC session. Anything else is returned unchanged (see
+ * {@link oracleInstantBinding}).
+ */
+export function oracleDayBinding(day: unknown): unknown {
+  if (typeof day !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(day)) return day;
+  return oracleInstantBinding(`${day}T00:00:00.000Z`);
+}
+
+/**
+ * The comparison operators whose answer Oracle's `'' IS NULL` rule changes.
+ * The pattern operators (`$contains`, `$startsWith`, `$endsWith`, `$like`) are
+ * not here: their pattern is built before binding (`'%' || '' || '%'` is never
+ * sent), and an Oracle column holds no `''` for `'%%'` to miss.
+ */
+const ORACLE_EMPTY_STRING_SENSITIVE_OPERATORS: ReadonlySet<string> = new Set([
+  '=', '$eq', '$ne', '$in', '$nin', '$gt', '$gte', '$lt', '$lte', '$between',
+]);
+
+/**
+ * Refuses a `''` comparand on an Oracle read, for the operators in
+ * {@link ORACLE_EMPTY_STRING_SENSITIVE_OPERATORS}.
+ *
+ * Oracle stores a zero-length `VARCHAR2` as `NULL`, and a bound `''` IS `NULL`
+ * there, so `col = ''` is never true and `col <> ''` never true either —
+ * measured on 23ai: `{ region: '' }` answered no rows and
+ * `{ region: { $ne: '' } }` answered only the `NULL` row, against a table where
+ * every other dialect answers the opposite. Answering either would be a
+ * silent wrong answer, so the filter is refused and names the spelling that
+ * does mean what the caller asked: `$null` / `$empty`.
+ */
+export function assertOracleComparandNotEmptyString(
+  operator: string,
+  field: string,
+  value: unknown,
+  subtree?: unknown,
+): void {
+  if (!ORACLE_EMPTY_STRING_SENSITIVE_OPERATORS.has(operator)) return;
+  const hasEmpty = value === '' || (Array.isArray(value) && value.includes(''));
+  if (!hasEmpty) return;
+  const why =
+    "an empty-string comparand on an Oracle table. Oracle stores '' as NULL and compares a bound '' as " +
+    "NULL, so the condition can never be true and would silently answer the wrong rows. Use " +
+    '{ "$null": true } (or "$empty") to match a missing value.';
+  const op = operator === '=' ? 'equality' : `operator "${operator}"`;
+  throw withheldFilterError(
+    `This filter uses ${op} with ${why} The field is withheld from the message; the full diagnostic is in ` +
+      'the server log.',
+    `Field "${field}" uses ${op} with ${why}`,
+    subtree,
+  );
 }
 
 /**

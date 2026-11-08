@@ -52,6 +52,7 @@ import type { SqlDriver } from './sql-driver.js';
 export interface DateBucketHost {
   readonly dateGranularityCapabilities: SqlDriver['dateGranularityCapabilities'];
   readonly isMysql: SqlDriver['isMysql'];
+  readonly isOracle: SqlDriver['isOracle'];
   readonly isPostgres: SqlDriver['isPostgres'];
   readonly isSqlite: SqlDriver['isSqlite'];
   sqliteTemporalArg: SqlDriver['sqliteTemporalArg'];
@@ -59,10 +60,32 @@ export interface DateBucketHost {
 }
 
 /** The body of `SqlDriver#buildDateBucketExpr`; the method's docblock there is its contract. */
-export function buildDateBucketExpr(this: Pick<DateBucketHost, 'dateGranularityCapabilities' | 'isMysql' | 'isPostgres' | 'isSqlite' | 'sqliteTemporalArg' | 'temporalFieldKind'>, field: string, granularity: 'day' | 'week' | 'month' | 'quarter' | 'year', table?: string | null): { sql: string; bindings: any[] } | null {
+export function buildDateBucketExpr(this: Pick<DateBucketHost, 'dateGranularityCapabilities' | 'isMysql' | 'isOracle' | 'isPostgres' | 'isSqlite' | 'sqliteTemporalArg' | 'temporalFieldKind'>, field: string, granularity: 'day' | 'week' | 'month' | 'quarter' | 'year', table?: string | null, column: string = field): { sql: string; bindings: any[] } | null {
   if (!this.dateGranularityCapabilities[granularity]) return null;
 
   const calendarDay = this.temporalFieldKind(table, field) === 'date';
+  // `field` is the FIELD — the registries (`temporalFieldKind`, the SQLite
+  // repair) are keyed by it; `column` is the identifier the statement names,
+  // the remote column an `external.columnMap` maps the field to.
+  if (column !== field) {
+    const bucket = buildDateBucketExpr.call(this, field, granularity, table);
+    return bucket && { sql: bucket.sql, bindings: bucket.bindings.map((b) => (b === field ? column : b)) };
+  }
+
+  if (this.isOracle) {
+    // A zone-less `DATE` / `TIMESTAMP` holds the UTC wall clock in this driver's
+    // canon and is labelled as stored; `SYS_EXTRACT_UTC` reads it in the UTC
+    // session unchanged, and brings a `TIMESTAMP WITH TIME ZONE` column to UTC
+    // before it is labelled. A `Field.date` keeps its calendar day.
+    const arg = calendarDay ? `??` : `sys_extract_utc(??)`;
+    switch (granularity) {
+      case 'year':    return { sql: `to_char(${arg}, 'YYYY')`, bindings: [field] };
+      case 'month':   return { sql: `to_char(${arg}, 'YYYY-MM')`, bindings: [field] };
+      case 'day':     return { sql: `to_char(${arg}, 'YYYY-MM-DD')`, bindings: [field] };
+      case 'quarter': return { sql: `to_char(${arg}, 'YYYY"-Q"Q')`, bindings: [field] };
+      case 'week':    return { sql: `to_char(${arg}, 'IYYY"-W"IW')`, bindings: [field] };
+    }
+  }
 
   if (this.isPostgres) {
     const arg = calendarDay ? `(??)::date::timestamp` : `(??)::timestamptz AT TIME ZONE 'UTC'`;

@@ -1170,21 +1170,24 @@ export class SqlDriver implements IDataDriver {
     field: string,
     granularity: 'day' | 'week' | 'month' | 'quarter' | 'year',
     table?: string | null,
+    column?: string,
   ): { sql: string; bindings: any[] } | null {
     // [#25521 cut 20] The body moved to `sql-driver-date-bucket.ts` (see `DateBucketHost`).
     const readDateGranularityCapabilities = () => this.dateGranularityCapabilities;
     const readIsMysql = () => this.isMysql;
+    const readIsOracle = () => this.isOracle;
     const readIsPostgres = () => this.isPostgres;
     const readIsSqlite = () => this.isSqlite;
     const host: ThisParameterType<typeof buildDateBucketExpr> = {
       get dateGranularityCapabilities() { return readDateGranularityCapabilities(); },
       get isMysql() { return readIsMysql(); },
+      get isOracle() { return readIsOracle(); },
       get isPostgres() { return readIsPostgres(); },
       get isSqlite() { return readIsSqlite(); },
       sqliteTemporalArg: (...a) => this.sqliteTemporalArg(...a),
       temporalFieldKind: (...a) => this.temporalFieldKind(...a),
     };
-    return buildDateBucketExpr.call(host, field, granularity, table);
+    return buildDateBucketExpr.call(host, field, granularity, table, column);
   }
 
   /**
@@ -8936,6 +8939,7 @@ export class SqlDriver implements IDataDriver {
       buildDateBucketExpr: (...a) => driver.buildDateBucketExpr(...a),
       get config() { return driver.config; },
       get isMysql() { return driver.isMysql; },
+      get isOracle() { return driver.isOracle; },
       get isPostgres() { return driver.isPostgres; },
       get isSqlite() { return driver.isSqlite; },
       get knex() { return driver.knex; },
@@ -9078,6 +9082,7 @@ export class SqlDriver implements IDataDriver {
       filterColumnExpr: (...a) => driver.filterColumnExpr(...a),
       isJsonColumn: (...a) => driver.isJsonColumn(...a),
       get isMysql() { return driver.isMysql; },
+      get isOracle() { return driver.isOracle; },
       isNonTextColumn: (...a) => driver.isNonTextColumn(...a),
       get isSqlite() { return driver.isSqlite; },
       jsonColumnFieldClass: (...a) => driver.jsonColumnFieldClass(...a),
@@ -9288,6 +9293,7 @@ export class SqlDriver implements IDataDriver {
       get datetimeFields() { return driver.datetimeFields; },
       get fileColumnsMoved() { return driver.fileColumnsMoved; },
       get isMysql() { return driver.isMysql; },
+      get isOracle() { return driver.isOracle; },
       get isSqlite() { return driver.isSqlite; },
       get jsonFields() { return driver.jsonFields; },
       get mediaFields() { return driver.mediaFields; },
