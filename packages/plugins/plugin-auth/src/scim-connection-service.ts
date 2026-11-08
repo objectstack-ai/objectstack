@@ -274,6 +274,24 @@ export interface ScimBearerVerification {
 }
 
 /**
+ * Is credential `row` live — affirmatively `active` and not expired? The one
+ * reading of a credential row's liveness: the bearer verifier below refuses a
+ * row this answers `false` for, and the IdP group mapping door reads a
+ * connection's owning organization from live rows only, so a revoked credential
+ * never decides anything.
+ */
+export function scimCredentialIsLive(row: Record<string, unknown>, now: number = Date.now()): boolean {
+  // sqlite hands booleans back as 0/1 — refuse anything not affirmatively active.
+  const active = row.active;
+  if (active === false || active === 0 || active == null) return false;
+  const rawExpiry = row.expires_at;
+  if (rawExpiry == null) return true;
+  const parsed = new Date(rawExpiry as string);
+  if (Number.isNaN(parsed.getTime())) return false; // unreadable expiry fails closed
+  return parsed.getTime() > now;
+}
+
+/**
  * Application-owned bearer verification for the stable scim plugin: digest the
  * presented token, probe the credential store by digest (unique index), refuse
  * inactive or expired rows, and resolve the connection from the row.
@@ -295,18 +313,9 @@ export async function verifyScimBearerToken(
     // A storage fault reads as "cannot verify", never as "verified".
     return null;
   }
-  if (!row) return null;
-  // sqlite hands booleans back as 0/1 — refuse anything not affirmatively active.
-  const active = (row as { active?: unknown }).active;
-  if (active === false || active === 0 || active == null) return null;
+  if (!row || !scimCredentialIsLive(row)) return null;
   const rawExpiry = (row as { expires_at?: unknown }).expires_at;
-  let expiresAt: Date | undefined;
-  if (rawExpiry != null) {
-    const parsed = new Date(rawExpiry as string);
-    if (Number.isNaN(parsed.getTime())) return null; // unreadable expiry fails closed
-    if (parsed.getTime() <= Date.now()) return null;
-    expiresAt = parsed;
-  }
+  const expiresAt = rawExpiry != null ? new Date(rawExpiry as string) : undefined;
   const connectionId = String((row as { connection_id?: unknown }).connection_id ?? '');
   if (!connectionId) return null;
   const domain = (row as { provisioning_domain_id?: unknown }).provisioning_domain_id;

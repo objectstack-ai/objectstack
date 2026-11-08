@@ -36,29 +36,36 @@
  * or an uninstall racing the record write. A later base under the same id —
  * a Studio duplicate also defaults to `<sourceId>-copy` — must not inherit
  * the purge. So the record also keeps the base's `instance`: the `version` and
- * `created_at` of the base's row in the package store (`sys_packages`, read
- * through the `package` service's `get`). The store mints `created_at` when it
- * first inserts the row, keeps it when the same base is published again, and
- * an uninstall deletes the row, so a later base under the same id gets a row of
- * its own. The purge reads the row again and answers 404 when it is gone or its
- * `created_at` differs.
+ * `created_at` of the base's row in the package store (`sys_packages`). At
+ * install they come from the import's own answer (`baseInstance`, #31530): the
+ * package service's `publish` answers the `created_at` the row holds after its
+ * write (the stamp it bound for a new row, the row's own for one already
+ * stored), so the door never reads the row back after the copy. The store sets `created_at`
+ * when it first inserts the row, keeps it when the same base is published
+ * again, and an uninstall deletes the row, so a later base under the same id
+ * gets a row of its own. The purge reads the row through the `package`
+ * service's `get` and answers 404 when it is gone or its `created_at` differs.
  *
  * What it leaves:
  *   - a runtime with no `package` service persists no base row; the record
  *     then holds no `instance`, and the purge's reach is by id alone — the
  *     condition above stays open there (such a base does not survive a
  *     restart either);
- *   - `created_at` is the store's `CURRENT_TIMESTAMP`, so a base uninstalled
+ *   - `created_at` is a `YYYY-MM-DD HH:MM:SS` UTC stamp, so a base uninstalled
  *     and re-created under the same id within the same second shares it;
+ *   - a package service whose `publish` states no stamp (including one whose
+ *     read of an already-stored row before its write faulted) leaves the import with
+ *     no `baseInstance`; the door then writes no record and `copyRecord` says
+ *     so (it fails closed, and no door writes that record later: the record's
+ *     proof is the door's own act at install, and neither the base row nor
+ *     its receipt marks a base as a copy, #31425);
  *   - the store's `get` catches an ordinary driver error (a lock timeout, a
  *     dropped connection), logs it and answers `null`; only its
- *     seam-unreadable refusal is thrown. So a passing store error reads as
- *     "no row": at purge the copy answers 404 (the purge refuses, nothing is
- *     deleted), and at install no record is written and `copyRecord` says so;
- *     no door writes that record later: the record's proof is the door's own
- *     act at install, and neither the base row nor its receipt marks a base as
- *     a copy (#31425). Both fail closed. Only the seam refusal reaches the
- *     purge as a 503.
+ *     seam-unreadable refusal is thrown. At install this no longer matters
+ *     (#31530: nothing is read there). At purge, reseed and count a passing
+ *     store error reads as "no row", and the copy answers 404 (the door
+ *     refuses, nothing is deleted); it fails closed, and the next call reads
+ *     the row again. Only the seam refusal reaches those doors as a 503.
  */
 
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';

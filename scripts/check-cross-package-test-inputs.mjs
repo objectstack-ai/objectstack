@@ -1244,9 +1244,16 @@ function findUpSeeds(src, hereDepth, fileSegs, ownPackageName) {
  * `--self-test` pins the shapes that must keep flagging AND the shapes that must
  * not; an added spelling without an added case is the next silent regression.
  */
-function scanPathExpressions(src, hereDepth, fileSegs = null, ownPackageName = null) {
+export function scanPathExpressions(src, hereDepth, fileSegs = null, ownPackageName = null) {
   const known = new Map();
   const escapes = [];
+  // Every path-argument read, with what its argument resolved to (`null` when
+  // nothing here could read it). This gate judges escapes and needs no more;
+  // `ui/scripts/select-affected-tests.mjs` reads it to attribute a disk-reading
+  // test to the packages it reads, and keeps the test always-on when any entry
+  // is `null` or unnamed -- an unread argument must cost it the attribution,
+  // never pass as "reads nothing" (objectstack#31520).
+  const reads = [];
   const files = new Set();
   const dirs = new Set();
   // Module specifiers this file imports from outside the package, as the
@@ -1308,6 +1315,7 @@ function scanPathExpressions(src, hereDepth, fileSegs = null, ownPackageName = n
     n += 1;
     const first = splitTopLevel(args)[0];
     const info = known.get(first) ?? pathExpression(first, hereDepth, known, fileSegs);
+    reads.push({ fn, info: info ?? null });
     if (DIR_ARG_READS.has(fn) && (!info || info.segs === null)) anonymousDescent = true;
     collect(DIR_ARG_READS.has(fn) ? dirs : files, info);
     // A bare binding here was already judged at its declaration; reporting it a
@@ -1335,7 +1343,7 @@ function scanPathExpressions(src, hereDepth, fileSegs = null, ownPackageName = n
     if (info.segs?.length && !info.vendored) imports.add(info.segs.join('/'));
   }
   const walkRoots = anonymousDescent ? descentRoots(src, hereDepth, fileSegs, known) : new Set();
-  return { escapes, files, dirs, imports, walkRoots };
+  return { escapes, files, dirs, imports, walkRoots, reads };
 }
 
 /**
@@ -3341,6 +3349,63 @@ function selfTest() {
       CO,
     ).includes('scripts/sync-template-versions.mjs'),
   );
+  {
+    // `reads` lists every path-argument read, an unreadable argument included
+    // as `null` -- the selector's fail-closed attribution rests on that entry.
+    const { reads } = scanPathExpressions(
+      "const HERE = dirname(fileURLToPath(import.meta.url));\n" +
+        "readFileSync(join(HERE, '..', 'index.ts'), 'utf8');\n" +
+        'readFileSync(someVariable);',
+      1,
+      CO,
+    );
+    ok(
+      '`reads` names a resolved read and keeps an unreadable one as null (objectstack#31520)',
+      reads.length === 2 &&
+        reads[0].info?.segs?.join('/') === 'packages/create-objectstack/index.ts' &&
+        reads[1].info === null,
+    );
+  }
+  {
+    // The UI test selector attributes a disk-reading test through `reads`
+    // (ui/scripts/select-affected-tests.mjs, `readRadius`). CI's ui filter does
+    // not list this file, so a walker-only edit would skip Test UI; this case
+    // drives the selector's own reading here instead (objectstack#31520). A
+    // child process does the import: the selector imports this module back.
+    const selector = pathToFileURL(join(REPO_ROOT, 'ui', 'scripts', 'select-affected-tests.mjs')).href;
+    const probe = spawnSync(
+      process.execPath,
+      [
+        '--input-type=module',
+        '-e',
+        `const S = await import(${JSON.stringify(selector)});\n` +
+          "const packages = [{ name: '@fx/own', dir: 'packages/own' }, { name: '@fx/other', dir: 'packages/other' }];\n" +
+          "const seed = \"import { readFileSync } from 'node:fs';\\nimport { dirname, join } from 'node:path';\\n" +
+          "import { fileURLToPath } from 'node:url';\\nconst HERE = dirname(fileURLToPath(import.meta.url));\\n\";\n" +
+          "const at = (read) => { const r = S.readRadius({ rel: 'packages/own/src/x.test.ts', source: `${seed}${read};\\n`, " +
+          "packages, prefix: '', walker: S.PATH_WALKER }); return r === null ? null : [...r]; };\n" +
+          'console.log(JSON.stringify({ walker: typeof S.PATH_WALKER, ' +
+          "own: at(\"readFileSync(join(HERE, '..', 'fixtures', 'x.json'))\"), " +
+          "other: at(\"readFileSync(join(HERE, '..', '..', 'other', 'src', 'index.ts'))\"), " +
+          "unread: at('readFileSync(someVariable)') }));",
+      ],
+      { encoding: 'utf8' },
+    );
+    let got = null;
+    try {
+      got = JSON.parse((probe.stdout || '').trim().split('\n').pop());
+    } catch {
+      got = null;
+    }
+    ok(
+      "the UI test selector's readRadius, driven through this walker, bounds an own and a cross-package read and refuses an unread one (objectstack#31520)",
+      probe.status === 0 &&
+        got?.walker === 'function' &&
+        JSON.stringify(got.own) === '["packages/own"]' &&
+        JSON.stringify(got.other) === '["packages/other"]' &&
+        got.unread === null,
+    );
+  }
   ok(
     'reconstructs an ascent-relative literal (metadata-protocol -> the durability gate)',
     named(

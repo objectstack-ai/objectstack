@@ -32,8 +32,8 @@
  *     administrator" is not a fact stored on `sys_user` at all. It lives in the
  *     two tables `resolveAdminUserIds` enumerates, so it is taken away by
  *     writing THEM: downgrading (or deleting) the `sys_member` row that carries
- *     the `owner`/`admin` grade — better-auth's `updateMemberRole`, a SCIM
- *     group-mapping change — or deleting the `admin_full_access`
+ *     the `owner`/`admin` grade — better-auth's `updateMemberRole`, an
+ *     import, a script — or deleting the `admin_full_access`
  *     `sys_user_permission_set` grant, or editing it until it no longer counts
  *     (re-pointed at another set, scoped to an organization, moved outside its
  *     ADR-0091 validity window). The end state is identical to (2): everyone is
@@ -118,7 +118,8 @@
  *
  * The standing halves judge EVERY membership downgrade, not only a caller
  * downgrading themselves. Narrowing to self-downgrade would miss the case that
- * actually happens: an IdP group mapping that rewrites other people's roles.
+ * actually happens: an administrator, an import or a script rewriting other
+ * people's roles.
  *
  * ## What counts as an administrator
  *
@@ -557,11 +558,13 @@ const OP_WORDS: Record<GuardedOp, OpWords> = {
  * shape actually comes from, so the operator goes and fixes the source instead
  * of this guard.
  *
- * The two identity tables are written by IdP integrations, so their refusals
- * point at the SCIM group mapping. The activation ledger is not — nothing in
- * SCIM or better-auth writes it; a disable action, an upgrade step or a script
- * does. Sending THAT operator to look at an IdP group would send them into a
- * system they may not even run.
+ * The two identity tables are written by administrators, better-auth's own
+ * membership doors, imports and scripts — never by an identity provider's group
+ * mapping, which grants only ordinary permission sets inside the organization
+ * boundary (`sys_idp_group_mapping`, refused at save otherwise), so it can
+ * neither confer nor take away administrator standing. Their refusals send the
+ * operator to grant standing elsewhere first. The activation ledger is written
+ * by a disable action, an upgrade step or a script, and says so.
  */
 function standingOrigin(table: string, noun: string, op?: GuardedOp): string {
   if (op === 'organization-insert') {
@@ -597,8 +600,9 @@ function standingOrigin(table: string, noun: string, op?: GuardedOp): string {
     );
   }
   return (
-    `If the ${noun} came from an identity provider, the SCIM group mapping is too broad — fix ` +
-    'the IdP group, not this guard.'
+    `If the ${noun} came from an import, a script or an administrator, grant another account ` +
+    'administrator standing first, then make the change. An identity provider group mapping never ' +
+    'moves administrator standing: it grants ordinary permission sets only.'
   );
 }
 
@@ -1943,9 +1947,9 @@ export function registerLastAdminGuard(
     if (ctx.object !== SystemObjectName.MEMBER) return;
     const data = (ctx.input?.data ?? {}) as Record<string, unknown>;
     // The whole downgrade family lands here: better-auth's `updateMemberRole`,
-    // a SCIM group-mapping change, an import, a script. It is NOT narrowed to
-    // "the caller downgrading themselves" — an IdP writes these on everyone's
-    // behalf, which is exactly the case ADR-0135 D5.2 exists for.
+    // an import, a script. It is NOT narrowed to "the caller downgrading
+    // themselves" — those write on everyone's behalf, which is exactly the
+    // case ADR-0135 D5.2 exists for.
     //
     // A payload touching neither `role` nor `user_id` provably cannot move the
     // enumeration (see MEMBER_STANDING_KEYS), so it costs no reads at all.
