@@ -3307,6 +3307,10 @@ export default class Serve extends Command {
       // `stackBootPlugins` [#22371], the list `os migrate
       // security-catalog-overlays --dev` composes too.
       let plugins: any[] = stackBootPlugins(config, flags.dev);
+      // Where `devPlugins` sit in that list (after the stack's own `plugins`),
+      // so an entry that does not load is named by the list it was written in.
+      const authoredPluginCount = stackBootPlugins(config, false).length;
+      const bootPluginCount = plugins.length;
 
       // 1. Auto-register ObjectQL Plugin if objects define but plugins missing
       // [#15006] The whole gate — the `objects` read AND the already-composed
@@ -4765,7 +4769,11 @@ export default class Serve extends Command {
             trackPlugin(pluginName);
           } catch (e: any) {
             console.error(chalk.red(`  ✗ Failed to load plugin: ${e.message}`));
-            unloadedStackPlugins.push({ index, entry: plugin, materialized, error: e });
+            unloadedStackPlugins.push(
+              index >= authoredPluginCount && index < bootPluginCount
+                ? { list: 'devPlugins', index: index - authoredPluginCount, entry: plugin, materialized, error: e }
+                : { index, entry: plugin, materialized, error: e },
+            );
           }
         }
       }
@@ -6390,11 +6398,18 @@ export function cryptoProviderPlugins(composed: Iterable<unknown>): Array<{ name
     if (typeof name === 'string') byName.set(name, candidate as object);
   }
   return [...byName]
-    .filter(([, plugin]) => {
-      const provides = (plugin as { providesServices?: unknown }).providesServices;
-      return Array.isArray(provides) && provides.includes(CRYPTO_PROVIDER_SERVICE);
-    })
+    .filter(([, plugin]) => declaresCryptoProvider(plugin))
     .map(([name, plugin]) => ({ name, plugin }));
+}
+
+/**
+ * Does this plugin (or entry) declare, in `providesServices` (ADR-0116), that
+ * it registers {@link CRYPTO_PROVIDER_SERVICE}? The one predicate behind
+ * {@link cryptoProviderPlugins} and {@link refuseUnloadedCryptoProviderPlugins}.
+ */
+function declaresCryptoProvider(plugin: object): boolean {
+  const provides = (plugin as { providesServices?: unknown }).providesServices;
+  return Array.isArray(provides) && provides.includes(CRYPTO_PROVIDER_SERVICE);
 }
 
 /**
@@ -6421,7 +6436,9 @@ export function refuseTwoCryptoProviderPlugins(composed: Iterable<unknown>): voi
 
 /** A `plugins` entry `os serve` could not load: {@link refuseUnloadedCryptoProviderPlugins}. */
 export interface UnloadedStackPlugin {
-  /** Its position in the stack's `plugins`. */
+  /** The list the entry was written in; `plugins` when absent. */
+  list?: 'plugins' | 'devPlugins';
+  /** Its position in that list. */
   index: number;
   /** The entry as the config wrote it. */
   entry: unknown;
@@ -6438,12 +6455,13 @@ export interface UnloadedStackPlugin {
  * setting, and the host chooses it once at `kernel:ready`
  * ({@link createHostCryptoProvider}). A boot that goes on without the plugin
  * that provides it would choose another one, so it does not go on. An entry is
- * ruled out only by what it says it provides: the plugin it materialized to
- * (or the entry itself, when it is an object) has a `providesServices`
- * (ADR-0116) that does not name the provider. An entry that never
- * materialized (a package specifier that does not resolve or import) says
- * nothing, and is refused. Every other unloaded entry keeps the boot's
- * existing handling: it is printed and the boot goes on without it.
+ * judged by what it says it provides, read as {@link cryptoProviderPlugins}
+ * reads it: the plugin it materialized to (or the entry itself, when it is an
+ * object) is refused when its `providesServices` (ADR-0116) names the
+ * provider, and ruled out when it declares other services or declares none.
+ * An entry that never materialized (a package specifier that does not resolve
+ * or import) says nothing, and is refused. Every ruled-out entry keeps the
+ * boot's existing handling: it is printed and the boot goes on without it.
  *
  * The one-shot secret commands keep the same rule over the same host config.
  */
@@ -6453,14 +6471,13 @@ export function refuseUnloadedCryptoProviderPlugins(unloaded: readonly UnloadedS
       ? materialized
       : entry && typeof entry === 'object' ? entry : undefined;
     if (!said) return true;
-    const provides = (said as { providesServices?: unknown }).providesServices;
-    return Array.isArray(provides) && provides.includes(CRYPTO_PROVIDER_SERVICE);
+    return declaresCryptoProvider(said);
   });
   if (refused.length === 0) return;
-  const label = ({ index, entry, materialized }: UnloadedStackPlugin): string => {
-    if (typeof entry === 'string') return `plugins[${index}] ('${entry}')`;
+  const label = ({ list = 'plugins', index, entry, materialized }: UnloadedStackPlugin): string => {
+    if (typeof entry === 'string') return `${list}[${index}] ('${entry}')`;
     const name = (materialized as { name?: unknown } | null | undefined)?.name ?? (entry as { name?: unknown } | null)?.name;
-    return typeof name === 'string' ? `plugins[${index}] ('${name}')` : `plugins[${index}]`;
+    return typeof name === 'string' ? `${list}[${index}] ('${name}')` : `${list}[${index}]`;
   };
   const reason = (error: unknown): string => (error instanceof Error ? error.message : String(error));
   throw new HostCryptoProviderRefusal(

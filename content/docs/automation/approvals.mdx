@@ -142,7 +142,7 @@ export const opportunityApproval: Flow = {
       config: {
         triggerType: 'record-after-update',
         objectName: 'opportunity',
-        condition: "record.amount >= 50000 && record.stage == 'proposal'",
+        condition: "record.amount != null && record.amount >= 50000 && record.stage == 'proposal'",
       },
     },
     {
