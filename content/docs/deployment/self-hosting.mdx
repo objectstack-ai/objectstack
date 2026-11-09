@@ -475,7 +475,12 @@ then treats the deployment as multi-node and **refuses to boot without an
 explicit `OS_SECRET_KEY`** rather than minting per-node keys that can't
 decrypt each other's secrets. All replicas must share the same
 `OS_SECRET_KEY`, `OS_AUTH_SECRET`, and database. See
-[Cluster](/docs/kernel/cluster).
+[Cluster](/docs/kernel/cluster). A database local to each replica cannot be
+shared — SQLite (the default when `OS_DATABASE_URL` is unset), sqlite-wasm, or
+libSQL over a `file:` URL — so once several replicas are declared over the
+redis cluster driver, `os serve` refuses to start on one, exits 1 and names a
+Postgres `OS_DATABASE_URL` instead. A libSQL server URL (`libsql://…`) is one
+shared database and is not refused.
 
 **Uploads need S3 or one shared volume once replicas are declared.** The
 default local storage adapter writes uploads to the replica's own disk, so a

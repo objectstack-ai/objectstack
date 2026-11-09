@@ -29,6 +29,7 @@
  * evaluation cycle. `index.ts` re-exports nothing from this module.
  */
 
+import { clearConcurrentIndexDeferral } from './pg-concurrent-index.js';
 import { isRefusedSchemaWork, type PendingSchemaWork } from './schema-drift.js';
 import type { SqlDriver } from './sql-driver.js';
 
@@ -40,6 +41,7 @@ import type { SqlDriver } from './sql-driver.js';
  * assigns.
  */
 export interface DeferredDdlHost {
+  readonly concurrentIndexState: SqlDriver['concurrentIndexState'];
   deferredDdl: SqlDriver['deferredDdl'];
   readonly deferredSchemaObjects: SqlDriver['deferredSchemaObjects'];
   flushingDeferredDdl: SqlDriver['flushingDeferredDdl'];
@@ -62,7 +64,10 @@ export class DeferredDdlFacet {
   }
 
   /** The body of `SqlDriver#flushDeferredSchemaDdl`; the method's docblock there is its contract. */
-  static async flushDeferredSchemaDdl(this: Pick<DeferredDdlHost, 'deferredDdl' | 'deferredSchemaObjects' | 'flushingDeferredDdl' | 'initObjects' | 'previewDeferredSchemaWork'>): Promise<PendingSchemaWork[]> {
+  static async flushDeferredSchemaDdl(this: Pick<DeferredDdlHost, 'concurrentIndexState' | 'deferredDdl' | 'deferredSchemaObjects' | 'flushingDeferredDdl' | 'initObjects' | 'previewDeferredSchemaWork'>): Promise<PendingSchemaWork[]> {
+    // #31901: an operator's run waits for itself; it does not inherit the
+    // concurrent index builds' deferral window an earlier sync opened.
+    clearConcurrentIndexDeferral(this.concurrentIndexState);
     const pending = [...this.deferredSchemaObjects.values()];
     if (pending.length === 0) {
       this.deferredDdl = false;
