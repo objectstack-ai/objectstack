@@ -57,7 +57,10 @@
  * an account a session.
  *
  * Both answer better-auth's `FORBIDDEN` with `code: 'PERMISSION_DENIED'`. A
- * read of the row that throws refuses too: an unknown kind is not a person.
+ * read of the row that throws refuses too, since an unknown kind is not a
+ * person, but as what it is: `503 SERVICE_UNAVAILABLE` saying the user record
+ * could not be read ({@link USER_ROW_READ_FAULT_REFUSAL}), with the cause
+ * logged once. A database outage never reads as "this is an AI service account".
  */
 
 import { SystemObjectName } from '@objectstack/spec/system';
@@ -92,6 +95,18 @@ export const AGENT_ACCOUNT_CREDENTIAL_REFUSAL = Object.freeze({
   message:
     'An AI service account holds no password and no sign-in provider link. It acts only through API keys that its '
       + 'owner or an administrator creates for it.',
+});
+
+/**
+ * The refusal when the user's own record could not be read, so whether the
+ * user is an AI service account was never decided. A server-side outage, not
+ * a verdict on the user: `503`, and the caller may try again.
+ */
+export const USER_ROW_READ_FAULT_REFUSAL = Object.freeze({
+  code: 'SERVICE_UNAVAILABLE',
+  message:
+    'The user record could not be read, so this sign-in was not completed. This is a temporary server-side '
+      + 'problem, not a refusal of the user: try again in a moment.',
 });
 
 /**
@@ -147,18 +162,38 @@ async function forbidden(refusal: { code: string; message: string }): Promise<ne
 }
 
 /**
+ * Fail closed on a read that threw: log the cause once (its class and message,
+ * never the session or credential being written) and refuse with the 503
+ * read-fault refusal.
+ */
+async function readFault(door: 'session' | 'credential', cause: unknown): Promise<never> {
+  const what = cause instanceof Error ? `${cause.name}: ${cause.message}` : String(cause);
+  console.warn(
+    `[plugin-auth] the ${door} was refused because the user record could not be read to tell a person from an `
+      + `AI service account (ADR-0151 D2): ${what}`,
+  );
+  const { APIError } = await import('better-auth/api');
+  const err = new APIError('SERVICE_UNAVAILABLE', {
+    code: USER_ROW_READ_FAULT_REFUSAL.code,
+    message: USER_ROW_READ_FAULT_REFUSAL.message,
+  });
+  (err as { cause?: unknown }).cause = cause;
+  throw err;
+}
+
+/**
  * [D2] Refuse a session for an AI service account. Composed FIRST into
  * `session.create.before`, so it holds for every sign-in method,
  * impersonation and every administrator- or server-minted session. A read of
- * the row that fails refuses too.
+ * the row that fails refuses with {@link USER_ROW_READ_FAULT_REFUSAL}.
  */
 export async function refuseAgentAccountSession(engine: any, session: unknown): Promise<void> {
   const userId = (session as { userId?: unknown } | null | undefined)?.userId;
   let agent: boolean;
   try {
     agent = await isAgentAccountUser(engine, userId);
-  } catch {
-    agent = true;
+  } catch (cause) {
+    return readFault('session', cause);
   }
   if (agent) await forbidden(AGENT_ACCOUNT_SESSION_REFUSAL);
 }
@@ -166,15 +201,15 @@ export async function refuseAgentAccountSession(engine: any, session: unknown): 
 /**
  * [D2] Refuse a `sys_account` row (a password, a social or SSO link) for an
  * AI service account. Composed FIRST into `account.create.before`. A read of
- * the row that fails refuses too.
+ * the row that fails refuses with {@link USER_ROW_READ_FAULT_REFUSAL}.
  */
 export async function refuseAgentAccountCredential(engine: any, account: unknown): Promise<void> {
   const a = account as { userId?: unknown; user_id?: unknown } | null | undefined;
   let agent: boolean;
   try {
     agent = await isAgentAccountUser(engine, a?.userId ?? a?.user_id);
-  } catch {
-    agent = true;
+  } catch (cause) {
+    return readFault('credential', cause);
   }
   if (agent) await forbidden(AGENT_ACCOUNT_CREDENTIAL_REFUSAL);
 }

@@ -41,6 +41,7 @@ import {
   AGENT_ACCOUNT_SESSION_REFUSAL,
   refuseAgentAccountCredential,
   refuseAgentAccountSession,
+  USER_ROW_READ_FAULT_REFUSAL,
 } from './service-account-identity';
 // [#23184] Vendor modules paid at module load, never inside a clocked case.
 import 'better-auth';
@@ -273,17 +274,33 @@ describe.concurrent('ADR-0151 D2 — an AI service account holds no password and
   });
 });
 
-describe.concurrent('ADR-0151 D2 — a read of the row that fails refuses', () => {
+describe('ADR-0151 D2 — a read of the row that fails refuses as an outage, not as an account', () => {
   // The kind lives on the row, so a read that fails cannot tell a person from
-  // an account. Both refusals treat it as an account: a sign-in fails closed.
-  const brokenEngine = { find: vi.fn(async () => { throw new Error('db down'); }) };
+  // an account. Both refusals fail closed, but say what happened: 503, "the
+  // user record could not be read", never the AI service account refusal a
+  // person would otherwise see during a database outage. The cause is logged.
+  const brokenEngine = () => ({ find: vi.fn(async () => { throw new Error('db down'); }) });
 
-  it('a session whose user row cannot be read is refused', async () => {
-    await expectRejectedWith(refuseAgentAccountSession(brokenEngine, { userId: 'u_any' }), AGENT_ACCOUNT_SESSION_REFUSAL);
+  const expectReadFault = async (promise: Promise<unknown>) => {
+    const err: any = await promise.then(() => undefined, (e) => e);
+    expect(err, 'the call was refused').toBeDefined();
+    expect(err.statusCode ?? err.status).toBe(503);
+    expect(err.body?.code).toBe(USER_ROW_READ_FAULT_REFUSAL.code);
+    expect(err.body?.message).toBe(USER_ROW_READ_FAULT_REFUSAL.message);
+    expect(err.body?.message).not.toBe(AGENT_ACCOUNT_SESSION_REFUSAL.message);
+    expect(err.body?.message).not.toBe(AGENT_ACCOUNT_CREDENTIAL_REFUSAL.message);
+  };
+
+  it('a session whose user row cannot be read is refused as a read fault, and the cause is logged', async () => {
+    await expectReadFault(refuseAgentAccountSession(brokenEngine(), { userId: 'u_any' }));
+    const logged = (console.warn as any).mock.calls.map((c: unknown[]) => String(c[0]));
+    expect(logged.some((l: string) => l.includes('session') && l.includes('db down'))).toBe(true);
   });
 
-  it('a credential whose user row cannot be read is refused', async () => {
-    await expectRejectedWith(refuseAgentAccountCredential(brokenEngine, { userId: 'u_any' }), AGENT_ACCOUNT_CREDENTIAL_REFUSAL);
+  it('a credential whose user row cannot be read is refused as a read fault, and the cause is logged', async () => {
+    await expectReadFault(refuseAgentAccountCredential(brokenEngine(), { userId: 'u_any' }));
+    const logged = (console.warn as any).mock.calls.map((c: unknown[]) => String(c[0]));
+    expect(logged.some((l: string) => l.includes('credential') && l.includes('db down'))).toBe(true);
   });
 
   it('CONTROL: a readable person row passes both', async () => {
