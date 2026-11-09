@@ -174,6 +174,20 @@ A release artifact MAY carry N package manifests. Everything inside one artifact
 one file and installed in one act. That joint delivery **is** the ownership proof; nothing else
 needs to assert it.
 
+> **Note (2026-11-09, [#31685](https://github.com/objectstack-ai/objectstack/issues/31685)) — what
+> co-ownership does not decide: how a reference between two packages of one artifact resolves.**
+> The CLI's picklist-reference check and the post-seal install judge read the paragraph above as
+> letting a package resolve a list a sibling package of the same artifact owns, with no declared
+> dependency (`packages/cli/src/utils/picklist-references.ts`). That allowance narrows to declared
+> dependencies: a bare reference resolves from the referring package's own items, then the unique
+> holder in its declared dependency closure (ADR-0141, plus `sys`), else it is refused naming every
+> candidate ([ADR-0150](./0150-behavioural-metadata-addressed-by-package-objects-keep-the-literal-prefix.md)
+> D3). A sibling in the same artifact is in that closure only when the referring package's manifest
+> declares it, and the author's fix is that one `dependencies` entry. Maintainer ruling N1 on
+> #31678, recorded in
+> [#31678 comment 6729820123](https://github.com/objectstack-ai/objectstack/issues/31678#issuecomment-6729820123).
+> D1's co-ownership claim, and the install gate it corrects, are unchanged.
+
 Therefore the install gate's criterion is corrected from *"is this the same package id?"* to
 *"are these co-owners within one artifact?"*. This is not a new permission being granted; it is
 an existing check being asked the question it was always meant to ask. The 2026-08-06 ruling
