@@ -1927,6 +1927,11 @@ function refuseNonPictureImageField(
  *    repeating the literal);
  *  - the field is of such a type without `valueDomain: 'iso_4217_currency'`.
  *
+ * Amended 2026-11-09 (#31743, ruling A): a two-segment pointer
+ * `PARENT_FIELD.CODE_FIELD` follows the parent's code instead, and is judged
+ * by {@link refuseDishonestRecordCurrencyPath}; the three refusals above are
+ * for the one-segment pointer.
+ *
  * Judged against the AUTHORED field map. Not judged on
  * `ObjectExtensionSchema`: an extension's fields merge into an object it does
  * not hold, so its pointer may name a field only the owner declares.
@@ -1954,6 +1959,10 @@ function refuseDishonestRecordCurrencyField(
         ? `candidates: ${candidates.map((c) => `\`${c}\``).join(', ')}.`
         : 'the object has none; declare one, conventionally `currency_code: Field.text({ valueDomain: \'iso_4217_currency\' })`.');
     const path = ['fields', name, 'currencyConfig', 'currencyField'];
+    if (target.includes('.')) {
+      refuseDishonestRecordCurrencyPath(objectName, name, field, target, map, path, ctx);
+      continue;
+    }
     const declared = target !== name && Object.prototype.hasOwnProperty.call(map, target);
     if (!declared) {
       ctx.addIssue({
@@ -1983,6 +1992,86 @@ function refuseDishonestRecordCurrencyField(
           + `currency. Add \`valueDomain: 'iso_4217_currency'\` to \`${target}\`, or point at another field. ${prescription}`,
       });
     }
+  }
+}
+
+/**
+ * [ADR-0144 D2, amended 2026-11-09 by #31743] The half of a two-segment
+ * `currencyField` (`PARENT_FIELD.CODE_FIELD`) that the amount's own object can
+ * see. Ruling A, recorded in 6739066323: "`currencyField` may name
+ * `<master_detail field>.<parent code field>`, so a child follows its
+ * parent's currency by construction". The amended D2 note: "The two-segment
+ * form is admitted only when its first segment is a `master_detail` field of
+ * the amount's own object and its second names, on that field's target
+ * object, a code field of the kind the first bullet requires. The ruling
+ * names `master_detail` only, so a path through a `lookup` stays refused."
+ *
+ * Refused here, at the pointer, each with its remedy:
+ *
+ *  - a `summary` naming a path. The roll-up sits on the parent and is in the
+ *    parent's currency (D6, amended), whose code field is the roll-up's own
+ *    sibling, so it names that field in one segment;
+ *  - segment 1 is no declared field of this object;
+ *  - segment 1 is a `lookup` (the ruling names `master_detail` only) or any
+ *    other non-`master_detail` field.
+ *
+ * Segment 2 lives on the object segment 1 references, which this object does
+ * not hold: `defineStack`'s cross-reference pass judges it where the stack
+ * holds both (`collectRecordCurrencyPathErrors`, stack.zod.ts), and the
+ * registry judges it at runtime registration. A pointer whose spelling the
+ * config door already refused (more than two segments, a malformed segment)
+ * is not judged again.
+ */
+function refuseDishonestRecordCurrencyPath(
+  objectName: string,
+  name: string,
+  field: { type?: unknown } | null,
+  target: string,
+  map: Record<string, { type?: unknown; reference?: unknown } | null>,
+  path: (string | number)[],
+  ctx: z.RefinementCtx,
+): void {
+  const segments = target.split('.');
+  if (segments.length !== 2 || segments.some((s) => !/^[a-z_][a-z0-9_]*$/.test(s))) return;
+  const [via, code] = segments as [string, string];
+  const at = `\`${name}.currencyConfig.currencyField\` names \`${target}\``;
+  if (field?.type === 'summary') {
+    ctx.addIssue({
+      code: 'custom',
+      path,
+      message: `${at}, a path, on a \`summary\` field of object \`${objectName}\`. A roll-up through a \`master_detail\` `
+        + 'totals children that follow THIS record\'s currency, so it is in the currency this object\'s own code field '
+        + `holds: name that field in one segment (\`currencyField: '${code}'\` if it is this object's code field).`,
+    });
+    return;
+  }
+  const masters = Object.keys(map).filter((k) => k !== name && (map[k] as { type?: unknown } | null)?.type === 'master_detail');
+  const candidates = masters.length > 0
+    ? `candidates: ${masters.map((m) => `\`${m}.${code}\``).join(', ')}.`
+    : 'the object has none; a child follows a parent only through a `master_detail` field.';
+  const remedy = 'A `currencyField` path starts at a `master_detail` field of this object, whose parent holds the code — '
+    + candidates;
+  const viaField = Object.prototype.hasOwnProperty.call(map, via) && via !== name ? map[via] : undefined;
+  if (viaField === undefined) {
+    ctx.addIssue({
+      code: 'custom',
+      path,
+      message: `${at}, but object \`${objectName}\` declares no other field \`${via}\`. ${remedy}`,
+    });
+    return;
+  }
+  if (viaField?.type !== 'master_detail') {
+    ctx.addIssue({
+      code: 'custom',
+      path,
+      message: `${at}, and \`${via}\` is a \`${String(viaField?.type)}\` field on object \`${objectName}\`. `
+        + (viaField?.type === 'lookup'
+          ? 'Only a `master_detail` carries a child to its parent\'s currency: a lookup may be blank, and the amount '
+            + `would then have no currency. Make \`${via}\` a \`master_detail\` field, or give \`${objectName}\` its own `
+            + 'code field. '
+          : '')
+        + remedy,
+    });
   }
 }
 
@@ -2179,6 +2268,12 @@ function refuseDishonestHomeAmount(
     }
 
     // `rateField` — a declared `number` sibling, shared only by amounts that store the same rate.
+    // Two amounts store the same rate when they convert from the same code on the same date, and a
+    // `currencyField` names its code by its spelling: a path `PARENT_FIELD.CODE_FIELD` (ADR-0144 D2,
+    // amended 2026-11-09) names the parent's code through that one `master_detail`, so it equals
+    // another pointer exactly when the spellings are equal. A path and a one-segment sibling never
+    // share (the child's own code and its parent's are two values), nor do two paths through two
+    // different `master_detail` fields (two parent rows).
     if (typeof home.rateField === 'string') {
       const target = home.rateField;
       const t = map[target];

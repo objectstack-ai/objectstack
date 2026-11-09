@@ -536,6 +536,51 @@ const CURRENCY_CONFIG_DECIMAL_PLACES_GUIDANCE: Readonly<Record<string, string>> 
     + ' Delete the key.',
 };
 
+/** A field's machine name, the grammar each segment of a two-segment `currencyField` is held to. */
+const RECORD_CURRENCY_PATH_SEGMENT = /^[a-z_][a-z0-9_]*$/;
+
+/**
+ * [ADR-0144 D2, amended 2026-11-09 by #31743, ruling A recorded in
+ * 6739066323] A `record`-mode `currencyField` is one field name, or exactly
+ * two joined by one dot: "`currencyField` may name `<master_detail
+ * field>.<parent code field>`, so a child follows its parent's currency by
+ * construction". The ruling names one hop, so a pointer of three or more
+ * segments is refused here, and so is a segment that is not a field's
+ * machine name (an empty one included: `a.`, `.b`, `a..b`). A one-segment
+ * pointer is not judged here; the object judges what it names.
+ *
+ * This door sees one config, so it judges the spelling alone. What segment 1
+ * names (a `master_detail` field of the same object, never a `lookup`) is the
+ * object's to judge (`refuseDishonestRecordCurrencyField`, object.zod.ts);
+ * what segment 2 names lives on another object.
+ */
+function refuseMalformedRecordCurrencyPath(pointer: string, ctx: z.RefinementCtx): void {
+  if (!pointer.includes('.')) return;
+  const segments = pointer.split('.');
+  const shape =
+    'A `currencyField` path is `PARENT_FIELD.CODE_FIELD`: a `master_detail` field of this object, one dot, and the '
+    + 'code field on the parent object it references. It names one hop, so a child follows its own parent and no '
+    + 'further; to read a grandparent\'s code, give the parent its own code field and follow that.';
+  if (segments.length > 2) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['currencyField'],
+      message: `\`currencyField\` names \`${pointer}\`, a path of ${segments.length} segments, and a path is two. ${shape}`,
+    });
+    return;
+  }
+  const bad = segments.filter((s) => !RECORD_CURRENCY_PATH_SEGMENT.test(s));
+  if (bad.length > 0) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['currencyField'],
+      message: `\`currencyField\` names \`${pointer}\`, and `
+        + (bad.includes('') ? 'one of its two segments is empty' : `\`${bad[0]}\` is not a field's machine name (snake_case)`)
+        + `. ${shape}`,
+    });
+  }
+}
+
 /**
  * [ADR-0144 D2] `currencyMode: 'record'` ⇔ `currencyField`, and no
  * `defaultCurrency` beside it. A `record`-mode amount has no currency until a
@@ -581,8 +626,11 @@ function refuseRecordModeKeyMismatch(
       message:
         '`currencyMode: \'record\'` needs `currencyField`: name the field on this object that holds each '
         + 'record\'s ISO 4217 code — a `text` field with `valueDomain: \'iso_4217_currency\'`, conventionally '
-        + '`currency_code` — or use `currencyMode: \'fixed\'` (one currency) or `\'dynamic\'` (the tenant default).',
+        + '`currency_code`; on a `master_detail` child, `PARENT_FIELD.CODE_FIELD` follows the parent\'s code — '
+        + 'or use `currencyMode: \'fixed\'` (one currency) or `\'dynamic\'` (the tenant default).',
     });
+  } else if (config.currencyMode === 'record' && typeof config.currencyField === 'string') {
+    refuseMalformedRecordCurrencyPath(config.currencyField, ctx);
   } else if (config.currencyMode !== 'record' && config.currencyField !== undefined) {
     ctx.addIssue({
       code: 'custom',
@@ -702,6 +750,18 @@ function refuseSummaryWithoutField(
  * Configuration for currency field type supporting multi-currency — and, in the
  * same shape, for a `formula` field whose `returnType` is `currency` (#22727).
  *
+ * A `summary` field spells its currency in the same shape (ADR-0144 D6,
+ * amended 2026-11-09 by #31743, ruling A: "A `summary` rolled up through that
+ * same master_detail is single-currency by construction, and is admitted in
+ * the parent's currency."). The roll-up lives on the parent, and the parent's
+ * code field is its sibling, so it declares `currencyMode: 'record'` with a
+ * one-segment `currencyField` naming that code field: the declaration a
+ * sibling-code amount already makes, so a reader that resolves a record-mode
+ * amount resolves the roll-up the same way and no key is added. Whether the
+ * child amount it rolls up follows that very code through that very
+ * `master_detail` is a question about two objects, answered where both are
+ * held, never by this one-config shape.
+ *
  * Note: Currency codes are validated by length only (3 characters) to support:
  * - Standard ISO 4217 codes (USD, EUR, CNY, etc.)
  * - Cryptocurrency codes (BTC, ETH, etc.)
@@ -732,15 +792,17 @@ export const CurrencyConfigSchema = lazySchema(() => strictObject({
   aliases: { mode: 'currencyMode', currency: 'defaultCurrency', code: 'defaultCurrency', isoCode: 'defaultCurrency' },
   guidance: CURRENCY_CONFIG_DECIMAL_PLACES_GUIDANCE,
 }, {
-  currencyMode: z.enum(['dynamic', 'fixed', 'record']).default('dynamic').describe('Currency mode. `fixed`: the field has one currency, `defaultCurrency`. `dynamic` (the default): the field has no currency of its own — amounts display in the tenant default currency (the `localization.currency` setting; a plain number when none is set) and `defaultCurrency` is not read. `record`: each record has its own currency, the ISO 4217 code stored in the sibling field `currencyField` names; `defaultCurrency` is refused. The value is a bare number in every mode (ADR-0104 D1).'),
+  currencyMode: z.enum(['dynamic', 'fixed', 'record']).default('dynamic').describe('Currency mode. `fixed`: the field has one currency, `defaultCurrency`. `dynamic` (the default): the field has no currency of its own — amounts display in the tenant default currency (the `localization.currency` setting; a plain number when none is set) and `defaultCurrency` is not read. `record`: each record has its own currency, the ISO 4217 code stored in the field `currencyField` names — a sibling field, or on a `master_detail` child the parent\'s code field, which the child then follows; `defaultCurrency` is refused. The value is a bare number in every mode (ADR-0104 D1).'),
   defaultCurrency: z.string().length(3).optional().describe('The currency code (ISO 4217, e.g. USD, CNY, EUR) of a `fixed`-mode field: its one currency, required under `fixed`. Not read under `dynamic` (the default), where amounts display in the tenant default currency, and refused under `record`, where each record names its own.'),
   // ADR-0144 D2 — the pointer of a `record`-mode amount. Optional at the key
   // level and never empty; `refuseRecordModeKeyMismatch` below makes it
   // required under `record` and refuses it under the other two modes, and the
   // object's `superRefine` (`refuseDishonestRecordCurrencyField`,
   // object.zod.ts) checks what it names, because only the object holds the
-  // sibling field map.
-  currencyField: z.string().min(1, '`currencyField` names a field: an empty name points at nothing — name the field on this object that holds each record\'s ISO 4217 code, conventionally `currency_code`.').optional().describe('`record` mode only, and required there: the name of the field on the same object that holds each record\'s currency — a `text` field declaring `valueDomain: \'iso_4217_currency\'` (conventionally `currency_code`). Refused under `dynamic` and `fixed`, and never empty.'),
+  // sibling field map. Amended 2026-11-09 (#31743, ruling A): a two-segment
+  // path `PARENT_FIELD.CODE_FIELD` follows the parent's code; its spelling is
+  // judged by `refuseMalformedRecordCurrencyPath` above.
+  currencyField: z.string().min(1, '`currencyField` names a field: an empty name points at nothing — name the field on this object that holds each record\'s ISO 4217 code, conventionally `currency_code`.').optional().describe('`record` mode only, and required there: the name of the field on the same object that holds each record\'s currency — a `text` field declaring `valueDomain: \'iso_4217_currency\'` (conventionally `currency_code`). On a `master_detail` child it may instead be a two-segment path, `PARENT_FIELD.CODE_FIELD`: a `master_detail` field of this object (never a `lookup`), one dot, and that code field on the parent it references, so the child follows its parent\'s currency and stores no code of its own (ADR-0144 D2, amended). Refused under `dynamic` and `fixed`, and never empty.'),
   // ADR-0144 D5 — the stored home-currency projection, declared by pointer.
   // Optional; `refuseRecordModeKeyMismatch` below refuses it outside `record`,
   // and the object's `superRefine` (`refuseDishonestHomeAmount`,
@@ -2220,7 +2282,7 @@ export const FieldSchema = lazySchema(() => {
 
   // Currency config — read for a `currency` field and for a `formula` whose
   // `returnType` is `currency` (#22727): one shape for both, never a second one.
-  currencyConfig: CurrencyConfigSchema.optional().describe('Which currency an amount is in: for a currency field, and for a formula field whose returnType is currency. Absent: dynamic mode.'),
+  currencyConfig: CurrencyConfigSchema.optional().describe('Which currency an amount is in: for a currency field, for a formula field whose returnType is currency, and for a summary that rolls up, through a master_detail, child amounts that follow this record\'s currency (`currencyMode: \'record\'` naming this object\'s own code field). Absent: dynamic mode.'),
 
   // Vector field — flat dimensionality (the live authoring path).
   // The renderer reads this flat sibling (read point recorded in
