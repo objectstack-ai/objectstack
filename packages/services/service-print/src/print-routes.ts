@@ -12,6 +12,7 @@ import {
   resolveAuthzContext,
   shouldDenyAnonymous,
   userAuthGateSourceOf,
+  credentialUseClientFor,
 } from '@objectstack/core';
 import type { ErrorCode } from '@objectstack/spec/api';
 import type { AuthSessionApi, IAuthService, IHttpRequest, IHttpResponse, IHttpServer } from '@objectstack/spec/contracts';
@@ -244,6 +245,9 @@ async function resolveCaller(req: IHttpRequest, deps: PrintRoutesDeps): Promise<
     tenancyPosture: await deps.resolveTenancyPosture(),
     userAuthGates: userAuthGateSourceOf(auth),
     apiKeyLifecycle: apiKeyLifecyclePolicySourceOf(auth),
+    // [#31898] Where the request came from, for the `credential_use` row an
+    // admitted API key writes; the auth service applies the trust rule.
+    client: credentialUseClientFor(auth, { headers, remoteAddress: req.remoteAddress || undefined }),
   });
   const context = assembleExecutionContext({
     authz,

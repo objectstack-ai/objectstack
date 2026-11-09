@@ -636,6 +636,9 @@ export function makeExecutionContextResolver(
                 accessToken: 'withhold',
                 oauth: undefined,
                 onAdmission: undefined,
+                // [#31898] `'session-only'` reads no API key, so no `credential_use` row is
+                // written here and no transport is handed.
+                transport: undefined,
             });
             if (!context) return undefined;
             // [#2408 / #3361] Open the per-request `Server-Timing` disclosure

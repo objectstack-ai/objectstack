@@ -145,6 +145,8 @@ import {
     classifyAdmissionTenancyPosture,
     resolveControlPlaneApiKey,
     type TenancyPostureSource,
+    credentialUseClientFor,
+    transportPeerAddressOf,
 } from '@objectstack/core';
 import type { AuthSessionApi, IAuthService, IObjectQLEngine } from '@objectstack/spec/contracts';
 import { inProcessSessionReadInput } from '@objectstack/types';
@@ -897,7 +899,13 @@ export class CloudConnectionPlugin implements Plugin {
              * (`503 SERVICE_UNAVAILABLE`) rather than answered as "does not
              * hold". Any other fault fails closed.
              */
-            const holdsPlatformSettings = async (rawReq: Request, caller: ResolvedSession): Promise<boolean> => {
+            const holdsPlatformSettings = async (
+                rawReq: Request,
+                caller: ResolvedSession,
+                // [#31898] The transport's own peer address (`transportPeerAddressOf(c)`),
+                // for the `credential_use` row an API key this read admits writes.
+                remoteAddress: string | undefined,
+            ): Promise<boolean> => {
                 const { sessionData, authService, kernel } = caller.readFrom;
                 let ql: IObjectQLEngine | undefined;
                 if (kernel) {
@@ -922,6 +930,9 @@ export class CloudConnectionPlugin implements Plugin {
                         tenancyPosture,
                         userAuthGates: userAuthGateSourceOf(authService),
                         apiKeyLifecycle: apiKeyLifecyclePolicySourceOf(authService),
+                        // [#31898] Where the request came from, for the `credential_use` row an
+                        // admitted API key writes; the auth service applies the trust rule.
+                        client: credentialUseClientFor(authService, { headers: rawReq.headers, remoteAddress }),
                     });
                     if (authz.credential !== 'session' || authz.userId !== caller.userId) return false;
                     return Array.isArray(authz.systemPermissions) && authz.systemPermissions.includes(CLOUD_CONNECTION_CAPABILITY);
@@ -966,11 +977,12 @@ export class CloudConnectionPlugin implements Plugin {
             const servedStatus = async (
                 environmentId: string | undefined,
                 rawReq: Request,
+                remoteAddress: string | undefined,
                 full: { environmentId: string | null; runtimeId: string | null; bound: boolean; provider: string; connection: unknown },
             ) => {
                 const caller = await resolveSession(environmentId ?? '', rawReq);
                 try {
-                    if (caller && !caller.authGate && await holdsPlatformSettings(rawReq, caller)) return full;
+                    if (caller && !caller.authGate && await holdsPlatformSettings(rawReq, caller, remoteAddress)) return full;
                 } catch (err) {
                     if (!isAuthzStoreUnavailableError(err)) throw err;
                     ctx.logger?.warn?.(`[CloudConnectionPlugin] status served without the connection details — ${err.message}`);
@@ -990,7 +1002,7 @@ export class CloudConnectionPlugin implements Plugin {
                     return c.json({ success: false, error: { code: 'ENVIRONMENT_NOT_FOUND', message: ENVIRONMENT_NOT_FOUND_MESSAGE } }, 404);
                 }
                 const serve = async (full: Parameters<typeof servedStatus>[2]) =>
-                    c.json({ success: true, data: await servedStatus(environmentId, c.req.raw, full) });
+                    c.json({ success: true, data: await servedStatus(environmentId, c.req.raw, transportPeerAddressOf(c), full) });
                 // A single-env runtime with no env id and no credential is
                 // simply not bound yet — valid state, not an error.
                 if (!environmentId && !credential()) {
@@ -1055,7 +1067,7 @@ export class CloudConnectionPlugin implements Plugin {
                 if (!session?.userId) return c.json({ success: false, error: { code: 'UNAUTHENTICATED', message: 'Sign in to connect a cloud account.' } }, 401);
                 // [#24148, #25119] Refused before any work, so a caller without
                 // the capability cannot learn whether a control plane is configured.
-                if (!(await holdsPlatformSettings(c.req.raw, session))) return refuseWithoutPlatformSettings(c);
+                if (!(await holdsPlatformSettings(c.req.raw, session, transportPeerAddressOf(c)))) return refuseWithoutPlatformSettings(c);
                 // [#25113] The connection is the platform's — refused before the
                 // device-code request, as `unbind` is refused before its revoke.
                 if (platformManaged) return refusePlatformManaged(c);
@@ -1119,7 +1131,7 @@ export class CloudConnectionPlugin implements Plugin {
                 if (session?.authGate) return refuseHeldSession(c, session.authGate);
                 if (!session?.userId) return c.json({ success: false, error: { code: 'UNAUTHENTICATED', message: 'Sign in.' } }, 401);
                 // [#24148, #25119] This is the door that persists the binding.
-                if (!(await holdsPlatformSettings(c.req.raw, session))) return refuseWithoutPlatformSettings(c);
+                if (!(await holdsPlatformSettings(c.req.raw, session, transportPeerAddressOf(c)))) return refuseWithoutPlatformSettings(c);
                 // [#25113] The connection is the platform's — refused before the
                 // device-token poll, the control plane's `/bind` and the local
                 // write: a bind completed here would persist a credential the
@@ -1236,7 +1248,7 @@ export class CloudConnectionPlugin implements Plugin {
                 if (session?.authGate) return refuseHeldSession(c, session.authGate);
                 if (!session?.userId) return c.json({ success: false, error: { code: 'UNAUTHENTICATED', message: 'Sign in.' } }, 401);
                 // [#24148, #25119] Refused before the revoke and before the local clear.
-                if (!(await holdsPlatformSettings(c.req.raw, session))) return refuseWithoutPlatformSettings(c);
+                if (!(await holdsPlatformSettings(c.req.raw, session, transportPeerAddressOf(c)))) return refuseWithoutPlatformSettings(c);
                 // Ruling 甲 (#25097): the connection is the platform's — refused
                 // before the revoke and before the local clear, so nothing
                 // changes on either side.

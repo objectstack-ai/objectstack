@@ -29,6 +29,8 @@ import {
   // judges a key-admitted request by the KEY's answer.
   resolveApiKeyAdmission,
   userAuthGateSourceOf,
+  // [#31898] The one helper a door's facts meet the client-address trust rule through.
+  credentialUseClientFor,
   // [#23367] The API-key lifecycle policy source, and its branded refusal.
   apiKeyLifecyclePolicySourceOf,
   isApiKeyLifecycleRefusalError,
@@ -1019,6 +1021,16 @@ function resolveMetrics(
   return new NoopMetricsRegistry();
 }
 
+/**
+ * [#31898] The transport's own peer address (`IHttpRequest.remoteAddress`),
+ * when the request carries one: the fact every key-admitting storage door hands
+ * the key-admission seam for the `credential_use` row.
+ */
+function peerAddressOf(req: { remoteAddress?: unknown }): string | undefined {
+  const address = req?.remoteAddress;
+  return typeof address === 'string' && address ? address : undefined;
+}
+
 /** Normalize adapter request headers to a Web `Headers` (better-auth needs it). */
 function toWebHeaders(req: { headers?: unknown }): any | null {
   const rawHeaders: any = req?.headers;
@@ -1481,6 +1493,10 @@ function buildAuthGateSessionReader(
         // unclaimed-file download) never read a key and answer by the session
         // alone; the raw-transfer routes answer by their capability token.
         apiKeyLifecyclePolicySourceOf(auth),
+        // [#31898] Where the request came from, for the `credential_use` row
+        // this admission's use stamp writes; the auth service applies the
+        // trust rule to the transport's peer and the headers.
+        credentialUseClientFor(auth, { headers, remoteAddress: peerAddressOf(req) }),
       );
       if (admission.outcome === 'held') return { authGate: admission.gate };
       // [#24366] Every other answer falls through to the session's own gate.
@@ -1644,7 +1660,7 @@ async function resolveAdmissionTenancyPosture(
 function buildFileReadAuthorizer(
   registry: StorageGateRegistry,
   engine: IDataEngine | null,
-): ((file: FileRecord, req: { headers?: unknown }) => Promise<FileReadVerdict>) | undefined {
+): ((file: FileRecord, req: { headers?: unknown; remoteAddress?: unknown }) => Promise<FileReadVerdict>) | undefined {
   // The door's wiring fact: no `auth` service or no data engine binds no gate
   // at all, and parent-governed downloads stay open (the declared bare-kernel
   // behaviour). The service is looked up once, here, as the family's gate
@@ -1709,6 +1725,9 @@ function buildFileReadAuthorizer(
         accessToken: 'carry',
         oauth: undefined,
         onAdmission: undefined,
+        // [#31898] The transport's own peer address, for the `credential_use` row
+        // an admitted API key writes; the auth service applies the trust rule.
+        transport: { remoteAddress: peerAddressOf(req) },
       });
       if (!context?.userId) return 'unauthenticated';
 
@@ -1778,6 +1797,9 @@ function buildUploadAttacher(
           accessToken: 'carry',
           oauth: undefined,
           onAdmission: undefined,
+          // [#31898] The transport's own peer address, for the `credential_use` row
+          // an admitted API key writes; the auth service applies the trust rule.
+          transport: { remoteAddress: peerAddressOf(req) },
         })
       : undefined;
     if (!context?.userId) throw refusal(401, 'AUTH_REQUIRED', 'Authentication required to attach a file');

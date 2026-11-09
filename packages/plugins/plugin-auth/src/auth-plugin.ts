@@ -3444,7 +3444,12 @@ export class AuthPlugin implements Plugin {
    * ⛔ An unreachable permission store throws (`AuthzStoreUnavailableError`):
    * an outage, never a caller with no capability.
    */
-  private async resolveOrganizationSettingsCaller(headers: Headers): Promise<OrganizationAddressReaderContext | undefined> {
+  private async resolveOrganizationSettingsCaller(
+    headers: Headers,
+    // [#31898] The raw-app request's peer address (`readTransportPeerAddress(c)`),
+    // for the `credential_use` row an API key this door admits writes.
+    remoteAddress: string | undefined,
+  ): Promise<OrganizationAddressReaderContext | undefined> {
     const context = await resolveRequestExecutionContext({
       headers,
       ql: this.authManager!.getDataEngine(),
@@ -3460,6 +3465,9 @@ export class AuthPlugin implements Plugin {
       accessToken: 'withhold',
       oauth: undefined,
       onAdmission: undefined,
+      // [#31898] The transport's own peer address, for the `credential_use` row
+      // an admitted API key writes; the auth service applies the trust rule.
+      transport: { remoteAddress: remoteAddress },
     });
     if (!context) return undefined;
     return {
@@ -4140,7 +4148,7 @@ export class AuthPlugin implements Plugin {
       try {
         const { judgeOrganizationAddressReader, runClientAddressRead } = await import('./client-address-read.js');
         const refusal = judgeOrganizationAddressReader(
-          await this.resolveOrganizationSettingsCaller(c.req.raw.headers),
+          await this.resolveOrganizationSettingsCaller(c.req.raw.headers, readTransportPeerAddress(c)),
           judgeHeldSession,
         );
         if (refusal) return c.json(refusal.body, refusal.status);
@@ -4361,6 +4369,9 @@ export class AuthPlugin implements Plugin {
             accessToken: 'withhold',
             oauth: undefined,
             onAdmission: undefined,
+            // [#31898] `'session-only'` reads no API key, so no `credential_use` row is
+            // written here and no transport is handed.
+            transport: undefined,
           });
           return context as Record<string, unknown> | undefined;
         },
