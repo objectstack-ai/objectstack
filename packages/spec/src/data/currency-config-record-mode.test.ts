@@ -19,6 +19,13 @@
  * object door its first segment (a `master_detail` of the same object, never a
  * `lookup`) and the summary's one-segment rule, and `defineStack`'s
  * cross-reference pass the halves that need the parent object.
+ *
+ * Narrowed 2026-11-09 (#31958, claim amend 1, record 6746006322): a `summary`
+ * carries a currency only where one is admitted. The object refuses a `count`
+ * roll-up's config in every mode, `dynamic` on any summary, and `record` on a
+ * roll-up with no child amount; `defineStack` refuses a `record` roll-up that
+ * is not the one through the `master_detail` its child amount follows. `fixed`
+ * stays accepted on sum / min / max / avg.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -445,14 +452,16 @@ describe('defineStack: a roll-up through that master_detail declares the parent\
     expect(finding).toContain("It names 'billing_currency' instead");
   });
 
-  it('names the mode a roll-up declared instead, `fixed` and `dynamic` alike', () => {
+  it('names the mode a roll-up declared instead; `dynamic` never reaches it, the object refuses it first', () => {
     const fixed = stackRefusal([
       salesOrder({ currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'USD' } }), region, orderLine(),
     ]);
     expect(fixed).toContain("It declares `currencyMode: 'fixed'`, and would show in that one currency");
     expect(fixed).not.toContain('bare number');
-    const dynamic = stackRefusal([salesOrder({ currencyConfig: { currencyMode: 'dynamic' } }), region, orderLine()]);
-    expect(dynamic).toContain('would show in the tenant default currency');
+    // `dynamic` on any summary is the object door's refusal (claim amend 1 on #31958).
+    const issues = objectIssues(salesOrder({ currencyConfig: { currencyMode: 'dynamic' } }));
+    expect(issues.map((i) => i.path)).toEqual([['fields', 'total', 'currencyConfig']]);
+    expect(issues[0]!.message).toMatch(/declaring `currencyMode: 'dynamic'`/);
   });
 
   it('does not judge a roll-up on a parent this stack knows only through an extension', () => {
@@ -482,5 +491,155 @@ describe('defineStack: a roll-up through that master_detail declares the parent\
       amount: { type: 'currency', label: 'Amount', currencyConfig: RECORD },
     });
     expect(() => buildStack([salesOrder({ currencyConfig: undefined }), region, own])).not.toThrow();
+  });
+});
+
+// ─── ADR-0144 D6, amended: a summary carries a currency only where admitted ──
+//
+// The refusal set is the spec seat's claim amend 1 on #31958 (record
+// 6746006322): a `count` roll-up refuses every mode; `dynamic` is refused on
+// every summary (nothing reads it there); `record` is refused unless it is the
+// admitted roll-up; `fixed` stays accepted on sum / min / max / avg, because
+// the analytics layer reads its code.
+
+/** A parent with only a roll-up of its own: `sales_order` and one `summary` field `rollup`. */
+function orderWith(rollup: Record<string, unknown>): Record<string, unknown> {
+  return {
+    name: 'sales_order', label: 'Order',
+    fields: { currency_code: CODE_FIELD, rollup: { type: 'summary', label: 'Roll-up', ...rollup } },
+  };
+}
+
+const SUM_LINES = { object: 'order_line', field: 'amount', function: 'sum', relationshipField: 'sales_order' } as const;
+const COUNT_LINES = { object: 'order_line', function: 'count', relationshipField: 'sales_order' } as const;
+
+/** The one issue a refused object carries, at `fields.rollup.currencyConfig`. */
+function rollupRefusal(rollup: Record<string, unknown>): string {
+  const issues = objectIssues(orderWith(rollup));
+  expect(issues, 'expected the object to REFUSE this roll-up').toHaveLength(1);
+  expect(issues[0]!.code).toBe('custom');
+  expect(issues[0]!.path).toEqual(['fields', 'rollup', 'currencyConfig']);
+  return issues[0]!.message;
+}
+
+describe('the object refuses a summary currency it can see is not admitted', () => {
+  it('refuses every mode on a `count`, `fixed` included: a count is never an amount', () => {
+    for (const currencyConfig of [
+      { currencyMode: 'record', currencyField: 'currency_code' },
+      { currencyMode: 'fixed', defaultCurrency: 'USD' },
+      { currencyMode: 'dynamic' },
+    ]) {
+      const message = rollupRefusal({ summaryOperations: COUNT_LINES, currencyConfig });
+      expect(message).toMatch(new RegExp(
+        `^\`rollup\` is a \`summary\` field of object \`sales_order\` that counts child rows \\(\`function: 'count'\`\\) `
+        + `and declares \`currencyMode: '${currencyConfig.currencyMode}'\`\\. A count is a number of rows, never an amount`,
+      ));
+    }
+    expect(objectIssues(orderWith({ summaryOperations: COUNT_LINES }))).toEqual([]);
+  });
+
+  it('refuses `dynamic` on a sum, written or by an absent mode: nothing reads it there', () => {
+    for (const currencyConfig of [{ currencyMode: 'dynamic' }, {}]) {
+      expect(rollupRefusal({ summaryOperations: SUM_LINES, currencyConfig })).toMatch(
+        /^`rollup` is a `summary` field of object `sales_order` declaring `currencyMode: 'dynamic'` \(an absent `currencyMode` is `dynamic`\)\. No reader draws a roll-up in the tenant default currency/,
+      );
+    }
+  });
+
+  it('refuses `record` on a summary that rolls up no child amount', () => {
+    expect(rollupRefusal({ currencyConfig: RECORD })).toMatch(
+      /^`rollup` is a `summary` field of object `sales_order` declaring `currencyMode: 'record'` with no `summaryOperations` naming a child amount/,
+    );
+  });
+
+  it('accepts `fixed` on a sum, min, max and avg: the analytics layer reads its code', () => {
+    for (const fn of ['sum', 'min', 'max', 'avg']) {
+      const summaryOperations = { ...SUM_LINES, function: fn };
+      expect(objectIssues(orderWith({ summaryOperations, currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'USD' } }))).toEqual([]);
+    }
+    // And `record` on a sum is the stack's to judge: the object alone cannot see the child.
+    expect(objectIssues(orderWith({ summaryOperations: SUM_LINES, currencyConfig: RECORD }))).toEqual([]);
+  });
+
+  it('a standalone field and an extension parse what they parsed before', () => {
+    const count = { type: 'summary', label: 'Count', summaryOperations: COUNT_LINES, currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'USD' } };
+    expect(FieldSchema.safeParse(count).success).toBe(true);
+    expect(() => defineStack({
+      manifest: stackManifest, objects: [],
+      objectExtensions: [{ extend: 'sales_order', fields: { line_count: count } }],
+    } as Parameters<typeof defineStack>[0])).not.toThrow();
+  });
+});
+
+/** A second parent object holding its own code field, for a child amount that follows it instead. */
+const contract = {
+  name: 'contract', label: 'Contract',
+  fields: { currency_code: CODE_FIELD },
+};
+
+describe('defineStack refuses a `record` roll-up that is not the admitted one', () => {
+  const prefix = "Object 'sales_order' field 'total' currencyConfig: `currencyMode: 'record'` on a summary is admitted only "
+    + 'for a roll-up through a master_detail whose child amounts follow this record\'s currency through that very field';
+
+  it('refuses one over a child amount with its own code field', () => {
+    const own = orderLine({ currency_code: CODE_FIELD, amount: { type: 'currency', label: 'Amount', currencyConfig: RECORD } });
+    const finding = stackRefusal([salesOrder(), region, own]);
+    expect(finding.startsWith(prefix)).toBe(true);
+    expect(finding).toContain("This summary rolls up sum(order_line.amount), and 'order_line.amount' is in each 'order_line' record's own currency");
+  });
+
+  it('refuses one over a fixed child amount, prescribing that fixed code', () => {
+    const fixed = orderLine({ amount: { type: 'currency', label: 'Amount', currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'EUR' } } });
+    const finding = stackRefusal([salesOrder(), region, fixed]);
+    expect(finding.startsWith(prefix)).toBe(true);
+    expect(finding).toContain("is fixed to EUR");
+    expect(finding).toContain("`currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'EUR' }`");
+    // The prescribed spelling is accepted.
+    expect(() => buildStack([
+      salesOrder({ currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'EUR' } }), region, fixed,
+    ])).not.toThrow();
+  });
+
+  it('refuses one over a child amount that declares no currency', () => {
+    const plain = orderLine({ amount: { type: 'number', label: 'Amount' } });
+    const finding = stackRefusal([salesOrder(), region, plain]);
+    expect(finding.startsWith(prefix)).toBe(true);
+    expect(finding).toContain("'order_line.amount' declares no currency that follows this record");
+  });
+
+  it('refuses one over a child amount that follows another parent', () => {
+    const other = orderLine({
+      contract: { type: 'master_detail', label: 'Contract', reference: 'contract' },
+      amount: { type: 'currency', label: 'Amount', currencyConfig: { currencyMode: 'record', currencyField: 'contract.currency_code' } },
+    });
+    const finding = stackRefusal([salesOrder(), contract, region, other]);
+    expect(finding.startsWith(prefix)).toBe(true);
+    expect(finding).toContain("'order_line.amount' follows the currency of 'contract' through 'contract', not this record's");
+  });
+
+  it('refuses one written through another relation than the one the child amount follows', () => {
+    const twoBack = orderLine({ origin_order: { type: 'lookup', label: 'Origin', reference: 'sales_order' } });
+    const ops = { object: 'order_line', field: 'amount', function: 'sum', relationshipField: 'origin_order' };
+    const finding = stackRefusal([salesOrder({ summaryOperations: ops }), region, twoBack]);
+    expect(finding.startsWith(prefix)).toBe(true);
+    expect(finding).toContain("it rolls up through 'origin_order', while 'order_line.amount' follows its parent's currency through 'sales_order'");
+  });
+
+  it('does not judge a relation it cannot resolve, a child it does not declare, or a child known only through an extension', () => {
+    const twoBack = orderLine({ origin_order: { type: 'lookup', label: 'Origin', reference: 'sales_order' } });
+    const ops = { object: 'order_line', field: 'amount', function: 'sum' };
+    expect(() => buildStack([salesOrder({ summaryOperations: ops }), region, twoBack])).not.toThrow();
+    expect(() => buildStack([salesOrder()])).not.toThrow();
+    expect(() => defineStack({
+      manifest: stackManifest, objects: [salesOrder()],
+      objectExtensions: [{ extend: 'order_line', fields: { amount: { type: 'number', label: 'Amount' } } }],
+    } as Parameters<typeof defineStack>[0])).not.toThrow();
+  });
+
+  it('a `fixed` roll-up over a child amount with its own code field is not this pass\'s (D6\'s first bullet stays the registry\'s)', () => {
+    const own = orderLine({ currency_code: CODE_FIELD, amount: { type: 'currency', label: 'Amount', currencyConfig: RECORD } });
+    expect(() => buildStack([
+      salesOrder({ currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'USD' } }), region, own,
+    ])).not.toThrow();
   });
 });
