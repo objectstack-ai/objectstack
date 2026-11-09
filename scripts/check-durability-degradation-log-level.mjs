@@ -415,6 +415,10 @@ const DURABILITY_CRITICAL_CALLEES = new Map([
         'The compliance audit row for a package uninstall was never written — the uninstall itself completed and was answered, so the API, the registry and every counter read clean, while the `sys_audit_log` row recording WHO uninstalled WHICH package, and when, is simply absent and nothing retries it. The package\'s own `sys_packages` row is deleted with raw SQL, so this row is the only ledger trace of the package itself (#31186, the #5226 shape on the package seam).',
     ],
     [
+        'persistScimRefusalAuditRow',
+        'The compliance audit row for a refused SCIM request was never written — the identity provider was answered its refusal exactly as it would have been without the ledger, so the API and every counter read clean, while the `sys_audit_log` row recording WHICH connection was refused, and why, is simply absent and nothing retries it. A SCIM console or SIEM feed reading `scim_refused` rows keeps showing a connection with no errors (#31829, the #5226 shape on the SCIM door).',
+    ],
+    [
         'deleteMetaItemFromLoader',
         'The metadata definition was never deleted from the authoritative store — `unregister()` still resolves and still announces `deleted`, the in-memory registry entry is gone, and the surviving row is read straight back out of storage by the very next `list()`/`get()`, so the "deleted" item reappears and survives every restart. Nothing retries it (#5259).',
     ],
