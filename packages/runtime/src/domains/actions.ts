@@ -559,6 +559,13 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
             }
         }
     }
+    // [ADR-0150 D5] Four segments are a route only when the first is an
+    // address: the bare grammar ends at `/:object/:action/:recordId`. A
+    // four-segment path whose first segment is a literal or no installed
+    // namespace reaches this domain only through the addressed call's mount,
+    // and is no route of it — declined, so each transport answers it as the
+    // path nothing serves it answered before that mount existed.
+    if (!addressQualifier && parts.length > 3) return { handled: false };
     // A single segment is an OBJECT-LESS action (#3913): `POST /actions//log_call`
     // is what an SDK that has no object to name emits, and `filter(Boolean)`
     // already ate the empty segment. Route it at the canonical `'global'` key

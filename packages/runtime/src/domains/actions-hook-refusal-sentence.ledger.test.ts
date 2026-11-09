@@ -30,6 +30,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+import '@objectstack/metadata';
 
 import { HttpDispatcher } from '../http-dispatcher.js';
 import { ROUTE_LEDGER } from '../route-ledger.js';

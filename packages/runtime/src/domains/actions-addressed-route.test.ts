@@ -17,6 +17,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import '@objectstack/metadata';
+import { assertEngineFindOnePredicate } from '@objectstack/objectql';
 import { HttpDispatcher } from '../http-dispatcher.js';
 
 const CRM = 'com.crm.pkg';
@@ -33,7 +34,7 @@ function dispatcherWith(objects: any[], standalone: any[], namespaceOf: Record<s
             getPackage: (id: string) => (namespaceOf[id] ? { manifest: { id, namespace: namespaceOf[id] } } : undefined),
         },
         find: vi.fn(async () => [{ id: 'r1' }]),
-        findOne: vi.fn(async () => ({ id: 'r1' })),
+        findOne: vi.fn(async (object: string, query?: any) => { assertEngineFindOnePredicate(object, query); return { id: 'r1' }; }),
         insert: vi.fn(),
         update: vi.fn(),
         delete: vi.fn(),
@@ -72,8 +73,9 @@ function dispatcherWith(objects: any[], standalone: any[], namespaceOf: Record<s
         const response = answered?.response as { status?: number; body?: any };
         return { status: response?.status ?? 200, body: response?.body };
     };
+    const declined = async (path: string) => (await dispatcher.handleActions(path, 'POST', {}, ctx()))?.handled === false;
     const bridge = dispatcher.buildMcpBridge(ctx());
-    return { post, bridge, ran };
+    return { post, declined, bridge, ran };
 }
 
 const act = (name: string, pkg: string | undefined, extra: Record<string, unknown> = {}) => ({
@@ -174,6 +176,21 @@ describe('POST /actions/_env/... — the environment named exactly', () => {
         expect(answer.status).toBe(404);
         expect(messageOf(answer)).toContain('in the environment');
         expect(ran).toEqual([]);
+    });
+});
+
+describe('a four-segment path whose first segment is no address is no route', () => {
+    it('declined (`handled: false`), never served by the bare grammar: a literal, or no installed namespace', async () => {
+        const { declined, ran } = dispatcherWith([], [act('close', CRM, { objectName: 'task' })]);
+        for (const path of ['/task/close/rec_1/extra', '/_activation/task/close/extra', '/global/task/close/extra']) {
+            expect(await declined(path), path).toBe(true);
+        }
+        expect(ran).toEqual([]);
+    });
+
+    it('CONTROL — an addressed four-segment path is served', async () => {
+        const { declined } = dispatcherWith([], [act('close', CRM, { objectName: 'task' })]);
+        expect(await declined('/crm/task/close/r1')).toBe(false);
     });
 });
 

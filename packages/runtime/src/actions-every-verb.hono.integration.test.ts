@@ -5,6 +5,7 @@ import { request as httpRequest } from 'node:http';
 import { LiteKernel, Plugin, PluginContext } from '@objectstack/core';
 import { HonoServerPlugin } from '@objectstack/plugin-hono-server';
 import type { IHttpServer } from '@objectstack/spec/contracts';
+import '@objectstack/metadata';
 
 import { createDispatcherPlugin } from './dispatcher-plugin.js';
 
