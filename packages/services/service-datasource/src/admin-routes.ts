@@ -35,6 +35,7 @@ import {
   // [#23367] The API-key lifecycle policy source, and its branded refusal.
   apiKeyLifecyclePolicySourceOf,
   isApiKeyLifecycleRefusalError,
+  credentialUseClientFor,
 } from '@objectstack/core';
 // [ADR-0131 D3 · D12 items 7–8 · D11] The walled refusal every door that writes
 // the environment's metadata asks, the `/meta` write doors among them.
@@ -608,6 +609,9 @@ export function registerDatasourceAdminRoutes(
           userAuthGates: userAuthGateSourceOf(authService),
           // [#23367] The API-key lifecycle policy, from the same service.
           apiKeyLifecycle: apiKeyLifecyclePolicySourceOf(authService),
+          // [#31898] Where the request came from, for the `credential_use` row an
+          // admitted API key writes; the auth service applies the trust rule.
+          client: credentialUseClientFor(authService, { headers, remoteAddress: typeof req?.remoteAddress === 'string' && req.remoteAddress ? req.remoteAddress : undefined }),
         });
         userId = authz.userId;
         gateSubject = authz;

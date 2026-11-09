@@ -5792,6 +5792,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/services/service-storage/src/storage-credential-use-client.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/services/service-storage/src/storage-routes.family-gate-credential.pin.test.ts",
       "verb": "findOne",
       "pinned": 1

@@ -224,6 +224,8 @@ describe('an auth request whose credentials name two different accounts is refus
         accessToken: 'withhold',
         oauth: undefined,
         onAdmission: undefined,
+        // [#31898] Session-only: no key is read, no transport handed.
+        transport: undefined,
       });
 
     expect(await resolve(twoAccounts(d))).toBeUndefined();
