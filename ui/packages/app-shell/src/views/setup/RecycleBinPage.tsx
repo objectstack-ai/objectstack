@@ -119,10 +119,17 @@ export function RecycleBinSection({ objectName, objectLabel }: { objectName: str
   );
   const doors = React.useMemo(() => recycleBinDoorsOf(adapter), [adapter]);
   const restore = recycleBinRestoreOf(adapter as Parameters<typeof recycleBinRestoreOf>[0], objectName, effectiveObjects);
-  const labels = React.useMemo(
-    () => recycleBinRefusalLabelsOf(objectName, objectDef, (name) => (name === objectName ? objectLabel : name)),
-    [objectName, objectDef, objectLabel],
-  );
+  // A refusal names objects by label: this one by the page's, a parent by its
+  // definition's, either falling back to the machine name.
+  const labels = React.useMemo(() => {
+    const objects = (metadata.objects ?? []) as Array<{ name?: unknown; label?: unknown } | null>;
+    const labelOf = (name: string) => {
+      if (name === objectName) return objectLabel;
+      const label = objects.find((o) => o?.name === name)?.label;
+      return typeof label === 'string' && label !== '' ? label : name;
+    };
+    return recycleBinRefusalLabelsOf(objectName, objectDef, labelOf);
+  }, [metadata.objects, objectName, objectDef, objectLabel]);
 
   const [read, setRead] = React.useState<BinRead>({ kind: 'loading' });
   const [loadingMore, setLoadingMore] = React.useState(false);
