@@ -14,7 +14,7 @@ import { assembleMetadataProtocol, isServedOverrideRowOf } from '@objectstack/me
 import { installedManifestsOf, isTenantAuthored, readLegacyOrganizationRows } from '@objectstack/metadata-core';
 import type { MetadataAuthoringChannel } from '@objectstack/metadata-protocol';
 import { Plugin, PluginContext } from '@objectstack/core';
-import { resolveArtifactPackageEntries, artifactPackageId, readDeploymentOrgScopingEntitlement } from '@objectstack/core';
+import { resolveArtifactPackageEntries, artifactPackageId, declaredDependencyIds, readDeploymentOrgScopingEntitlement } from '@objectstack/core';
 // [ADR-0130 D4] The residual rule's decision half — which top-level items of a
 // multi-package stack no body declares, and the id they take. See
 // `unclaimedTopLevelObjects` below.
@@ -1024,6 +1024,13 @@ export class ObjectQLPlugin implements Plugin {
         // own; the door's word, `code` when it states none, is its origin.
         const residualOwnerId = residual?.ownerId ?? residualItems?.ownerId;
         if (residualOwnerId !== undefined) ql.recordResidualOwner(residualOwnerId, options?.source ?? 'code');
+        // [ADR-0130 D4, epic #31527 R2] …and what the residual's owner
+        // declares it depends on (the stack's own manifest): no package record
+        // carries it, so the one closure walk reads it here, and a residual
+        // reaches its declared dependencies through every reader of the walk.
+        if (residualOwnerId !== undefined) {
+          ql.registry.recordResidualOwnerDependencies(residualOwnerId, declaredDependencyIds((artifact as { manifest?: unknown })?.manifest ?? artifact));
+        }
         // [#24472] The boot reported every same-name pair it found
         // (`kernel:ready`, below); an artifact arriving later is judged once it
         // has registered, for the pairs naming one of its packages on either

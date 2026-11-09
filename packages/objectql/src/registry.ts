@@ -9234,6 +9234,34 @@ export class SchemaRegistry {
     return this.metadata.get('package')?.get(id) as InstalledPackage | undefined;
   }
 
+  /**
+   * [ADR-0130 D4, epic #31527 R2] The dependencies each residual owner
+   * declared — the id a multi-package stack's top-level items are owned by,
+   * which has no package record. Kept beside the package records, never as
+   * one: `getPackage` / `getAllPackages` do not see it.
+   */
+  private readonly residualOwnerDependencies = new Map<string, readonly string[]>();
+
+  /**
+   * Record the dependencies residual owner `ownerId` declares on its stack's
+   * manifest, as the artifact door registers its residual. The latest record
+   * wins (a reinstall of the stack restates them).
+   */
+  recordResidualOwnerDependencies(ownerId: string, dependencies: readonly string[]): void {
+    this.residualOwnerDependencies.set(ownerId, Object.freeze([...dependencies]));
+  }
+
+  /**
+   * The dependencies residual owner `id` declared, or `undefined` for an id
+   * that is no recorded residual owner. The one closure walk
+   * (`packageDependencyClosure` in `@objectstack/metadata-core`) reads it for
+   * an id {@link getPackage} cannot produce, so a residual reaches what it
+   * declares through every reader of that walk.
+   */
+  residualOwnerDependenciesOf(id: string): readonly string[] | undefined {
+    return this.residualOwnerDependencies.get(id);
+  }
+
   getAllPackages(): InstalledPackage[] {
     return this.listItems<InstalledPackage>('package');
   }
@@ -9777,6 +9805,7 @@ export class SchemaRegistry {
     this.metadata.clear();
     this.appNavContributions.clear();
     this.picklistExtensionContributions.clear();
+    this.residualOwnerDependencies.clear();
     this._objectRevision += 1;
     this.log('[Registry] Reset complete');
   }

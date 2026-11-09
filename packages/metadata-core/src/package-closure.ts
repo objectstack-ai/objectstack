@@ -87,6 +87,31 @@ export function resolvePackageClosure(
 export interface PackageClosureRegistry {
   getPackage?: (id: string) => { manifest?: unknown } | undefined;
   getAllPackages?: () => ReadonlyArray<{ manifest?: unknown }>;
+  /**
+   * [ADR-0130 D4] The dependencies a residual owner declared — the id a
+   * multi-package stack's top-level items are owned by, which has no package
+   * record — or `undefined` for an id that is no residual owner. Read only
+   * for an id `getPackage` cannot produce, so a residual's declared closure is
+   * walked like a package's, by every reader of this walk.
+   */
+  residualOwnerDependenciesOf?: (id: string) => readonly string[] | undefined;
+}
+
+/**
+ * `registry.getPackage`, answering a residual owner (ADR-0130 D4) that has no
+ * package record with a manifest of the dependencies it declared, so the walk
+ * reads it as it reads a package. A package record always wins.
+ */
+function closurePackageReader(registry: PackageClosureRegistry, getPackage: NonNullable<PackageClosureRegistry['getPackage']>) {
+  const residual = registry.residualOwnerDependenciesOf;
+  return (id: string): { manifest?: unknown } | undefined => {
+    const row = getPackage.call(registry, id);
+    if (row || typeof residual !== 'function') return row;
+    const dependencies = residual.call(registry, id);
+    return dependencies === undefined
+      ? undefined
+      : { manifest: { id, dependencies: Object.fromEntries(dependencies.map((dep) => [dep, '*'])) } };
+  };
 }
 
 /**
@@ -139,7 +164,11 @@ export function widenPairClosureToAppMembers(
  *
  * Answers `undefined` exactly where the walk does — no package id, the
  * `sys_metadata` sentinel, a package `registry` cannot produce — and for a
- * registry with no `getPackage` (a metadata-only test double). Each reader
+ * registry with no `getPackage` (a metadata-only test double). A residual
+ * owner (ADR-0130 D4: no package record) is walked through the dependencies
+ * it declared ({@link PackageClosureRegistry.residualOwnerDependenciesOf}),
+ * so every reader — the save door and the resolution rule alike — sees one
+ * closure for it (epic #31527 R2, ruled from E6's finding). Each reader
  * decides what `undefined` means for it: the save door narrows nothing, the
  * resolver reaches nothing beyond the caller's own items and `sys`.
  *
@@ -154,8 +183,8 @@ export function packageDependencyClosure(
   registry: PackageClosureRegistry | undefined,
 ): { packageId: string; dependencies: string[] } | undefined {
   const getPackage = registry?.getPackage;
-  if (typeof getPackage !== 'function') return undefined;
-  const closure = resolvePackageClosure(packageId, (id) => getPackage.call(registry, id));
+  if (!registry || typeof getPackage !== 'function') return undefined;
+  const closure = resolvePackageClosure(packageId, closurePackageReader(registry, getPackage));
   return closure === undefined ? undefined : widenPairClosureToAppMembers(closure, registry);
 }
 

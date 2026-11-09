@@ -810,3 +810,32 @@ describe('R2 — an object registered with no package id is a caller with no pac
     expect((ql.registry.getObject('rt_probe') as { _packageId?: unknown } | undefined)?._packageId).toBe(core.RUNTIME_COMPATIBILITY_PACKAGE_ID);
   });
 });
+
+describe('R2 — a residual owner (ADR-0130 D4) reaches what it declares through the one walk', () => {
+  const RESIDUAL = 'com.acme.release';
+
+  it('a residual declaring a dependency reaches that dependency\'s item; declaring none, it is refused outside-closure', () => {
+    install(A);
+    ship('flow', 'send_email', A);
+    expect(registry.getPackage(RESIDUAL)).toBeUndefined();
+    expect(resolve('flow', 'send_email', RESIDUAL)).toMatchObject({
+      status: 'refused', reason: 'outside-closure', candidates: [{ kind: 'package', packageId: A }],
+    });
+    registry.recordResidualOwnerDependencies(RESIDUAL, [A]);
+    expect(resolve('flow', 'send_email', RESIDUAL)).toMatchObject({ status: 'resolved', via: 'closure', holder: { kind: 'package', packageId: A } });
+    expect(packageDependencyClosure(RESIDUAL, registry)).toEqual({ packageId: RESIDUAL, dependencies: [A] });
+    // No package record appears for it.
+    expect(registry.getPackage(RESIDUAL)).toBeUndefined();
+    expect(registry.getAllPackages().map((p) => p.manifest?.id)).not.toContain(RESIDUAL);
+  });
+
+  it('a residual declaring none reaches nothing beyond `sys`, and a package record always wins over a residual record', () => {
+    install(A);
+    ship('flow', 'send_email', A);
+    registry.recordResidualOwnerDependencies(RESIDUAL, []);
+    expect(resolve('flow', 'send_email', RESIDUAL)).toMatchObject({ status: 'refused', reason: 'outside-closure' });
+    install(P);
+    registry.recordResidualOwnerDependencies(P, [A]);
+    expect(resolve('flow', 'send_email', P)).toMatchObject({ status: 'refused', reason: 'outside-closure' });
+  });
+});
