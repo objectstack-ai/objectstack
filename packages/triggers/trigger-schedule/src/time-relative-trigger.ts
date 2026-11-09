@@ -90,18 +90,14 @@ export interface TimeRelativeDataEngine {
 export interface FlowDispatchClaimSurface {
     claim(key: string): Promise<boolean>;
     /**
-     * [ADR-0150 D8 row R10] One claim row, or `null` — read only for the
-     * transition read of a window's bare-shape key ({@link timeRelativeDispatchKey}).
-     * Optional: a surface without it skips that read.
+     * [ADR-0150 D8 row R10] The dispatch key's coordinates for the flow (the
+     * one D3 rule, asked with no caller): `packageId` is the key's package
+     * segment, `null` for the bare shape; `claimBare` says whether the bare-
+     * shape key is claimed first (one package holds the flow) or not at all
+     * (two or more packages hold it). Optional: a surface without it keys by
+     * the bare shape, as before.
      */
-    readDispatch?(key: string): Promise<unknown | null>;
-    /**
-     * [ADR-0150 D8 row R10] The package that holds the flow (the one D3 rule,
-     * asked with no caller), or `null` when no single package holds it: the
-     * key's package segment. Optional: a surface without it keys by the bare
-     * shape, as before.
-     */
-    flowHolderPackage?(flowName: string): string | null;
+    flowDispatchHolder?(flowName: string): { packageId: string | null; claimBare: boolean };
 }
 
 /**
@@ -618,7 +614,7 @@ export class TimeRelativeTrigger implements FlowTrigger {
         const scopes = computeWindowClaimScopes(desc, this.now());
         const seenIds = new Set<unknown>();
         const matched: Array<{ record: Record<string, unknown>; claimKey: string | null; legacyKey: string | null }> = [];
-        const packageId = this.flowPackage(flowName);
+        const holder = this.dispatchHolder(flowName);
 
         for (const { window, scope } of scopes) {
             if (matched.length >= maxRecords) break;
@@ -682,8 +678,10 @@ export class TimeRelativeTrigger implements FlowTrigger {
                 // #10220 — dispatch key: the MATCHED WINDOW's identity + the
                 // record. A row without an id can't be keyed; it is dispatched
                 // unconditionally, exactly as it was never dedupable before.
-                const claimKey = id != null ? timeRelativeDispatchKey(flowName, scope, String(id), packageId) : null;
-                const legacyKey = id != null ? timeRelativeDispatchKey(flowName, scope, String(id)) : null;
+                const claimKey = id != null ? timeRelativeDispatchKey(flowName, scope, String(id), holder.packageId) : null;
+                const bareKey = id != null ? timeRelativeDispatchKey(flowName, scope, String(id)) : null;
+                // [ADR-0150 D8 row R10] The collision guard: no bare claim when two or more packages hold the flow.
+                const legacyKey = holder.claimBare && bareKey !== claimKey ? bareKey : null;
                 matched.push({ record: row, claimKey, legacyKey });
                 if (matched.length >= maxRecords) break;
             }
@@ -864,17 +862,19 @@ export class TimeRelativeTrigger implements FlowTrigger {
     }
 
     /**
-     * [ADR-0150 D8 row R10] The dispatch key's package segment for `flowName`
-     * ({@link FlowDispatchClaimSurface.flowHolderPackage}), or `null` — the
-     * bare shape — when the surface cannot say or no single package holds it.
+     * [ADR-0150 D8 row R10] The dispatch key's coordinates for `flowName`
+     * ({@link FlowDispatchClaimSurface.flowDispatchHolder}). A surface that
+     * cannot say, or whose answer throws, keys by the bare shape, as before
+     * the package segment existed.
      */
-    private flowPackage(flowName: string): string | null {
+    private dispatchHolder(flowName: string): { packageId: string | null; claimBare: boolean } {
+        const bare = { packageId: null, claimBare: true };
         const surface = this.getClaimSurface();
-        if (!surface || typeof surface.flowHolderPackage !== 'function') return null;
+        if (!surface || typeof surface.flowDispatchHolder !== 'function') return bare;
         try {
-            return surface.flowHolderPackage(flowName) ?? null;
+            return surface.flowDispatchHolder(flowName) ?? bare;
         } catch {
-            return null; // no answer is the bare key, as before the segment existed
+            return bare; // no answer is the bare key, as before the segment existed
         }
     }
 
@@ -897,13 +897,13 @@ export class TimeRelativeTrigger implements FlowTrigger {
         const surface = this.getClaimSurface();
         if (surface && typeof surface.claim === 'function') {
             try {
-                // [ADR-0150 D8 row R10] The transition read, until every node
-                // runs a release that keys by package: a claim an older node
-                // wrote under the bare-shape key is this window's claim. Retire
-                // it once the ledger's retention has passed since the release
-                // that added the package segment.
-                if (legacyKey && legacyKey !== key && typeof surface.readDispatch === 'function'
-                    && (await surface.readDispatch(legacyKey)) != null) {
+                // [ADR-0150 D8 row R10] The bare claim first: a node of an
+                // older release claims only the bare-shape key, so whoever
+                // inserts that key wins this (flow, window, record), on either
+                // release, in either order; the scoped key is claimed second.
+                // `legacyKey` is null when two or more packages hold the flow
+                // (the collision guard).
+                if (legacyKey && !(await surface.claim(legacyKey))) {
                     return false;
                 }
                 return await surface.claim(key);

@@ -5182,6 +5182,31 @@ export class AutomationEngine implements IAutomationService {
     }
 
     /**
+     * [ADR-0150 D8 row R10] The dispatch key's coordinates for `name`, read by
+     * the schedule and time-relative triggers:
+     *
+     *  - one package holds it: `{ packageId: P, claimBare: true }`. The key is
+     *    scoped to P, and the window's bare-shape key is claimed first, so a
+     *    node of an older release (which claims only the bare key) and this
+     *    one share one arbiter during a rolling upgrade;
+     *  - two or more packages hold it: `{ packageId: <the armed body's
+     *    package> | null, claimBare: false }` — the collision guard. The bare
+     *    key would be one row for every holder, the cross-package collision
+     *    the package segment removes, so it is neither claimed nor read.
+     *    Unreachable while {@link registerFlow} refuses a second package's
+     *    same-named flow (#31754); the guard keeps the bare claim safe once
+     *    ADR-0150 D9 lets two packages hold one name;
+     *  - anything else (the environment's own flow, a flow registered straight
+     *    into the engine, no holder, no resolver): `{ packageId: null,
+     *    claimBare: true }` — the bare key, as before.
+     */
+    flowDispatchHolder(name: string): { packageId: string | null; claimBare: boolean } {
+        const answer = this.flowHolder(name);
+        if (answer?.status === 'refused') return { packageId: this.armedFlowPackage(name) ?? null, claimBare: false };
+        return { packageId: this.flowHolderPackage(name), claimBare: true };
+    }
+
+    /**
      * [#20790] Attach the write-only flow credential channel. The automation
      * plugin calls this at `init()`, before any flow is registered. With none
      * attached (a bare engine) every credential is the literal its definition

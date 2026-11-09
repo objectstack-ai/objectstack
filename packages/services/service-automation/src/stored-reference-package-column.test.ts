@@ -176,6 +176,22 @@ describe('the holder is the item\'s one holder in this environment (D8, seat rul
     });
 });
 
+describe('R10 — the dispatch key\'s coordinates (flowDispatchHolder): the bare key is claimed only when one package holds the flow', () => {
+    it('one package: scoped to it, bare claimed first; the environment\'s or nobody\'s: bare key, as before', () => {
+        expect(automation.flowDispatchHolder(ONE_HOLDER)).toEqual({ packageId: A, claimBare: true });
+        expect(automation.flowDispatchHolder(OVERRIDDEN)).toEqual({ packageId: P, claimBare: true });
+        expect(automation.flowDispatchHolder(ENV_FLOW)).toEqual({ packageId: null, claimBare: true });
+        expect(automation.flowDispatchHolder(NOBODY)).toEqual({ packageId: null, claimBare: true });
+    });
+
+    it('the collision guard: a name two packages hold never claims the bare key, and is scoped to the armed body\'s package', () => {
+        // Phase 1's registerFlow refuses arming such a name (#31754), so the armed package is answered by a double.
+        expect(automation.flowDispatchHolder(TWO_HOLDERS)).toEqual({ packageId: null, claimBare: false });
+        vi.spyOn(automation, 'armedFlowPackage').mockReturnValue(B);
+        expect(automation.flowDispatchHolder(TWO_HOLDERS)).toEqual({ packageId: B, claimBare: false });
+    });
+});
+
 describe('R8 — a paused run gains the package that holds its flow', () => {
     async function seed(engine: ObjectQL): Promise<void> {
         for (const row of [
