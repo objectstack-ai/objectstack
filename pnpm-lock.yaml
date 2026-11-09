@@ -2061,6 +2061,9 @@ importers:
       '@objectstack/formula':
         specifier: workspace:*
         version: link:../../formula
+      '@objectstack/objectql':
+        specifier: workspace:*
+        version: link:../../objectql
       '@objectstack/platform-objects':
         specifier: workspace:*
         version: link:../../platform-objects
@@ -2071,9 +2074,6 @@ importers:
         specifier: ^10.1.4
         version: 10.2.1
     devDependencies:
-      '@objectstack/objectql':
-        specifier: workspace:*
-        version: link:../../objectql
       '@objectstack/service-queue':
         specifier: workspace:*
         version: link:../../services/service-queue
