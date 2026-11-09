@@ -2123,6 +2123,11 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
             label: "매핑: 이름 클레임",
             helpText: "선택 사항입니다. 표시 이름에 매핑되는 클레임입니다. 기본값은 \"name\"입니다.",
             placeholder: "name"
+          },
+          mapGroups: {
+            label: "Map: Groups claim",
+            helpText: "Optional. Claim that carries the user’s groups, e.g. \"groups\". Each sign-in grants the permission sets mapped to those groups. Leave blank to map no groups.",
+            placeholder: "groups"
           }
         }
       },
@@ -2153,6 +2158,11 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
             label: "NameID 형식",
             helpText: "선택 사항입니다. 요청할 SAML NameID 형식입니다. 기본값은 IdP에 구성된 형식입니다.",
             placeholder: "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
+          },
+          mapGroups: {
+            label: "Map: Groups attribute",
+            helpText: "Optional. Assertion attribute that carries the user’s groups. Each sign-in grants the permission sets mapped to those groups. Leave blank to map no groups.",
+            placeholder: "groups"
           }
         }
       },
@@ -2181,6 +2191,35 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
       edit_sso_sign_in_options: {
         label: "로그인 옵션 편집",
         successMessage: "로그인 옵션 저장됨"
+      },
+      show_sso_groups_claim: {
+        label: "Show Groups Claim",
+        resultDialog: {
+          title: "Groups claim",
+          description: "The OIDC claim or SAML attribute this provider reads the user’s groups from at each sign-in. Empty means the provider maps no groups. Change it with “Edit Groups Claim”.",
+          acknowledge: "Done",
+          fields: {
+            groupsClaim: "Groups claim"
+          }
+        }
+      },
+      edit_sso_groups_claim: {
+        label: "Edit Groups Claim",
+        params: {
+          groupsClaim: {
+            label: "Groups claim",
+            helpText: "The OIDC claim or SAML attribute that carries the user’s groups. Each sign-in grants the permission sets mapped to those groups. Leave blank to remove it: the provider then maps no groups.",
+            placeholder: "groups"
+          }
+        },
+        resultDialog: {
+          title: "Groups claim saved",
+          description: "The groups claim this provider now reads at each sign-in. Empty means it maps no groups.",
+          acknowledge: "Done",
+          fields: {
+            groupsClaim: "Groups claim"
+          }
+        }
       }
     }
   },
