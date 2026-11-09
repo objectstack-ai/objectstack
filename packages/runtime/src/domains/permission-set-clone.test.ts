@@ -146,7 +146,7 @@ function boot(opts: BootOptions = {}) {
     if (opts.catalogError) {
         bindTestSecurityCatalog(engine, () => { throw opts.catalogError; });
     } else if (!opts.unbound) {
-        bindTestSecurityCatalog(engine, opts.appMember ? { permissions: [...CATALOG.permissions, SUITE_SET] } : CATALOG);
+        bindTestSecurityCatalog(engine, opts.appMember ? { permissions: [...(CATALOG.permissions ?? []), SUITE_SET] } : CATALOG);
     }
     const saves: Saved[] = [];
     const ensures: string[] = [];
