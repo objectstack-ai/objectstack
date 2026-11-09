@@ -15,10 +15,11 @@
  * what stays accepted: a namespace that only starts with a literal, and the
  * `_`-led literals no namespace can spell anyway.
  *
- * Only a NEW install is refused: a package the deployment already holds under
- * such a namespace — registered by the cold boot, before the holders are
- * sealed, or registered again under its own id after — keeps booting, warned
- * once, and is read with `?package=`.
+ * Only the running install door refuses: a package the boot registers under
+ * such a namespace (installed, or shipped in code) — registered before the
+ * holders are sealed, or registered again after under its own id AND the same
+ * namespace — keeps booting, warned once, and is read with `?package=`. An
+ * upgrade that moves its namespace to a literal is refused.
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -142,6 +143,26 @@ describe('a package already installed under such a namespace keeps booting', () 
       await expect(Promise.resolve(svc.register({ packages: [{ manifest: { ...body(ALPHA, 'hooks'), version: '1.0.1' } }] }))).resolves.not.toThrow();
       expect(ql.registry.getPackage(ALPHA)?.manifest?.version).toBe('1.0.1');
       expect(warn.mock.calls.map((c) => String(c[0])).filter((m) => m.includes(`Package '${ALPHA}' is installed under a namespace`))).toHaveLength(1);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('an upgrade after the boot that MOVES its namespace to a literal is a new occupation: refused 422', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const kernel = await bootHolding(body(ALPHA, 'flows'));
+      const ql = kernel.getService<ObjectQL>('objectql');
+      const svc = kernel.getService('manifest') as { register(m: unknown): void | Promise<void> };
+      let err: Refusal | undefined;
+      try {
+        await svc.register({ packages: [{ manifest: { ...body(ALPHA, 'hooks'), version: '2.0.0' } }] });
+      } catch (e) {
+        err = e as Refusal;
+      }
+      expect([err?.code, err?.status, err?.name], err?.message).toEqual(['NAMESPACE_CONFLICT', 422, 'NamespaceAddressLiteralError']);
+      expect(ql.registry.getPackage(ALPHA)?.manifest?.namespace).toBe('flows');
+      expect(ql.registry.getNamespaceOwner('hooks')).toBeUndefined();
     } finally {
       warn.mockRestore();
     }

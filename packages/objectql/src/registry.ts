@@ -9189,22 +9189,26 @@ export class SchemaRegistry {
     // [ADR-0150 D5, child G1] A namespace never spells a literal segment of
     // the REST address grammar: the router reads the literal first, so the
     // package's qualified addresses would reach another door. Ahead of every
-    // mutation, with no `collisionPolicy` downgrade — for a NEW install only.
+    // mutation, with no `collisionPolicy` downgrade — at the running install
+    // door only.
     //
-    // A package already installed under such a namespace keeps booting: no
-    // release before this rule refused one, and what the literal costs it is
-    // its qualified path alone, which never existed before the rule did. Two
-    // readings name it, the bare-name rule's (`refuseBareNameConflicts`): until
-    // the cold boot seals the holders, every package registering is one the
-    // deployment already holds; after it, a package already registered under
-    // its own id is a reload, a re-install or an upgrade (the namespace gate's
-    // same-package reading above). Either is warned once and installs; it is
+    // A package the boot registers keeps booting: no release before this rule
+    // refused one, and what the literal costs it is its qualified path alone,
+    // which never existed before the rule did. Two readings name it, the
+    // bare-name rule's (`refuseBareNameConflicts`): until the cold boot seals
+    // the holders, every package registering is one the deployment holds
+    // (installed, or shipped in its code); after it, a package already
+    // registered under its own id AND the same namespace is a reload, a
+    // re-install or an upgrade (the namespace gate's same-package reading
+    // above). An upgrade that MOVES to a literal namespace is a new occupation
+    // of it and is refused. A held package is warned once and installs; it is
     // read by `?package=`.
     {
       const literalRefusal = validateNamespaceNotAddressLiteral(manifest.namespace);
       if (literalRefusal) {
         const packageId = selfId ?? manifest.id;
-        const alreadyHeld = !this.bareNameHoldersSealed || this.getPackage(packageId) !== undefined;
+        const alreadyHeld = !this.bareNameHoldersSealed
+          || this.getPackage(packageId)?.manifest?.namespace === manifest.namespace;
         if (!alreadyHeld) {
           throw new NamespaceAddressLiteralError(manifest.namespace as string, literalRefusal, packageId);
         }
