@@ -103,7 +103,9 @@ describe('site counting reads the AST, not the source text', () => {
     // (8 → 9 at #9566, which ADDED the `onSuccess` strictObject site — the
     // count is incidental; what this case pins is that JSDoc examples are
     // not counted.)
-    expect(countSites(at('ui/action.zod.ts'))).toBe(9);
+    // (9 → 12 at #31840, which ADDED the `preflight`, `preflight.read` and
+    // `preflight.seed` strictObject sites.)
+    expect(countSites(at('ui/action.zod.ts'))).toBe(12);
   });
 
   it('counts a call the source wraps across lines (`z\\n  .object({`)', () => {
