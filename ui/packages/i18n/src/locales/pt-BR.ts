@@ -4149,6 +4149,7 @@ const pt = {
     tabAll: "Todas",
     statusPending: "Pendente",
     statusApproved: "Aprovada",
+    statusHeld: "Aguardando aprovação",
     statusExecuted: "Executada",
     statusFailed: "Falhou",
     statusRejected: "Rejeitada",

@@ -4244,6 +4244,7 @@ const ru = {
     tabAll: "Все",
     statusPending: "Ожидает",
     statusApproved: "Согласовано",
+    statusHeld: "Ожидает одобрения",
     statusExecuted: "Выполнено",
     statusFailed: "Не выполнено",
     statusRejected: "Отклонено",

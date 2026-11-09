@@ -61,6 +61,7 @@ export const AI_APPROVALS_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'aiApprovals.tabAll': 'All',
   'aiApprovals.statusPending': 'Pending',
   'aiApprovals.statusApproved': 'Approved',
+  'aiApprovals.statusHeld': 'Waiting for approval',
   'aiApprovals.statusExecuted': 'Executed',
   'aiApprovals.statusFailed': 'Failed',
   'aiApprovals.statusRejected': 'Rejected',

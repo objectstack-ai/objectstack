@@ -4147,9 +4147,15 @@ export const AiAgentChatRequestSchema = lazySchema(() => z.object({
 // The approval queue an embedding app has to render. `objectui` ships a whole
 // approval UI on these four routes over hand-built URLs.
 
-/** Lifecycle of a proposed action. Mirrors `PendingActionStatus` in contracts. */
+/**
+ * Lifecycle of a proposed action. Mirrors `PendingActionStatus` in contracts.
+ *
+ * `held`: the confirmation was accepted, and the write waits on an approval
+ * outside the conversation. Not a final state: the host that held it writes
+ * `executed`, `rejected` or `failed` when that approval resolves.
+ */
 export const AiPendingActionStatusSchema = lazySchema(() =>
-  z.enum(['pending', 'approved', 'executed', 'failed', 'rejected']));
+  z.enum(['pending', 'approved', 'held', 'executed', 'failed', 'rejected']));
 
 /**
  * One queued action, as the routes return it — the persisted row, snake_case
@@ -4197,10 +4203,15 @@ export const ListAiPendingActionsResponseSchema = lazySchema(() => z.object({
  * `status: 'failed'` is a 200 with a reason, not an HTTP error: the approval
  * succeeded, the execution did not. A caller that only checks `res.ok` will
  * report a failed write as a success.
+ *
+ * `status: 'held'` is a 200 too, and nothing was written: the confirmation was
+ * accepted, and a host policy holds the write for an approval outside the
+ * conversation. A caller that reads every 200 as `executed` reports a write
+ * that has not happened. The host that held it writes the final state later.
  */
 export const ApproveAiPendingActionResponseSchema = lazySchema(() => z.object({
-  status: z.enum(['executed', 'failed']).describe('Outcome of executing the approved action'),
-  result: z.unknown().optional().describe('Tool result, when executed'),
+  status: z.enum(['executed', 'held', 'failed']).describe('Outcome of the approved action: executed, held for an approval outside the conversation (nothing written yet), or failed'),
+  result: z.unknown().optional().describe('Tool result when executed; what the host returned about the hold when held'),
   error: z.string().optional().describe('Failure reason, when failed'),
 }));
 
