@@ -22,10 +22,13 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { hashApiKey } from '@objectstack/core';
+import { currentCredentialUseClient, hashApiKey } from '@objectstack/core';
 import { HonoHttpServer } from '@objectstack/plugin-hono-server';
 import { registerDatasourceAdminRoutes } from '../admin-routes.js';
 import { ENTITLED_ORGANIZATION, ENTITLED_USER, createSessionAuthService, createGrantsEngine } from './entitled-caller.fixture.js';
+// The admin service's SQLite filename check loads the SQL driver on first use;
+// paid here, at collection, never inside a case's clocked window.
+import '@objectstack/driver-sql';
 
 const KEY = 'osk_datasource_account_posture_pin';
 
@@ -38,7 +41,13 @@ const PASSWORD_EXPIRED = { code: 'PASSWORD_EXPIRED', message: 'Your password has
 /** What the posture computation answers for the key's owner; mutated per case. */
 const postures: Record<string, Array<{ code: string; message: string }>> = {};
 
-function mountFamily() {
+/** [#31898] What the key's use stamp ran with, and what the trust rule was handed. */
+interface ClientProbe {
+  establish: (transport: { headers?: Record<string, unknown>; remoteAddress?: string }) => string | undefined;
+  stamps: unknown[];
+}
+
+function mountFamily(probe?: ClientProbe) {
   const service = {
     listDatasources: vi.fn().mockResolvedValue([{ name: 'pg', origin: 'runtime', health: 'ok' }]),
     getDatasource: vi.fn().mockResolvedValue({ name: 'pg', driver: 'sqlite' }),
@@ -53,6 +62,7 @@ function mountFamily() {
   const auth = {
     ...createSessionAuthService(),
     resolveUserAuthGates: async (userId: string) => postures[userId] ?? [],
+    ...(probe ? { resolveClientAddress: probe.establish } : {}),
   };
   // The fixture's grants engine, taught the one key the entitled operator owns —
   // stamped with the organization the operator's grant belongs to, since a key
@@ -68,6 +78,13 @@ function mountFamily() {
         ? (opts?.where?.id === ENTITLED_USER ? [{ id: ENTITLED_USER }] : [])
         : grantsFind(object, opts)
   );
+  // [#31898] The key's use stamp: what plugin-audit's hook reads, read here.
+  if (probe) {
+    (engine as { update?: () => Promise<unknown> }).update = async () => {
+      probe.stamps.push(currentCredentialUseClient() ?? null);
+      return {};
+    };
+  }
   const ctx = {
     getService: vi.fn((name: string) => {
       if (name === 'auth') return auth;
@@ -146,5 +163,37 @@ describe('datasource-admin family — a key answers as its owner\'s session does
     expect((await drive('GET /api/v1/datasources')).status).toBe(403);
     postures[ENTITLED_USER] = [];
     expect((await drive('GET /api/v1/datasources')).status).toBe(200);
+  });
+});
+
+/**
+ * [#31898] The family's admin gate hands where the request came from to the
+ * key's use stamp: the transport's peer (the socket `@hono/node-server` puts on
+ * the request's env) and the headers go to the auth service's trust rule, and
+ * the address it establishes is what the `credential_use` row records, with the
+ * user agent. The door reads no forwarded header itself.
+ */
+describe('[#31898] the datasource admin gate hands its client facts to the key\'s use stamp', () => {
+  it('the stamp runs with the address the trust rule established from the peer, and the user agent', async () => {
+    const handed: Array<{ headers?: Record<string, unknown>; remoteAddress?: string }> = [];
+    const probe: ClientProbe = {
+      establish: (transport) => {
+        handed.push(transport);
+        return '203.0.113.7';
+      },
+      stamps: [],
+    };
+    const { app } = mountFamily(probe);
+    const res = await app.fetch(
+      new Request('http://local/api/v1/datasources', {
+        headers: { 'x-api-key': KEY, 'user-agent': 'ci-agent/3.1', 'x-forwarded-for': '198.51.100.9' },
+      }),
+      { incoming: { socket: { remoteAddress: '10.0.0.5' } } },
+    );
+    expect(res.status).toBe(200);
+    expect(handed).toHaveLength(1);
+    expect(handed[0].remoteAddress).toBe('10.0.0.5');
+    expect(handed[0].headers?.['x-forwarded-for'], 'handed over raw: the auth service decides whether it counts').toBe('198.51.100.9');
+    expect(probe.stamps).toEqual([{ ipAddress: '203.0.113.7', userAgent: 'ci-agent/3.1' }]);
   });
 });

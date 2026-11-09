@@ -44,6 +44,7 @@
  */
 
 import { AsyncLocalStorage } from 'node:async_hooks';
+import type { IAuthService } from '@objectstack/spec/contracts';
 
 /**
  * Why a `credential_use` row has no address:
@@ -92,6 +93,94 @@ export function userAgentOf(headers: unknown): string | undefined {
     return nonEmpty(Array.isArray(raw) ? raw[0] : raw);
   }
   return undefined;
+}
+
+/**
+ * [#31898] The one slice of the `auth` service the client address is asked of:
+ * its trust rule (`IAuthService.resolveClientAddress`). `undefined` when the
+ * door reaches no auth service.
+ */
+export type ClientAddressAuthority = Pick<IAuthService, 'resolveClientAddress'> | undefined;
+
+/**
+ * [#31898] What every HTTP door holds about where its request came from: the
+ * request's headers (a Web `Headers` or a plain record) and the transport's own
+ * peer address (`IHttpRequest.remoteAddress`, or a raw-app context's socket via
+ * {@link transportPeerAddressOf}), `undefined` when the transport exposes none.
+ */
+export interface CredentialUseDoorFacts {
+  headers: unknown;
+  remoteAddress: string | undefined;
+}
+
+/** Request headers as the plain lower-cased record `IAuthService.resolveClientAddress` reads. */
+function headerRecordOf(headers: unknown): Record<string, string | string[]> {
+  const out: Record<string, string | string[]> = {};
+  if (!headers || typeof headers !== 'object') return out;
+  try {
+    const h = headers as { forEach?: (fn: (value: string, name: string) => void) => void } & Record<string, unknown>;
+    if (typeof h.forEach === 'function' && !Array.isArray(headers)) {
+      h.forEach((value, name) => {
+        out[String(name).toLowerCase()] = value;
+      });
+      return out;
+    }
+    for (const [name, value] of Object.entries(h)) {
+      if (typeof value === 'string') out[name.toLowerCase()] = value;
+      else if (Array.isArray(value)) out[name.toLowerCase()] = value.map(String);
+    }
+  } catch {
+    // An unreadable headers object establishes nothing from its headers.
+  }
+  return out;
+}
+
+/**
+ * [#31898] Turn the facts an HTTP door holds into what it hands the
+ * key-admission seam. The ONE place a door's facts meet the deployment's
+ * client-address trust rule: the auth service establishes the address from the
+ * headers and the peer (`IAuthService.resolveClientAddress`, plugin-auth's
+ * `client-address.ts`), and the answer is the address, or `undefined` when it
+ * establishes none or no auth service can apply the rule. ⛔ Neither this
+ * function nor any door reads a forwarded header as an address, and the peer
+ * address is never taken without the rule.
+ *
+ * Every door that admits an API key calls it, directly or through
+ * `resolveRequestExecutionContext`'s `transport`; the door census
+ * (`credential-use-client-doors.pin.test.ts`) holds each to it.
+ */
+export function credentialUseClientFor(
+  authService: ClientAddressAuthority,
+  facts: CredentialUseDoorFacts,
+): CredentialUseClientInput {
+  let address: string | undefined;
+  try {
+    const resolved = authService?.resolveClientAddress?.({
+      headers: headerRecordOf(facts.headers),
+      ...(facts.remoteAddress ? { remoteAddress: facts.remoteAddress } : {}),
+    });
+    address = nonEmpty(resolved);
+  } catch {
+    address = undefined;
+  }
+  return { transport: 'http', address };
+}
+
+/**
+ * [#31898] The transport's peer address for a raw-app route's Hono context,
+ * when the runtime exposes one: `@hono/node-server` puts the Node
+ * `IncomingMessage` on `c.env.incoming`, the same read the transport makes for
+ * `IHttpRequest.remoteAddress` (`plugin-hono-server` `adapter.ts`). Every access
+ * is guarded: a runtime that exposes nothing yields `undefined`, which the trust
+ * rule reads as "no peer", never as a value to fabricate.
+ */
+export function transportPeerAddressOf(c: unknown): string | undefined {
+  try {
+    const incoming = (c as { env?: { incoming?: any } } | undefined)?.env?.incoming;
+    return nonEmpty(incoming?.socket?.remoteAddress ?? incoming?.connection?.remoteAddress);
+  } catch {
+    return undefined;
+  }
 }
 
 /**

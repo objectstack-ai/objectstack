@@ -53,13 +53,6 @@
       "reason": "state-owning: bare-this, the body hands the instance itself on (#29986 report: stays on the class)"
     },
     {
-      "file": "packages/objectql/src/engine.ts",
-      "class": "ObjectQL",
-      "member": "insert",
-      "card": "#30020",
-      "reason": "state-owning: bare-this, the body hands the instance itself on (#29986 report: stays on the class)"
-    },
-    {
       "file": "packages/drivers/driver-sql/src/sql-driver.ts",
       "member": "constructor",
       "card": "#30020",

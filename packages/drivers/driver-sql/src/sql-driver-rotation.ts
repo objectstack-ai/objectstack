@@ -216,6 +216,8 @@ export class RotationFacet {
         new Set(Object.keys(colInfo)),
         baseTenantField,
         obj.fields ?? {},
+        // #31901: a shard that already existed builds concurrently on PostgreSQL.
+        { existingTable: exists },
       );
     }
   }
@@ -605,6 +607,9 @@ export class RotationFacet {
           declaredIndexes,
           tenantField,
           physicalColumns,
+          // #31901: a table that was already there builds its missing indexes
+          // CONCURRENTLY on PostgreSQL; one this call just created stays plain.
+          { existingTable: exists },
         );
         // [cloud#3652 D3] A carried column is keyed twice now: under the index
         // name of its old key and under the one the declaration names. Drop

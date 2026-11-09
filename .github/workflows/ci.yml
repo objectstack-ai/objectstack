@@ -4132,10 +4132,13 @@ jobs:
   #   - full (push, schedule, dispatch, a selector that fails open): all
   #     sixteen slots, each leg running `--shard=k/16` through the sequencer
   #     exactly as before;
-  #   - affected: the selected files packed into N = clamp(ceil(P / D), 1, 16)
-  #     slots, P the selection's predicted seconds and D the whole suite's
-  #     over the roster, both read off ui/scripts/test-shard-timings.json on
-  #     every run, so no planned leg is denser than a full-battery leg.
+  #   - affected: the selector's always-on files (its `--lane-out`, the tests
+  #     the package graph cannot place, ~510 today) are the LANE, slot 1; the
+  #     rest of the selection is packed into N = clamp(ceil(P / D), 1, 15)
+  #     more slots, P their predicted seconds and D the whole suite's over the
+  #     roster, both read off ui/scripts/test-shard-timings.json on every run,
+  #     so no planned leg is denser than a full-battery leg. A full plan has
+  #     no lane: its sixteen legs already run everything.
   # Vitest's own collection (`vitest list`) is what the plan partitions; the
   # planner refuses to write a plan whose slots are not exactly that set.
   # 16 stays the slot roster: the matrix reads
@@ -4239,7 +4242,7 @@ jobs:
           else
             echo "Diff base: $base"
             node ui/scripts/select-affected-tests.mjs --base "$base" --out "$RUNNER_TEMP/affected-tests.txt" \
-              > "$RUNNER_TEMP/select.out" || status=$?
+              --lane-out "$RUNNER_TEMP/always-on-tests.txt" > "$RUNNER_TEMP/select.out" || status=$?
             cat "$RUNNER_TEMP/select.out"
           fi
           verdict=''
@@ -4268,7 +4271,7 @@ jobs:
           if [ "$MODE" = 'affected' ]; then
             mapfile -t filters < "$RUNNER_TEMP/affected-tests.txt"
             pnpm --dir ui exec vitest list --filesOnly --json="$RUNNER_TEMP/ui-tests-selected.json" "${filters[@]}"
-            "${plan[@]}" --selected "$RUNNER_TEMP/ui-tests-selected.json"
+            "${plan[@]}" --selected "$RUNNER_TEMP/ui-tests-selected.json" --lane "$RUNNER_TEMP/always-on-tests.txt"
           else
             "${plan[@]}"
           fi
@@ -4474,7 +4477,7 @@ jobs:
           else
             echo "Diff base: $base"
             node ui/scripts/select-affected-tests.mjs --base "$base" --out "$RUNNER_TEMP/affected-tests.txt" \
-              > "$RUNNER_TEMP/select.out" || status=$?
+              --lane-out "$RUNNER_TEMP/always-on-tests.txt" > "$RUNNER_TEMP/select.out" || status=$?
             cat "$RUNNER_TEMP/select.out"
           fi
           verdict=''
@@ -4521,7 +4524,7 @@ jobs:
             fi
             mapfile -t filters < "$RUNNER_TEMP/affected-tests.txt"
             pnpm --dir ui exec vitest list --filesOnly --json="$RUNNER_TEMP/ui-tests-selected.json" "${filters[@]}"
-            "${plan[@]}" --selected "$RUNNER_TEMP/ui-tests-selected.json" --expect-digest "$PLAN_DIGEST"
+            "${plan[@]}" --selected "$RUNNER_TEMP/ui-tests-selected.json" --lane "$RUNNER_TEMP/always-on-tests.txt" --expect-digest "$PLAN_DIGEST"
             node ui/scripts/plan-test-ui-shards.mjs files --plan "$RUNNER_TEMP/test-ui-plan.json" --slot ${{ matrix.shard }} > "$RUNNER_TEMP/slot-tests.txt"
             echo 'mode=affected' >> "$GITHUB_OUTPUT"
           else

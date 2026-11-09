@@ -7,13 +7,15 @@
  * (objectstack#31914). The root `ci.yml`'s `test-ui-plan` job writes the plan;
  * every `test-ui` leg derives it again and refuses to run on a mismatch.
  *
- *   node ui/scripts/plan-test-ui-shards.mjs plan --all ALL.json [--selected SEL.json]
+ *   node ui/scripts/plan-test-ui-shards.mjs plan --all ALL.json [--selected SEL.json [--lane LANE.txt]]
  *        --out PLAN.json [--github-output FILE] [--expect-digest HEX]
  *   node ui/scripts/plan-test-ui-shards.mjs files --plan PLAN.json --slot K
  *   node ui/scripts/plan-test-ui-shards.mjs verify-ran --plan PLAN.json --slot K --report REPORT.json
  *
  * `ALL.json` and `SEL.json` are `vitest list --filesOnly --json=FILE` output:
- * the whole suite, and the suite under the selector's filters. Vitest's own
+ * the whole suite, and the suite under the selector's filters. `LANE.txt` is
+ * the selector's `--lane-out`: its always-on files, one ui-relative path per
+ * line. Vitest's own
  * collection is the one authority on which files a set of filters runs, so the
  * planner never derives a file list of its own: a package filter that collects
  * a file the selector does not know about is still planned, and still checked.
@@ -50,6 +52,23 @@
  *             runs on slot j, its files passed to vitest by exact path. A file
  *             is never split across bins, so a file two projects collect
  *             runs in both of them on one leg.
+ *   the lane  (affected plans given `--lane`): the selection's ALWAYS-ON files,
+ *             the ones the selector selects only because the package graph
+ *             cannot place them, run together on slot 1, and the rest is
+ *             packed as above into slots 2..N+1, N at most the roster less
+ *             one. The lane is the selector's verdict on this very run, never
+ *             a list kept beside it. A full plan has no lane: its sixteen
+ *             sequencer legs already run everything (ruling 6739581615).
+ *
+ * ## Paths that are filters of each other
+ *
+ * Vitest reads each positional as a case-insensitive SUBSTRING of a test path,
+ * so a leg handed `a/x.test.ts` also runs `a/x.test.tsx`, and
+ * `scripts/vitest-invocation-guard.mjs` refuses an argv in which one positional
+ * contains another. The planner therefore packs such paths as one UNIT, always
+ * on one slot (the lane, when any of them is always-on), and `files` hands
+ * vitest only the shortest of them. A selected path that is a filter of a
+ * collected path the selection lacks cannot be run exactly, so `plan` refuses.
  *
  * Weights are `test-shard-partition.mjs`'s: the measured per-file ms keyed by
  * `pathKey()`, the dataset median for a file it does not name, at least 1 ms.
@@ -116,6 +135,68 @@ export function readSpecs(list, root = UI_ROOT) {
 const specId = (/** @type {{ path: string, project: string }} */ s) => `${s.path}\u0000${s.project}`;
 
 /**
+ * `paths` grouped into the units vitest's filters force: two paths share a unit
+ * when one is a case-insensitive substring of the other, transitively. Throws
+ * when a path is a filter of a collected path outside `paths`: the leg running
+ * it would run that file too, and no slot planned it.
+ *
+ * @param {string[]} paths unique
+ * @param {string[]} collected every collected path, unique
+ * @returns {string[][]} each unit sorted, shortest first
+ */
+export function filterUnits(paths, collected) {
+  const inPaths = new Set(paths);
+  const lower = collected.map((p) => p.toLowerCase());
+  /** @type {Map<string, string>} */
+  const parent = new Map(paths.map((p) => [p, p]));
+  const root = (/** @type {string} */ p) => {
+    let r = p;
+    while (parent.get(r) !== r) r = /** @type {string} */ (parent.get(r));
+    parent.set(p, r);
+    return r;
+  };
+  /** @type {string[]} */
+  const strays = [];
+  for (const p of paths) {
+    const needle = p.toLowerCase();
+    collected.forEach((q, i) => {
+      if (q === p || !lower[i].includes(needle)) return;
+      if (!inPaths.has(q)) strays.push(`${p} also matches ${q}`);
+      else parent.set(root(q), root(p));
+    });
+  }
+  if (strays.length > 0) {
+    throw new Error(
+      `plan-test-ui-shards: ${strays.length} selected path(s) are vitest filters of a collected file the selection lacks, so no leg could run them exactly: ${strays.slice(0, 5).join('; ')}`,
+    );
+  }
+  /** @type {Map<string, string[]>} */
+  const units = new Map();
+  for (const p of paths) units.set(root(p), [...(units.get(root(p)) ?? []), p]);
+  return [...units.values()].map((unit) => unit.sort((a, b) => a.length - b.length || a.localeCompare(b)));
+}
+
+/**
+ * The positionals that run exactly `paths`: a path another one already
+ * matches is left out, as the invocation guard requires.
+ *
+ * @param {string[]} paths
+ */
+export function slotFilters(paths) {
+  const sorted = [...new Set(paths)].sort((a, b) => a.length - b.length || a.localeCompare(b));
+  /** @type {string[]} lower-cased */
+  const kept = [];
+  const keep = new Set();
+  for (const p of sorted) {
+    const lower = p.toLowerCase();
+    if (kept.some((k) => lower.includes(k))) continue;
+    kept.push(lower);
+    keep.add(p);
+  }
+  return [...new Set(paths)].filter((p) => keep.has(p));
+}
+
+/**
  * The per-path weights the sequencer would use: measured ms, else the median.
  *
  * @param {string[]} paths
@@ -150,11 +231,13 @@ export function assertPartition(specs, bins) {
 /**
  * The whole plan for one run.
  *
- * @param {{ all: Array<{ path: string, project: string }>, selected?: Array<{ path: string, project: string }> | null, dataset: unknown, slots: number }} input
- *   `selected` absent or null is the full mode.
+ * @param {{ all: Array<{ path: string, project: string }>, selected?: Array<{ path: string, project: string }> | null, lane?: string[] | null, dataset: unknown, slots: number }} input
+ *   `selected` absent or null is the full mode. `lane`, the selector's
+ *   always-on paths, is an affected plan's slot 1; absent or null, no lane.
  */
-export function planRun({ all, selected = null, dataset, slots }) {
+export function planRun({ all, selected = null, lane = null, dataset, slots }) {
   if (!Number.isInteger(slots) || slots < 1) throw new Error(`plan-test-ui-shards: the slot roster must be a positive integer, got ${slots}`);
+  if (selected === null && lane !== null) throw new Error('plan-test-ui-shards: a lane belongs to an affected plan; a full plan has none');
   const allPaths = [...new Set(all.map((s) => s.path))];
   const allWeights = pathWeights(allPaths, dataset);
   const suiteMs = allPaths.reduce((sum, p) => sum + /** @type {number} */ (allWeights.get(p)), 0);
@@ -165,6 +248,9 @@ export function planRun({ all, selected = null, dataset, slots }) {
   /** @type {'full' | 'affected'} */
   let mode;
   let selectedMs = suiteMs;
+  /** Whether slot 1 is the always-on lane, and what it weighs. */
+  let hasLane = false;
+  let laneMs = 0;
   /** `sequencer` unless a full plan meets a dataset with no measurement in it. */
   let split = 'sequencer';
   if (selected === null) {
@@ -185,27 +271,53 @@ export function planRun({ all, selected = null, dataset, slots }) {
     mode = 'affected';
     const paths = [...new Set(selected.map((s) => s.path))];
     const weights = pathWeights(paths, dataset);
-    selectedMs = paths.reduce((sum, p) => sum + /** @type {number} */ (weights.get(p)), 0);
-    const count = paths.length === 0 ? 0 : Math.max(1, Math.min(slots, paths.length, Math.ceil(selectedMs / densityMs)));
+    const weigh = (/** @type {string[]} */ unit) => unit.reduce((sum, p) => sum + /** @type {number} */ (weights.get(p)), 0);
+    selectedMs = weigh(paths);
     /** @type {Map<string, Array<{ path: string, project: string }>>} */
     const byPath = new Map(paths.map((p) => [p, []]));
     for (const s of selected) /** @type {Array<{ path: string, project: string }>} */ (byPath.get(s.path)).push(s);
-    const packed = count === 0 ? { bins: [] } : partition(paths.map((p) => ({ key: p, weight: /** @type {number} */ (weights.get(p)) })), count);
-    bins = packed.bins.map((bin) => bin.flatMap((i) => /** @type {Array<{ path: string, project: string }>} */ (byPath.get(paths[i]))));
+    const specsOf = (/** @type {string[]} */ unit) => unit.flatMap((p) => /** @type {Array<{ path: string, project: string }>} */ (byPath.get(p)));
+    const units = filterUnits(paths, allPaths);
+    // The lane: every unit holding an always-on path. With a roster of one
+    // there is no slot left beside it, so the lane is then the whole plan.
+    const always = new Set(lane ?? []);
+    const laneUnits = units.filter((unit) => unit.some((p) => always.has(p)));
+    hasLane = laneUnits.length > 0;
+    const rest = hasLane && slots === 1 ? [] : units.filter((unit) => !laneUnits.includes(unit));
+    const laneBin = hasLane ? units.filter((unit) => !rest.includes(unit)).flat().sort() : [];
+    laneMs = weigh(laneBin);
+    const restMs = selectedMs - laneMs;
+    const room = slots - (hasLane ? 1 : 0);
+    const count = rest.length === 0 ? 0 : Math.max(1, Math.min(room, rest.length, Math.ceil(restMs / densityMs)));
+    const packed = count === 0 ? { bins: [] } : partition(rest.map((unit) => ({ key: unit[0], weight: weigh(unit) })), count);
+    bins = [...(hasLane ? [specsOf(laneBin)] : []), ...packed.bins.map((bin) => specsOf(bin.flatMap((i) => rest[i])))];
     assertPartition(selected, bins);
   }
   const shards = bins.map((_, i) => i + 1);
-  const digest = planDigest({ mode, slots, split, bins });
-  return { schema: PLAN_SCHEMA, mode, slots, split, shards, suiteMs: Math.round(suiteMs), densityMs: Math.round(densityMs), selectedMs: Math.round(selectedMs), bins, digest };
+  const digest = planDigest({ mode, slots, split, lane: hasLane, bins });
+  return {
+    schema: PLAN_SCHEMA,
+    mode,
+    slots,
+    split,
+    lane: hasLane,
+    shards,
+    suiteMs: Math.round(suiteMs),
+    densityMs: Math.round(densityMs),
+    selectedMs: Math.round(selectedMs),
+    laneMs: Math.round(laneMs),
+    bins,
+    digest,
+  };
 }
 
 /**
  * What a plan's digest covers: everything a leg acts on.
  *
- * @param {{ mode: string, slots: number, split: string, bins: unknown }} plan
+ * @param {{ mode: string, slots: number, split: string, lane: boolean, bins: unknown }} plan
  */
-function planDigest({ mode, slots, split, bins }) {
-  return createHash('sha256').update(JSON.stringify({ schema: PLAN_SCHEMA, mode, slots, split, bins })).digest('hex');
+function planDigest({ mode, slots, split, lane, bins }) {
+  return createHash('sha256').update(JSON.stringify({ schema: PLAN_SCHEMA, mode, slots, split, lane, bins })).digest('hex');
 }
 
 /**
@@ -296,7 +408,9 @@ async function main(argv) {
     const all = readSpecs(readJson(required(rest, '--all')));
     const selectedFile = option(rest, '--selected');
     const selected = selectedFile === undefined ? null : readSpecs(readJson(selectedFile));
-    const plan = planRun({ all, selected, dataset: readJson(TIMINGS), slots: await liveSlots() });
+    const laneFile = option(rest, '--lane');
+    const lane = laneFile === undefined ? null : readFileSync(laneFile, 'utf8').split('\n').filter(Boolean);
+    const plan = planRun({ all, selected, lane, dataset: readJson(TIMINGS), slots: await liveSlots() });
     const expected = option(rest, '--expect-digest');
     if (expected !== undefined && expected !== plan.digest) {
       console.error(
@@ -316,13 +430,20 @@ async function main(argv) {
       `Test UI plan: ${plan.mode}, ${plan.shards.length} of ${plan.slots} slot(s) for ${files} test file(s); ` +
         `${s(plan.selectedMs)} predicted against a density of ${s(plan.densityMs)} per slot (the whole suite's ${s(plan.suiteMs)} / ${plan.slots}); digest ${plan.digest}.`,
     );
-    plan.bins.forEach((bin, i) => console.log(`  slot ${i + 1}: ${bin.length} file(s)`));
+    plan.bins.forEach((bin, i) =>
+      console.log(`  slot ${i + 1}: ${bin.length} file(s)${plan.lane && i === 0 ? `, the always-on lane (${s(plan.laneMs)} predicted)` : ''}`),
+    );
+    if (lane !== null) {
+      const placed = new Set(plan.bins.flat().map((spec) => spec.path));
+      const uncollected = lane.filter((p) => !placed.has(p));
+      if (uncollected.length > 0) console.log(`  ${uncollected.length} always-on path(s) the selection did not collect, so no lane runs them: ${uncollected.slice(0, 5).join(', ')}`);
+    }
     return 0;
   }
   if (command === 'files') {
     const plan = readPlan(required(rest, '--plan'));
     const bin = slotBin(plan, Number(required(rest, '--slot')));
-    for (const file of [...new Set(bin.map((s) => s.path))]) console.log(file);
+    for (const file of slotFilters([...new Set(bin.map((s) => s.path))])) console.log(file);
     return 0;
   }
   if (command === 'verify-ran') {

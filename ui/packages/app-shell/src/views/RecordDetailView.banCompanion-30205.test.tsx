@@ -114,6 +114,7 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 });
 
 import { MetadataCtx } from '@object-ui/react';
+import { ActionRunner, type PreflightReadFiller } from '@object-ui/core';
 import { RecordDetailView } from './RecordDetailView';
 
 const OBJECT_NAME = 'sys_user';
@@ -166,7 +167,7 @@ function recordPageParamCollection() {
  * does and read back the state the dialog received. The promise stays pending —
  * that is the real shape too: nothing is POSTed until the dialog's own Confirm.
  */
-async function collectParams(dispatch: Record<string, unknown>, interpolate?: (text: string) => string) {
+async function collectParams(dispatch: Record<string, unknown>, interpolate?: (text: string) => string, interpolateRead?: unknown) {
   render(
     <MemoryRouter initialEntries={[`/app/demo/${OBJECT_NAME}/${RECORD_ID}`]}>
       <MetadataCtx.Provider value={METADATA}>
@@ -185,7 +186,7 @@ async function collectParams(dispatch: Record<string, unknown>, interpolate?: (t
   const collect = recordPageParamCollection()!;
   paramDialogState = null;
   await act(async () => {
-    void collect(PARAMS, dispatch as any, interpolate);
+    void collect(PARAMS, dispatch as any, interpolate, undefined, interpolateRead);
     await Promise.resolve();
   });
 }
@@ -223,5 +224,33 @@ describe('RecordDetailView — the ban dialog\'s companion (objectstack#30205)',
   it('CONTROL: another sys_user action carries no companion', async () => {
     await collectParams({ name: 'unban_user', label: 'Unban User', objectName: OBJECT_NAME, params: { _rowRecord: { id: RECORD_ID } } });
     expect(paramDialogState.companion).toBeUndefined();
+  });
+});
+
+describe('RecordDetailView — the declared preflight read (objectstack#31808)', () => {
+  const PREFLIGHT = { read: { url: '/api/v1/notes/plan?name=${ctx.record.name}&subject=${param.subject}' } };
+
+  it('hands the dialog the action\'s preflight, judged by the spec, with the runner\'s filler', async () => {
+    const fill = () => '/api/v1/notes/plan';
+    await collectParams({ name: 'send_note', label: 'Send', objectName: OBJECT_NAME, preflight: PREFLIGHT }, undefined, fill);
+    expect(paramDialogState.companion).toMatchObject({ kind: 'preflight', judged: { ok: true } });
+    expect(paramDialogState.companion.interpolateRead).toBe(fill);
+  });
+
+  it('a header dispatch binds `${ctx.record.FIELD}` to the record the page loaded', async () => {
+    await collectParams({ name: 'send_note', label: 'Send', objectName: OBJECT_NAME, preflight: PREFLIGHT });
+    // The runner the page's own provider builds, from the context it is handed:
+    // a header dispatch carries no row, so `ctx.record` is that context's record.
+    const context = [...captured].reverse().find((c) => c.context?.record?.id === RECORD_ID)?.context;
+    await waitFor(() => expect(context?.record?.name).toBe('Intro call'));
+    const runner = new ActionRunner(context);
+    let fill: PreflightReadFiller | undefined;
+    runner.registerHandler('api', vi.fn(async () => ({ success: true })));
+    runner.setParamCollectionHandler(async (_p, _a, _i, _r, interpolateRead) => {
+      fill = interpolateRead;
+      return null;
+    });
+    await runner.execute({ type: 'api', name: 'send_note', target: '/api/v1/x', params: PARAMS, preflight: PREFLIGHT } as never);
+    expect(fill!(PREFLIGHT.read.url, { subject: 'Hello' })).toBe('/api/v1/notes/plan?name=Intro%20call&subject=Hello');
   });
 });

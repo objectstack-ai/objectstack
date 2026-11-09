@@ -372,6 +372,11 @@ const ActionButtonRenderer = forwardRef<
           // meaning. ⛔ Never widen either end back to `as any`: that one
           // spelling hid the missing declaration AND the drifted mirror at once.
           resultDialog: schema.resultDialog,
+          // The param dialog's preflight read (`ActionSchema.preflight`,
+          // objectstack#31808): the console's param-collection handlers read
+          // it off the forwarded def. Dropped here, a dialog opened from this
+          // button would never send the read or seed its params.
+          preflight: schema.preflight,
           // Declared post-success navigation — spec's closed strict
           // `{ navigate, openIn }` block, authorable on `ActionSchema` since
           // @objectstack/spec 17.1.0 (objectui#5328). The runner reads it off
