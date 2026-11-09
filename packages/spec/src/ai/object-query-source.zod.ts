@@ -88,4 +88,3 @@ export const OBJECT_QUERY_SOURCE_TOOL_NAMES = [
 ] as const;
 
 export type ObjectQuerySource = z.input<typeof ObjectQuerySourceSchema>;
-export type ObjectQuerySourceParsed = z.infer<typeof ObjectQuerySourceSchema>;
