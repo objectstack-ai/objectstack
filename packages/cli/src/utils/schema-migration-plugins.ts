@@ -4,6 +4,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import {
   isDevelopmentBoot,
+  isFederatedObject,
   readDeploymentOrgScopingEntitlement,
   resolveAuthSecret,
   resolvePlatformAuthComposition,
@@ -2462,7 +2463,7 @@ export async function measureComposedCoverage(
     // Federated objects have no managed table — `detectManagedDrift` could not
     // diff one if it wanted to. Counted apart from a real gap rather than
     // folded into it.
-    if (obj?.external != null) { federated++; continue; }
+    if (isFederatedObject(obj)) { federated++; continue; }
     const driver = engine.getDriverForObject(obj.name);
     if (!driver) { unbound++; continue; }
     if (!plannedDrivers.includes(driver)) { otherDriver++; continue; }
