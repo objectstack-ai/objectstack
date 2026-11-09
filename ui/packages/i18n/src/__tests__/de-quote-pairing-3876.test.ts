@@ -418,7 +418,11 @@ describe('objectui#3876 — de pack closes „ with “ and not with a straight 
     // `objectActions.restoredNamed`, the toast after a recycle-bin Undo that
     // names the restored record („{{name}}“) — one interpolated span, runtime
     // data.
-    expect(okSpans, 'correctly paired spans').toBe(111);
+    // 114 once objectstack-ai/objectstack#31893 (2026-11-09) added
+    // `list.loadErrorUnknownColumnMessage` and `list.loadErrorUnknownFieldMessage`,
+    // the rejected list panel naming a refused column („{{column}}“) and field
+    // („{{field}}“, twice) — three interpolated spans, runtime data.
+    expect(okSpans, 'correctly paired spans').toBe(114);
   });
 
   it('keeps the count identity that replaces the card’s count(„) === count(“)', () => {
@@ -517,8 +521,10 @@ describe('objectui#3876 — de pack closes „ with “ and not with a straight 
     // matched pair fewer. 110 / 110 / 0 after objectstack-ai/objectstack#28104
     // added `form.aiDraftNotice`, one more matched pair. 111 / 111 / 0 after
     // objectstack-ai/objectstack#30239 added `objectActions.restoredNamed`, one
-    // more matched pair.
-    expect({ open, close, rdq }).toEqual({ open: 111, close: 111, rdq: 0 });
+    // more matched pair. 114 / 114 / 0 after objectstack-ai/objectstack#31893
+    // (2026-11-09) added `list.loadErrorUnknownColumnMessage` and
+    // `list.loadErrorUnknownFieldMessage`, three more matched pairs.
+    expect({ open, close, rdq }).toEqual({ open: 114, close: 114, rdq: 0 });
     // The durable shape: every „ closed by a “, every surplus “ an English
     // opener answered by a ”. Survived translating the two English values.
     expect(close).toBe(open + rdq);
