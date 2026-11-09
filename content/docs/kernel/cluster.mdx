@@ -365,6 +365,24 @@ channel's own doc comment:
   exceeds at-most-once delivery (§4.2), so a lost message is not retried.
   Each lane narrows the staleness window this always had — "until the next
   full reload on restart" — to "one network hop"; it does not promise more.
+- **Resync after a driver outage.** A message lost while the store is
+  unreachable is not retried, but a replica no longer waits for its restart
+  to recover it. When a remote driver's connection returns after an outage,
+  the driver emits ONE local `cluster.resync` event on that replica. The
+  event is never published to peers; each replica emits its own when its own
+  connection returns. `MetadataClusterBridgePlugin` re-reads every attached
+  lane on it: lane 1 drops the metadata list caches
+  (`MetadataManager.resyncClusterPubSub()`), lane 3 re-converges every stored
+  datasource and every held pool
+  (`DatasourceAdminService.resyncDatasourceMutationPubSub()`), and lane 4
+  runs the connector reconcile
+  (`AutomationEngine.resyncConnectorCredentialPubSub()`).
+  `AuthzClusterBridgePlugin` advances the engine's write epoch, which retires
+  cached grants. **Lane 2 has no resync yet**: it converges per item on the
+  signals that are delivered, and fully at boot. A cache of your own
+  subscribes with `onClusterResync(cluster, handler)` from
+  `@objectstack/service-cluster`. On the `memory` driver that subscription is
+  a no-op, because nothing there can lose a connection.
 
 All four lanes skip their fan-out on the same condition — the in-process
 `memory` cluster driver, described for lane 1 immediately below, applies
@@ -702,6 +720,34 @@ Note this reads the operator-**declared** count, not live membership: no
 membership view exists at boot. It is the right input for telling an operator
 about the configuration they wrote, and is deliberately not sufficient for
 enforcement.
+
+The `redis` driver has two outage settings:
+
+- `driverOptions.logger` (`{ warn, info? }`, default `console`): where the driver writes
+  its outage lines. It logs ONE warning when the store becomes unreachable,
+  naming `host:port` and never the URL or a password, and one info line when
+  the store returns. It does not log a line per failed command.
+- Every connection the driver creates is built with `commandTimeout` set to
+  `REDIS_COMMAND_TIMEOUT_MS` (2000 ms, exported by
+  `@objectstack/service-cluster-redis`). A command, queued or sent, fails
+  after 2 s instead of hanging on a black-holed store. The shared cache
+  derives its connection with `client.duplicate()` and inherits the same
+  bound. To run longer commands, pass your own client through
+  `driverOptions.client`.
+
+Two readings of the same driver answer different questions:
+
+- `readClusterDriverHealth(cluster)` is **passive**. It reports what the
+  driver's connections last said (`error`, `close`, `ready`), sends nothing to
+  the store, and costs nothing. It returns a `ClusterDriverLivenessHealth`:
+  `{ driver, nodeId, state: 'unknown' | 'up' | 'down', since, outages, lastError? }`.
+  A black-holed store whose socket never errors still reads as `up`.
+- `probeClusterDriverHealth(cluster, driver)` is **active**. It sends a
+  bounded `PING` to the store, and it is what `/ready` reports. It returns a
+  `ClusterDriverHealth`: `{ driver, reachable, reason? }`. It does see a
+  black-holed store, because the `PING` times out.
+
+Both return `undefined` on the `memory` driver.
 
 Every cluster primitive selects its implementation from `cluster.driver`.
 When the field is absent, `Runtime` auto-registers the in-memory, single-node

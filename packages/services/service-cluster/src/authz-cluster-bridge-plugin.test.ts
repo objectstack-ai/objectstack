@@ -23,6 +23,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import type { PluginContext } from '@objectstack/core';
 import { AuthzClusterBridgePlugin } from './authz-cluster-bridge-plugin.js';
+import { ClusterDriverLiveness, offerClusterDriverLiveness } from './cluster-resync.js';
 
 const TTL_ENV = 'OS_AUTHZ_GRANTS_CACHE_TTL_MS';
 
@@ -54,6 +55,9 @@ function makeHarness(opts: HarnessOptions = {}) {
     const detach = vi.fn();
 
     const pubsub = { publish: vi.fn(), subscribe: vi.fn(), close: vi.fn() };
+    // The engine's write epoch — what the bridge advances on `cluster.resync`.
+    const bump = vi.fn((_reason: string) => 7);
+    const engineService = { attachAuthzInvalidationPubSub: attach, writeEpoch: { current: 6, bump, subscribe: vi.fn() } };
     const cluster =
         driver === undefined
             ? undefined
@@ -74,7 +78,7 @@ function makeHarness(opts: HarnessOptions = {}) {
             }
             if (name === 'objectql') {
                 if (!engine) throw new Error('service not found: objectql');
-                return { attachAuthzInvalidationPubSub: attach };
+                return engineService;
             }
             throw new Error(`service not found: ${name}`);
         },
@@ -84,7 +88,7 @@ function makeHarness(opts: HarnessOptions = {}) {
         for (const h of hooks.get(name) ?? []) await h();
     };
 
-    return { ctx, logger, attach, detach, fire, pubsub };
+    return { ctx, logger, attach, detach, fire, pubsub, bump, cluster };
 }
 
 afterEach(() => {
@@ -213,5 +217,45 @@ describe('[#11968] the bridged arm — enabled cache, remote driver', () => {
         await h.fire('kernel:ready');
         await expect(h.fire('kernel:shutdown')).resolves.toBeUndefined();
         expect(h.logger.error).not.toHaveBeenCalled();
+    });
+});
+
+describe('cluster.resync — cached grants are retired after an outage that may have lost hints', () => {
+    function withLiveness(h: ReturnType<typeof makeHarness>) {
+        const liveness = new ClusterDriverLiveness({ driver: 'redis', nodeId: 'node-a', logger: { warn: vi.fn() } });
+        offerClusterDriverLiveness(h.cluster!, liveness);
+        return () => {
+            liveness.reportUp('command');
+            liveness.reportDown('command', new Error('ECONNREFUSED'));
+            liveness.reportUp('command');
+        };
+    }
+
+    it('while bridged, a recovered outage advances the write epoch once, as a remote hint does', async () => {
+        vi.stubEnv(TTL_ENV, '5000');
+        const h = makeHarness({ driver: 'redis' });
+        const outage = withLiveness(h);
+        await new AuthzClusterBridgePlugin().init(h.ctx);
+        await h.fire('kernel:ready');
+        expect(h.bump).not.toHaveBeenCalled();
+
+        outage();
+        expect(h.bump).toHaveBeenCalledTimes(1);
+        // `remote`: the bridge must not echo the bump onto the bus.
+        expect(h.bump).toHaveBeenCalledWith('remote');
+
+        await h.fire('kernel:shutdown');
+        outage();
+        expect(h.bump).toHaveBeenCalledTimes(1);
+    });
+
+    it('CONTROL — cache off (the shipped default): nothing is bridged, so nothing listens', async () => {
+        vi.stubEnv(TTL_ENV, '0');
+        const h = makeHarness({ driver: 'redis' });
+        const outage = withLiveness(h);
+        await new AuthzClusterBridgePlugin().init(h.ctx);
+        await h.fire('kernel:ready');
+        outage();
+        expect(h.bump).not.toHaveBeenCalled();
     });
 });

@@ -16,10 +16,10 @@
  * `democrm`), in both modes, so a scored build's names are the same on every
  * run and every machine. The card's object `account` is `democrm_account` — in
  * `expect`, the seed, its user-handle fields, questions, personas (with their
- * person records), operations, guardrails and the iterate delta. Every other item the card names carries the prefix too, since
- * a gallery app prefixes every item name (the scorer reports a bare one,
- * `score/scenario-naming.ts`): the expected dashboards and nav targets, the
- * agent actions, and each persona's permission set ({@link permissionSetName}).
+ * person records), operations, guardrails and the iterate delta. Every other item the card names carries the prefix too, so
+ * the names the prompt states and the Build half checks are one spelling on every run: the
+ * expected dashboards and nav targets, the agent actions, and each persona's permission
+ * set ({@link permissionSetName}). The scorer requires it only where ADR-0150 does.
  * Fields, row ids, persona ids and computed truths are untouched (a truth is
  * keyed by question id and computed over row values). An answer may still cite
  * the bare object name: {@link citationLabels} hands the grader both spellings.
