@@ -242,6 +242,25 @@ describe('two holders: a name two packages declare is refused, naming both (red 
     expect(message).toContain(ALPHA);
     expect(message).toContain(BETA);
   });
+  it('holds the refused name’s standing grants through the orphan sweep (refused is not absent), and warns once', async () => {
+    const { warnings, logger } = logs();
+    const engine = makeEngine({
+      sys_record_share: [
+        { id: 'g_held', source: 'rule', source_id: 'emea_share', organization_id: 'org_a' },
+        { id: 'g_orphan', source: 'rule', source_id: 'gone_rule', organization_id: 'org_a' },
+      ],
+    });
+    const revoked: string[] = [];
+    const sharing = { revoke: async (id: string) => void revoked.push(id) };
+    const source = createDeclaredSharingRuleSource({ engine: { registry } });
+    const rules = new SharingRuleService({ engine: engine as any, sharing: sharing as any, declaredRules: source, logger });
+    expect(await rules.sweepOrphanedRuleGrants()).toBe(1);
+    expect(await rules.sweepOrphanedRuleGrants()).toBe(1);
+    expect(revoked).toEqual(['g_orphan', 'g_orphan']);
+    const held = warnings.filter((w) => w.msg.includes('holds this name'));
+    expect(held).toHaveLength(1);
+    expect(held[0].meta).toMatchObject({ name: 'emea_share', candidates: [ALPHA, BETA] });
+  });
 });
 
 describe('a listing that cannot be asked (package, name) gets no pick either', () => {

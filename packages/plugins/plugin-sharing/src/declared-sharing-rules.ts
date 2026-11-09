@@ -65,6 +65,7 @@ import {
   servedDeclarations,
   type DeclaredNameAnswer,
 } from './package-scoped-declarations.js';
+import type { PackageScopedRefusal } from '@objectstack/objectql';
 
 type Logger = { info?: (m: string, meta?: any) => void; warn?: (m: string, meta?: any) => void };
 
@@ -256,6 +257,13 @@ export interface DeclaredSharingRuleSource {
    * `not-found`, as `list()` leaves it out.
    */
   lookup?(name: string): Promise<DeclaredNameAnswer<DeclaredSharingRule>>;
+  /**
+   * [ADR-0150 D3, child E4] Every declared name the resolver refuses (two or
+   * more holders), with its refusal. Refused is not absent: the orphaned-grant
+   * sweep holds these names' standing grants rather than revoking them on an
+   * ambiguity. Reports nothing itself; `list()` is the reader that reports.
+   */
+  refused?(): Promise<PackageScopedRefusal[]>;
 }
 
 /** The registry, as this read uses it — ObjectQL's `SchemaRegistry` (`engine.registry`) satisfies it. */
@@ -373,6 +381,12 @@ export function createDeclaredSharingRuleSource(opts: DeclaredSharingRuleSourceO
       if (answer.status !== 'resolved') return answer;
       const translated = translate(answer.item);
       return translated.rule ? { status: 'resolved', item: translated.rule } : { status: 'not-found' };
+    },
+    async refused(): Promise<PackageScopedRefusal[]> {
+      const { defs, registry } = await read();
+      const out: PackageScopedRefusal[] = [];
+      servedDeclarations(registry, 'sharing_rule', defs, (refusal) => out.push(refusal));
+      return out;
     },
   };
 }

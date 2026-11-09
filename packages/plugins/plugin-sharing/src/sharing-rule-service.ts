@@ -559,6 +559,8 @@ export class SharingRuleService implements ISharingRuleService {
   /** [ADR-0131 D6 regime C] The declaration-over-row conflicts already reported, `name::scope`. */
   private readonly declarationOverRowReported = new Set<string>();
   /** [ADR-0150, child E4] Declared rules' queue recipients already reported as refused from their package. */
+  /** [ADR-0150, child E4] Refused declared names the orphan sweep already warned it holds. */
+  private readonly sweepHeldRefusalsReported = new Set<string>();
   private readonly queueRecipientRefusalsReported = new Set<string>();
   /** [ADR-0131 D1/D8] Stored rules refused for carrying no organization, reported once each. */
   private readonly organizationlessRuleReported = new Set<string>();
@@ -1417,6 +1419,27 @@ export class SharingRuleService implements ISharingRuleService {
           { declaredRules: declaredNames.length },
         );
       }
+    }
+
+    // [ADR-0150 D3, child E4] Refused is not absent. A declared name two
+    // packages hold is served by neither (`list()` leaves it out), but its
+    // standing grants were materialised by a holder that is still installed;
+    // revoking them on an ambiguity is the one irreversible step taken on a
+    // guess. They are held — neither revoked here nor added by any pass —
+    // and re-judged once the name resolves, as the unknown-scopes arm above.
+    for (const refusal of (await this.declaredSource?.refused?.()) ?? []) {
+      live.add(refusal.name);
+      if (this.sweepHeldRefusalsReported.has(refusal.name)) continue;
+      this.sweepHeldRefusalsReported.add(refusal.name);
+      this.logger?.warn?.(
+        `[sharing-rule] ${refusal.message} The orphaned-grant sweep holds this name's standing grants ` +
+          'rather than revoking them on an ambiguity; no pass adds to them until the name resolves.',
+        {
+          name: refusal.name,
+          reason: refusal.reason,
+          candidates: refusal.candidates.map((c) => (c.kind === 'package' ? c.packageId : 'environment')),
+        },
+      );
     }
 
     const grants = await this.engine.find('sys_record_share', {
