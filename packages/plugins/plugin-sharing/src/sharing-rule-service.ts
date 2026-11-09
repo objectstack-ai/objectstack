@@ -52,7 +52,7 @@ import { TeamGraphService, teamHasMember } from './team-graph.js';
 import { PositionGraphService } from './position-graph.js';
 import { BusinessUnitGraphService } from './business-unit-graph.js';
 import type { DeclaredSharingRule, DeclaredSharingRuleSource } from './declared-sharing-rules.js';
-import { resolvePackageScopedName } from '@objectstack/objectql';
+import { resolvePackageScopedName, type PackageScopedRefusal } from '@objectstack/objectql';
 import {
   PackageScopedNameRefusedError,
   isPackageScopedRegistry,
@@ -559,8 +559,8 @@ export class SharingRuleService implements ISharingRuleService {
   /** [ADR-0131 D6 regime C] The declaration-over-row conflicts already reported, `name::scope`. */
   private readonly declarationOverRowReported = new Set<string>();
   /** [ADR-0150, child E4] Declared rules' queue recipients already reported as refused from their package. */
-  /** [ADR-0150, child E4] Refused declared names the orphan sweep already warned it holds. */
-  private readonly sweepHeldRefusalsReported = new Set<string>();
+  /** [ADR-0150, child E4] Refused declared names whose grants the orphan sweep already reported revoking. */
+  private readonly sweptRefusalsReported = new Set<string>();
   private readonly queueRecipientRefusalsReported = new Set<string>();
   /** [ADR-0131 D1/D8] Stored rules refused for carrying no organization, reported once each. */
   private readonly organizationlessRuleReported = new Set<string>();
@@ -1421,26 +1421,14 @@ export class SharingRuleService implements ISharingRuleService {
       }
     }
 
-    // [ADR-0150 D3, child E4] Refused is not absent. A declared name two
-    // packages hold is served by neither (`list()` leaves it out), but its
-    // standing grants were materialised by a holder that is still installed;
-    // revoking them on an ambiguity is the one irreversible step taken on a
-    // guess. They are held — neither revoked here nor added by any pass —
-    // and re-judged once the name resolves, as the unknown-scopes arm above.
-    for (const refusal of (await this.declaredSource?.refused?.()) ?? []) {
-      live.add(refusal.name);
-      if (this.sweepHeldRefusalsReported.has(refusal.name)) continue;
-      this.sweepHeldRefusalsReported.add(refusal.name);
-      this.logger?.warn?.(
-        `[sharing-rule] ${refusal.message} The orphaned-grant sweep holds this name's standing grants ` +
-          'rather than revoking them on an ambiguity; no pass adds to them until the name resolves.',
-        {
-          name: refusal.name,
-          reason: refusal.reason,
-          candidates: refusal.candidates.map((c) => (c.kind === 'package' ? c.packageId : 'environment')),
-        },
-      );
-    }
+    // [ADR-0150 D3, child E4; #31677 Q1 ruling A] A declared name two packages
+    // hold is refused and served to nobody, so its standing grants must not
+    // keep answering: they are revoked here like any grant no served rule
+    // claims. They are revoked as a REFUSAL, though, not as an orphan — the
+    // rule still exists, twice — so the sweep says which name, which packages,
+    // and that the grants come back once the rule is addressed by package.
+    const refusedNames = new Map<string, PackageScopedRefusal>();
+    for (const refusal of (await this.declaredSource?.refused?.()) ?? []) refusedNames.set(refusal.name, refusal);
 
     const grants = await this.engine.find('sys_record_share', {
       where: { source: 'rule' },
@@ -1449,22 +1437,48 @@ export class SharingRuleService implements ISharingRuleService {
       context: SYSTEM_CTX,
     });
     let revoked = 0;
+    let revokedRefused = 0;
     for (const g of (grants ?? [])) {
       const sourceId = (g as any).source_id;
       // A `source: 'rule'` row with no `source_id` names no rule that could
       // ever re-grant it — equally unreachable, equally void.
       if (sourceId != null && live.has(String(sourceId))) continue;
       if (sourceId != null && liveDeclared.has(`${String(sourceId)}::${String((g as any).organization_id)}`)) continue;
+      const refusal = sourceId != null ? refusedNames.get(String(sourceId)) : undefined;
       await this.sharing.revoke(String((g as any).id), SYSTEM_CTX);
       revoked += 1;
+      if (refusal) {
+        this.reportSweptRefusal(refusal);
+        revokedRefused += 1;
+      }
     }
-    if (revoked > 0) {
+    const orphaned = revoked - revokedRefused;
+    if (orphaned > 0) {
       this.logger?.warn?.(
         '[sharing-rule] revoked rule grants whose rule row no longer exists',
-        { grants: revoked },
+        { grants: orphaned },
       );
     }
     return revoked;
+  }
+
+  /**
+   * [ADR-0150, child E4] The orphaned-grant sweep revoked a grant of a declared
+   * rule name the resolver refuses: warned once per name, naming every
+   * candidate, as a refusal — never as a vanished rule.
+   */
+  private reportSweptRefusal(refusal: PackageScopedRefusal): void {
+    if (this.sweptRefusalsReported.has(refusal.name)) return;
+    this.sweptRefusalsReported.add(refusal.name);
+    this.logger?.warn?.(
+      `[sharing-rule] ${refusal.message} The rule is served to nobody, so the orphaned-grant sweep revoked ` +
+        "its standing grants; they come back once the rule is addressed by package.",
+      {
+        name: refusal.name,
+        reason: refusal.reason,
+        candidates: refusal.candidates.map((c) => (c.kind === 'package' ? c.packageId : 'environment')),
+      },
+    );
   }
 
   /**

@@ -259,9 +259,10 @@ export interface DeclaredSharingRuleSource {
   lookup?(name: string): Promise<DeclaredNameAnswer<DeclaredSharingRule>>;
   /**
    * [ADR-0150 D3, child E4] Every declared name the resolver refuses (two or
-   * more holders), with its refusal. Refused is not absent: the orphaned-grant
-   * sweep holds these names' standing grants rather than revoking them on an
-   * ambiguity. Reports nothing itself; `list()` is the reader that reports.
+   * more holders), with its refusal. The orphaned-grant sweep reads it to
+   * report a refused name's revoked grants as a refusal, naming every holder,
+   * never as a vanished rule. Reports nothing itself; `list()` is the reader
+   * that reports.
    */
   refused?(): Promise<PackageScopedRefusal[]>;
 }
