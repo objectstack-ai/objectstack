@@ -633,7 +633,7 @@ describe('defineStack refuses a `record` roll-up that is not the admitted one', 
     expect(() => defineStack({
       manifest: stackManifest, objects: [salesOrder()],
       objectExtensions: [{ extend: 'order_line', fields: { amount: { type: 'number', label: 'Amount' } } }],
-    } as Parameters<typeof defineStack>[0])).not.toThrow();
+    } as unknown as Parameters<typeof defineStack>[0])).not.toThrow();
   });
 
   it('a `fixed` roll-up over a child amount with its own code field is not this pass\'s (D6\'s first bullet stays the registry\'s)', () => {
