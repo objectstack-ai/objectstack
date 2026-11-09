@@ -1,4 +1,8 @@
-import { describe, it, expect, vi } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
+// Paid at collection, not inside a case's clocked window: the dispatcher's
+// reach loads `@objectstack/metadata` lazily (`check:test-source-alias`).
+import '@objectstack/metadata';
+import { offerClusterDriverConnection } from '@objectstack/service-cluster';
 import { HttpDispatcher, type HttpDispatcherResult } from './http-dispatcher.js';
 
 function kernel(state: string, dataService?: unknown): any {
@@ -310,6 +314,188 @@ describe('HttpDispatcher — GET /ready primary-vs-secondary drain (#13408)', ()
 
     expect(e.checkDriversHealth).toHaveBeenCalledTimes(1);
     expect(e.resolvePrimaryDatasource).toHaveBeenCalledTimes(1);
+  });
+});
+
+// #31601 (child of cloud epic #3814) — a declared multi-node deployment on the
+// redis cluster driver reports the cluster store's reachability on `/ready`.
+//
+//   R3 「同意：每张卡都只在"声明多副本并接上 Redis 驱动"时才生效」
+//   PM decision D4: an unreachable store answers 200 `status: degraded`, not
+//   503 — every replica loses the store together, so a 503 would turn a
+//   degraded cluster into a total outage while the database can still serve.
+describe('HttpDispatcher — GET /ready cluster driver health (#31601)', () => {
+  /** A `cluster` service on the redis driver, offering a client whose ping is `ping`. */
+  function redisCluster(ping: () => Promise<unknown>) {
+    const cluster = { driver: 'redis', nodeId: 'web-1' };
+    offerClusterDriverConnection(cluster, { driver: 'redis', client: { ping }, keyPrefix: 'os:' });
+    return cluster;
+  }
+  const redisDown = () => vi.fn(async () => { throw new Error('connect ECONNREFUSED 10.0.0.7:6379'); });
+  const redisUp = () => vi.fn(async () => 'PONG');
+
+  /** A host kernel serving `data` and `cluster`. */
+  function clusterKernel(state: string, cluster: unknown, dataService?: unknown): any {
+    return {
+      getState: () => state,
+      getService: (name: string) => (name === 'data' ? dataService : name === 'cluster' ? cluster : undefined),
+      getServiceAsync: async () => undefined,
+    };
+  }
+  const ready = (k: any) => new HttpDispatcher(k).dispatch('GET', '/ready', undefined, undefined, ctx);
+
+  afterEach(() => { vi.unstubAllEnvs(); });
+
+  describe('declared multi-node on the redis driver', () => {
+    it('Redis down: 200 — not 503 — with status degraded and a cluster entry naming the driver unreachable', async () => {
+      vi.stubEnv('OS_CLUSTER_REPLICAS', '3');
+      const ping = redisDown();
+      const res = await ready(clusterKernel('running', redisCluster(ping)));
+
+      expect(responseOf(res).status).toBe(200);
+      expect(responseOf(res).body.data).toEqual({
+        status: 'degraded',
+        state: 'running',
+        cluster: { driver: 'redis', reachable: false, reason: 'ping-failed' },
+      });
+      // The reading is served anonymously: the store's address stays out.
+      expect(JSON.stringify(responseOf(res).body)).not.toContain('10.0.0.7');
+      expect(ping).toHaveBeenCalledTimes(1);
+    });
+
+    it('Redis up: 200 with status ready and a reachable cluster entry', async () => {
+      vi.stubEnv('OS_EXPECT_MULTI_NODE', 'true');
+      const res = await ready(clusterKernel('running', redisCluster(redisUp())));
+
+      expect(responseOf(res).status).toBe(200);
+      expect(responseOf(res).body.data).toEqual({
+        status: 'ready',
+        state: 'running',
+        cluster: { driver: 'redis', reachable: true },
+      });
+    });
+
+    it('Redis down beside a degraded SECONDARY datasource: both are reported, still 200', async () => {
+      vi.stubEnv('OS_CLUSTER_REPLICAS', '2');
+      const res = await ready(clusterKernel(
+        'running',
+        redisCluster(redisDown()),
+        engineWithPrimary([{ driverName: 'pg', healthy: true }, { driverName: 'tenant_mongo', healthy: false }], primary('pg')),
+      ));
+
+      expect(responseOf(res).status).toBe(200);
+      expect(responseOf(res).body.data).toEqual({
+        status: 'degraded',
+        state: 'running',
+        degraded: { drivers: ['tenant_mongo'], primaryDatasource: 'pg' },
+        cluster: { driver: 'redis', reachable: false, reason: 'ping-failed' },
+      });
+    });
+
+    it('the primary datasource going down still answers the byte-identical 503, and never probes Redis', async () => {
+      vi.stubEnv('OS_CLUSTER_REPLICAS', '3');
+      const ping = redisDown();
+      const res = await ready(clusterKernel(
+        'running',
+        redisCluster(ping),
+        engineWithPrimary([{ driverName: 'pg', healthy: false }], primary('pg')),
+      ));
+
+      expect(responseOf(res).status).toBe(503);
+      expect(responseOf(res).body.error.message).toBe('Data driver unavailable');
+      expect(responseOf(res).body.error.details).toEqual({ state: 'running', drivers: ['pg'] });
+      expect(ping).not.toHaveBeenCalled();
+    });
+
+    it('the cluster probe is memoized with the same TTL — k8s polls must not each round-trip to Redis', async () => {
+      vi.stubEnv('OS_CLUSTER_REPLICAS', '3');
+      const ping = redisDown();
+      const dispatcher = new HttpDispatcher(clusterKernel('running', redisCluster(ping)));
+
+      await dispatcher.dispatch('GET', '/ready', undefined, undefined, ctx);
+      await dispatcher.dispatch('GET', '/ready', undefined, undefined, ctx);
+      await dispatcher.dispatch('GET', '/ready', undefined, undefined, ctx);
+
+      expect(ping).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // ⛔ The stopping (SIGTERM) / booting 503 — the graceful-drain path — is
+  // reached before any probe, so a declared deployment with Redis down answers
+  // it exactly as a single node does.
+  it.each(['idle', 'initializing', 'stopping', 'stopped'])(
+    'kernel %s: the 503 envelope is identical to the single-node one, and Redis is never probed',
+    async (state) => {
+      const single = responseOf(await ready(kernel(state)));
+      vi.stubEnv('OS_CLUSTER_REPLICAS', '3');
+      const ping = redisDown();
+      const declared = responseOf(await ready(clusterKernel(state, redisCluster(ping))));
+
+      expect(declared.status).toBe(503);
+      expect(declared.body.error.message).toBe('Service not ready');
+      expect(declared.body).toEqual(single.body);
+      expect(declared.body.error.details).toEqual({ state });
+      expect(ping).not.toHaveBeenCalled();
+    },
+  );
+
+  // ⛔ R3: nothing changes unless BOTH halves hold — the declaration AND the
+  // redis driver. Each case below is missing one half; its body must be the
+  // pre-#31601 body to the byte, and its cluster store is never pinged.
+  describe('single node, or no redis driver: body and status unchanged', () => {
+    it('single node (no declaration) with a redis cluster whose store is DOWN: the old body, no ping', async () => {
+      const ping = redisDown();
+      const res = await ready(clusterKernel('running', redisCluster(ping)));
+
+      expect(responseOf(res).status).toBe(200);
+      expect(JSON.stringify(responseOf(res).body.data)).toBe(JSON.stringify({ status: 'ready', state: 'running' }));
+      expect(ping).not.toHaveBeenCalled();
+    });
+
+    it('single node: OS_CLUSTER_REPLICAS=1 is not a declaration', async () => {
+      vi.stubEnv('OS_CLUSTER_REPLICAS', '1');
+      const ping = redisDown();
+      const res = await ready(clusterKernel('running', redisCluster(ping)));
+
+      expect(responseOf(res).body.data).toEqual({ status: 'ready', state: 'running' });
+      expect(ping).not.toHaveBeenCalled();
+    });
+
+    it('declared, but the cluster runs the in-process memory driver (guard escape hatch): the old body', async () => {
+      vi.stubEnv('OS_CLUSTER_REPLICAS', '3');
+      const res = await ready(clusterKernel('running', { driver: 'memory', nodeId: 'web-1' }));
+
+      expect(responseOf(res).status).toBe(200);
+      expect(responseOf(res).body.data).toEqual({ status: 'ready', state: 'running' });
+    });
+
+    it('declared, but no cluster service at all — or a lookup that throws: the old body', async () => {
+      vi.stubEnv('OS_CLUSTER_REPLICAS', '3');
+      const none = await ready(clusterKernel('running', undefined));
+      expect(responseOf(none).body.data).toEqual({ status: 'ready', state: 'running' });
+
+      const throwing = await ready({
+        getState: () => 'running',
+        getService: (name: string) => { if (name === 'cluster') throw new Error('not registered'); return undefined; },
+        getServiceAsync: async () => undefined,
+      });
+      expect(responseOf(throwing).status).toBe(200);
+      expect(responseOf(throwing).body.data).toEqual({ status: 'ready', state: 'running' });
+    });
+
+    it('single node with a degraded secondary: the #13408 body, no cluster key', async () => {
+      const res = await ready(clusterKernel(
+        'running',
+        redisCluster(redisDown()),
+        engineWithPrimary([{ driverName: 'pg', healthy: true }, { driverName: 'tenant_mongo', healthy: false }], primary('pg')),
+      ));
+
+      expect(responseOf(res).body.data).toEqual({
+        status: 'ready',
+        state: 'running',
+        degraded: { drivers: ['tenant_mongo'], primaryDatasource: 'pg' },
+      });
+    });
   });
 });
 
