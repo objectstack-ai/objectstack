@@ -226,6 +226,18 @@ export interface ApprovalResumeSurface {
   /** Flow definition lookup, used to derive step-progress display data. */
   getFlow?(name: string): Promise<any | null>;
   /**
+   * [ADR-0150 D3] The package that ships the flow `name`, per the loader's
+   * set, or `undefined` for a flow authored in this deployment. Read by
+   * {@link ApprovalService.flowPackageOf}: an approval step is declared inside
+   * its flow, so the queue an approver names is read from that package.
+   *
+   * ⚠️ Declares a method `AutomationEngine` ALREADY implements publicly
+   * (`packagedFlowOwner`, the one the engine's own subflow addressing reads);
+   * it widens no engine surface. Optional: absent, every step reads its queue
+   * names environment-wide, as before.
+   */
+  packagedFlowOwner?(name: string): string | undefined;
+  /**
    * Terminally cancel a suspended run (ADR-0044). Used when a recall lands
    * during a revision window — the run is paused at the revise-window node,
    * which has no reject edge to resume down.
@@ -2591,6 +2603,12 @@ export class ApprovalService implements IApprovalService {
        * was recorded and must not fail it (`decide`'s pre-snapshot tally).
        */
       onDirectoryFailure?: 'refuse' | 'literal';
+      /**
+       * [ADR-0150 D3] The package the step is declared in — its flow's
+       * ({@link flowPackageOf}) — which a `queue` approver's name is read
+       * from. `null` / omitted: environment-wide, as before.
+       */
+      callerPackageId?: string | null;
     },
   ): Promise<string[]> {
     if (!step || !Array.isArray(step.approvers)) return [];
@@ -2644,7 +2662,9 @@ export class ApprovalService implements IApprovalService {
       if (opts?.resolvedFrom && canonicalApproverType(String(a.type)) === 'field' && a.value != null) {
         opts.resolvedFrom[`field:${a.value}`] = (record as any)?.[a.value] ?? null;
       }
-      const ids = await this.resolveApproverSpec(a, record, organizationId, now, opts?.substitutions, onDirectoryFailure);
+      const ids = await this.resolveApproverSpec(
+        a, record, organizationId, now, opts?.substitutions, onDirectoryFailure, opts?.callerPackageId ?? null,
+      );
       // per_group (#3266): tag each resolved id with this spec's group.
       for (const u of ids) {
         if (!u) continue;
@@ -2674,6 +2694,7 @@ export class ApprovalService implements IApprovalService {
     now: number,
     substitutions?: OooSubstitution[],
     onDirectoryFailure: 'refuse' | 'literal' = 'refuse',
+    callerPackageId: string | null = null,
   ): Promise<string[]> {
     // ADR-0090 D3: `role` is the deprecated spelling of `org_membership_level`.
     // Resolve on the canonical type, and write the canonical type in the
@@ -2808,7 +2829,7 @@ export class ApprovalService implements IApprovalService {
         // organization (a queue is an organization's: APPROVER_ORG_SCOPED), on
         // the ADDRESSING purpose — the slate routes work, so the holders of a
         // switched-off position stay on it (D2).
-        const users = await bounded(await this.expandQueueUsers(String(a.value), directoryOrg));
+        const users = await bounded(await this.expandQueueUsers(String(a.value), directoryOrg, callerPackageId));
         if (users.length) return users;
       } else if (type === 'manager' && record) {
         const subject = (record as any)[a.value] ?? (record as any).owner_id;
@@ -3560,12 +3581,35 @@ export class ApprovalService implements IApprovalService {
    * catch turns that rejection into the node's {@link ApproverDirectoryUnreadableError},
    * so the slate is never opened without the people who could not be read. An
    * axis of its own beside `purpose`.
+   *
+   * [ADR-0150 D3] `callerPackageId` is the package the step is declared in
+   * ({@link flowPackageOf}): the name resolves from it — its own queue, else
+   * the one holder in its declared dependencies — through the queue service,
+   * the one resolver. A name it cannot pick rejects under `'refuse'` with the
+   * refusal naming every candidate, which the node answers as it answers a
+   * failed read: the slate is never opened on a guess. No package: the
+   * environment-wide read, as before.
    */
-  private async expandQueueUsers(queueName: string, organizationId?: string | null): Promise<string[]> {
+  private async expandQueueUsers(queueName: string, organizationId?: string | null, callerPackageId?: string | null): Promise<string[]> {
     if (!queueName) return [];
     const queues = this.queueSource();
     if (!queues) return [];
-    return queues.expandMembers(queueName, organizationId ?? null, { purpose: 'addressing', onFailedRead: 'refuse' });
+    return queues.expandMembers(queueName, organizationId ?? null, {
+      purpose: 'addressing', onFailedRead: 'refuse', ...(callerPackageId ? { callerPackageId } : {}),
+    });
+  }
+
+  /**
+   * [ADR-0150 D3] The package the approval step of flow `flowName` is
+   * declared in: the package that ships the flow, as the automation engine
+   * answers it (`packagedFlowOwner`, the reader its own subflow addressing
+   * takes the caller's package from), or `null` for a flow authored in this
+   * deployment, a request with no flow, and an engine that cannot say.
+   */
+  private flowPackageOf(flowName: string | null | undefined): string | null {
+    if (!flowName || typeof this.automation?.packagedFlowOwner !== 'function') return null;
+    const owner = this.automation.packagedFlowOwner(flowName);
+    return typeof owner === 'string' && owner !== '' ? owner : null;
   }
 
   /**
@@ -4372,6 +4416,9 @@ export class ApprovalService implements IApprovalService {
     const requestOrg = subjectOrg ?? ctxOrg;
     const resolvedFrom: Record<string, unknown> = {};
     const exprCtx = { trigger: input.record ?? null, vars: input.variables ?? null };
+    // [ADR-0150 D3] The package this step is declared in — its flow's — which
+    // every slate below reads a `queue` approver's name from.
+    const callerPackageId = this.flowPackageOf(input.flowName);
     const submitterId = input.submitterId !== undefined ? input.submitterId : (context.userId ?? null);
     // [#25573] `excludeSubmitter: true` (ruling 6377888641, letter B): the
     // submitter is taken off every slate this request can open on. It runs on
@@ -4410,6 +4457,7 @@ export class ApprovalService implements IApprovalService {
         now: nowDate.getTime(), substitutions, groups,
         exprCtx,
         resolvedFrom,
+        callerPackageId,
       },
     ), 'approvers', groups);
 
@@ -4469,6 +4517,7 @@ export class ApprovalService implements IApprovalService {
               now: nowDate.getTime(), substitutions, groups,
               exprCtx,
               resolvedFrom: fallbackResolvedFrom,
+              callerPackageId,
             },
           ), 'fallback', groups);
           // Keep the primary slate's resolution inputs (they explain WHY the
@@ -5211,7 +5260,13 @@ export class ApprovalService implements IApprovalService {
         // always kept (ADR-0142 D6's refusal is the node's, at open time).
         original = await this.expandApprovers(
           { approvers: config.approvers }, parseJson(raw.payload_json, undefined), org,
-          { onDirectoryFailure: 'literal' },
+          {
+            onDirectoryFailure: 'literal',
+            // [ADR-0150 D3] The step's flow is the row's `flow:<name>` process.
+            callerPackageId: this.flowPackageOf(
+              typeof raw.process_name === 'string' && raw.process_name.startsWith('flow:') ? raw.process_name.slice('flow:'.length) : null,
+            ),
+          },
         );
         groupMap = {};
       }
