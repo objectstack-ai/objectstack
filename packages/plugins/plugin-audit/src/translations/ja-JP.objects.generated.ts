@@ -18,7 +18,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
   sys_audit_log: {
     label: "監査ログ",
     pluralLabel: "監査ログ",
-    description: "プラットフォームイベントの不変の監査証跡",
+    description: "プラットフォームイベントの監査証跡。レコードはプラットフォームだけが書き込み、データ API と設定では読み取り専用です。",
     fields: {
       created_at: {
         label: "タイムスタンプ"

@@ -22,6 +22,7 @@ import {
   packageClosures,
   parseWorkspaceGlobs,
   readHeavyProject,
+  scanMemo,
   selectAffectedTests,
   trackedFiles,
 } from '../select-affected-tests.mjs';
@@ -399,6 +400,34 @@ describe('select-affected-tests — library programs (objectstack#31520)', () =>
   });
 });
 
+describe('select-affected-tests — a shared scan memo (objectstack#31941)', () => {
+  const { root, tracked } = workspace();
+  const changes: Array<{ changed: string[]; outside?: string[] }> = [
+    { changed: ['content/page.md'] },
+    { changed: ['scripts/helper.mjs'] },
+    { changed: ['packages/a/src/index.ts'] },
+    { changed: ['packages/c/src/index.ts'] },
+    { changed: ['packages/registry/src/index.ts'] },
+    { changed: [], outside: [PATH_WALKER_FILE] },
+  ];
+
+  it('changes no verdict, whichever change fills it first', () => {
+    const alone = changes.map((c) => selectAffectedTests({ root, tracked, ...c }));
+    for (const order of [changes, [...changes].reverse()]) {
+      const scans = scanMemo(root);
+      const shared = order.map((c) => selectAffectedTests({ root, tracked, ...c, scans }));
+      expect(order === changes ? shared : [...shared].reverse()).toEqual(alone);
+      expect(scans.nodes.size).toBeGreaterThan(0);
+    }
+  });
+
+  it('refuses a memo made for another root or another walker', () => {
+    const changed = ['content/page.md'];
+    expect(() => selectAffectedTests({ root, tracked, changed, scans: scanMemo() })).toThrow(/another root or walker/);
+    expect(() => selectAffectedTests({ root, tracked, changed, scans: scanMemo(root, null) })).toThrow(/another root or walker/);
+  });
+});
+
 describe('select-affected-tests — what forces a full run', () => {
   const { root, tracked } = workspace();
 
@@ -620,10 +649,14 @@ describe('select-affected-tests — the live tree', () => {
     // the selection with nothing here running to notice.
     // Since item 2c this is not the always-on set twice: both select the whole
     // scripts/ owner directory, which an empty change does not.
+    // One scan memo for the three (objectstack#31941): each call re-read every
+    // placed test's import closure, 8.9 s here and 12.1 s on PR CI of the 15 s
+    // testTimeout, and timed out in the merge queue; shared, 4.2 s here.
     const self = 'scripts/__tests__/select-affected-tests.test.ts';
-    const walker = selectAffectedTests({ changed: [], outside: [PATH_WALKER_FILE] });
-    const selector = selectAffectedTests({ changed: ['scripts/select-affected-tests.mjs'] });
-    const empty = selectAffectedTests({ changed: [] });
+    const scans = scanMemo();
+    const walker = selectAffectedTests({ changed: [], outside: [PATH_WALKER_FILE], scans });
+    const selector = selectAffectedTests({ changed: ['scripts/select-affected-tests.mjs'], scans });
+    const empty = selectAffectedTests({ changed: [], scans });
     expect(walker.mode).toBe('affected');
     expect(selector.mode).toBe('affected');
     expect(empty.mode).toBe('affected');
@@ -661,6 +694,27 @@ describe('select-affected-tests — the live tree', () => {
     const filters = fs.readFileSync(out, 'utf8').trim().split('\n');
     expect(filters.length).toBeGreaterThan(0);
     expect(filters.every((f) => fs.existsSync(path.join(repoRoot, f)))).toBe(true);
+  });
+
+  it('--lane-out writes the verdict\'s own always-on files, each one also selected by --out (objectstack#31914)', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'select-affected-lane-'));
+    tmpRoots.push(dir);
+    const [out, lane] = [path.join(dir, 'filters.txt'), path.join(dir, 'lane.txt')];
+    const run = spawnSync(process.execPath, ['scripts/select-affected-tests.mjs', '--base', 'HEAD', '--out', out, '--lane-out', lane, '--explain'], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    });
+    expect(run.status, run.stderr).toBe(0);
+    expect(run.stdout.trim().split('\n').pop()).toBe('mode=affected');
+    const always = fs.readFileSync(lane, 'utf8').split('\n').filter(Boolean);
+    const explained = /^always-on test files \(the package graph cannot place them\): (\d+)$/m.exec(run.stdout);
+    expect(always.length).toBe(Number(explained?.[1]));
+    expect(always.length).toBeGreaterThan(0);
+    for (const file of always) expect(run.stdout).toContain(`  - ${file}: `);
+    const filters = fs.readFileSync(out, 'utf8').trim().split('\n');
+    expect(always.every((file) => filters.some((f) => file.toLowerCase().includes(f.toLowerCase())))).toBe(true);
+    const bare = spawnSync(process.execPath, ['scripts/select-affected-tests.mjs', '--base', 'HEAD', '--out', out, '--lane-out'], { cwd: repoRoot, encoding: 'utf8' });
+    expect(bare.status).toBe(2);
   });
 
   it('answers "could not decide" with a non-zero exit, never a verdict', () => {
@@ -726,7 +780,7 @@ describe("the root ci.yml's Test UI job wires the selector fail-open (objectui#1
     expect(job).toContain(header);
     const run = job.slice(job.indexOf(header));
     expect(run).toContain(`${uiRun('test')} --shard=\${{ matrix.shard }}/${shards}`);
-    expect(run).toContain(`pnpm --dir ui exec vitest run --shard=\${{ matrix.shard }}/${shards} --reporter=default --reporter=github-actions "\${filters[@]}"`);
+    expect(run).toContain('pnpm --dir ui exec vitest run --reporter=default --reporter=github-actions "${ran[@]}" "${files[@]}"');
   });
 });
 

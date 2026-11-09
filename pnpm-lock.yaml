@@ -2074,6 +2074,9 @@ importers:
         specifier: ^10.1.4
         version: 10.2.1
     devDependencies:
+      '@objectstack/driver-sql':
+        specifier: workspace:*
+        version: link:../../drivers/driver-sql
       '@objectstack/service-queue':
         specifier: workspace:*
         version: link:../../services/service-queue
@@ -3376,6 +3379,9 @@ importers:
       '@objectstack/platform-objects':
         specifier: workspace:*
         version: link:../../platform-objects
+      '@objectstack/service-cluster':
+        specifier: workspace:*
+        version: link:../service-cluster
       '@objectstack/spec':
         specifier: workspace:*
         version: link:../../spec

@@ -2208,13 +2208,16 @@ jobs:
       # a legitimate filter-skipped run has zero artifacts to match, and an
       # artifact-service fault must reach the verdict as "credentials
       # missing" — fail-closed, with the step's own outcome printed — instead
-      # of an opaque red.
+      # of an opaque red. `[0-9]` after `test-`, not `*`: `shard-attest-test-*`
+      # also matches the Test UI legs' `shard-attest-test-ui-*`, which this
+      # gate does not count and would read as unexpected (objectstack#31914;
+      # check:shard-attestation refuses a pattern that reaches another gate's).
       - name: Download test shard attestations
         id: attestations
         continue-on-error: true
         uses: actions/download-artifact@v8
         with:
-          pattern: shard-attest-test-*
+          pattern: shard-attest-test-[0-9]*
           path: ${{ runner.temp }}/shard-attestations
           merge-multiple: true
 
@@ -4118,6 +4121,161 @@ jobs:
           path: .turbo/cache
           key: ${{ runner.os }}-turbo-${{ github.job }}-${{ github.ref_name }}-${{ github.sha }}
 
+  # ── Test UI: the planned matrix (objectstack#31914) ─────────────────────
+  # Until this job the `test-ui` matrix was the literal 1..16, so every run
+  # that started Test UI started sixteen runners, and each paid ~133 s before
+  # and around its tests (job setup, a ~51 s checkout, install, vitest's own
+  # start) whatever it was handed: run 42478811805, a console-only pull
+  # request, spent 3,371 runner-s on sixteen legs of 81 to 194 s of tests.
+  # This job plans the matrix the way `test-plan` plans Test Core's, with
+  # ui/scripts/plan-test-ui-shards.mjs (its header is the full statement):
+  #   - full (push, schedule, dispatch, a selector that fails open): all
+  #     sixteen slots, each leg running `--shard=k/16` through the sequencer
+  #     exactly as before;
+  #   - affected: the selector's always-on files (its `--lane-out`, the tests
+  #     the package graph cannot place, ~510 today) are the LANE, slot 1; the
+  #     rest of the selection is packed into N = clamp(ceil(P / D), 1, 15)
+  #     more slots, P their predicted seconds and D the whole suite's over the
+  #     roster, both read off ui/scripts/test-shard-timings.json on every run,
+  #     so no planned leg is denser than a full-battery leg. A full plan has
+  #     no lane: its sixteen legs already run everything.
+  # Vitest's own collection (`vitest list`) is what the plan partitions; the
+  # planner refuses to write a plan whose slots are not exactly that set.
+  # 16 stays the slot roster: the matrix reads
+  # `fromJSON(needs.test-ui-plan.outputs.shards || '[1, …, 16]')`, so a plan
+  # job that fails, or never runs, falls back to all sixteen full legs. It
+  # costs runners, never coverage. A started leg keeps its name `Test UI
+  # (k/16)`; only the aggregate `Test UI` is a required context.
+  # Same `if:` as `test-ui`, which adds only its own `[]` clause; not required.
+  # The select step is the leg's own, verbatim but for its name:
+  # ui/scripts/__tests__/select-affected-tests-wiring.test.ts holds the two
+  # equal, and runs both this job's plan step and the leg's slot step.
+  test-ui-plan:
+    name: Plan Test UI shards
+    needs: [filter, borrowed-verdict]
+    if: ${{ !cancelled() && needs.filter.outputs.ui_tree != 'false' && (needs.filter.outputs.ui != 'false' || needs.filter.outputs.ui_consumers != 'false') && needs.borrowed-verdict.outputs.test_ui != 'skip' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    outputs:
+      shards: ${{ steps.plan.outputs.shards }}
+      digest: ${{ steps.plan.outputs.digest }}
+      mode: ${{ steps.plan.outputs.mode }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Fetch this commit's history and the base branch
+        timeout-minutes: 14
+        env:
+          PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          refspecs=('+refs/heads/main:refs/remotes/origin/main')
+          if [ -n "$PR_BASE_REF" ] && [ "$PR_BASE_REF" != main ]; then
+            refspecs+=("+refs/heads/$PR_BASE_REF:refs/remotes/origin/$PR_BASE_REF")
+          fi
+          head=$(git rev-parse HEAD)
+          for attempt in 1 2 3; do
+            deepen=()
+            if [ "$(git rev-parse --is-shallow-repository)" = true ]; then deepen=(--unshallow); fi
+            if git fetch --no-tags "${deepen[@]}" origin "$head" "${refspecs[@]}"; then break; fi
+            if [ "$attempt" = 3 ]; then
+              echo "::error::Could not fetch $head's history and ${refspecs[*]} after 3 attempts. This job's history readers need it, so this job stops here rather than reading from a shallow clone."
+              exit 1
+            fi
+            sleep $((attempt * 15))
+          done
+          echo "History: $(git rev-list --count HEAD) commit(s) behind HEAD, shallow=$(git rev-parse --is-shallow-repository), no tags, refs: $(git for-each-ref --format='%(refname)' refs/remotes | tr '\n' ' ')"
+
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+
+      - name: Setup pnpm
+        uses: ./.github/actions/setup-pnpm
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      # Restore only: Build UI Deps saves the store (see the ui jobs' header).
+      - name: Restore pnpm cache
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-v3-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-v3-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Select the tests this change affects, for the plan
+        id: select
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+          QUEUE_BASE: ${{ github.event.merge_group.base_sha }}
+        run: |
+          base=''
+          case "$EVENT" in
+            pull_request)
+              if [ -n "$PR_BASE_REF" ]; then
+                base=$(git merge-base "refs/remotes/origin/$PR_BASE_REF" HEAD) || base=''
+              fi
+              ;;
+            merge_group) base="$QUEUE_BASE" ;;
+            *)
+              echo 'mode=full' >> "$GITHUB_OUTPUT"
+              echo "A $EVENT run is the full battery: every ui test file, sixteen shards."
+              exit 0
+              ;;
+          esac
+          status=0
+          if [ -z "$base" ]; then
+            echo "::warning::no diff base on this $EVENT event; running the full suite rather than guessing."
+            status=2
+          else
+            echo "Diff base: $base"
+            node ui/scripts/select-affected-tests.mjs --base "$base" --out "$RUNNER_TEMP/affected-tests.txt" \
+              --lane-out "$RUNNER_TEMP/always-on-tests.txt" > "$RUNNER_TEMP/select.out" || status=$?
+            cat "$RUNNER_TEMP/select.out"
+          fi
+          verdict=''
+          if [ "$status" -eq 0 ]; then
+            verdict=$(tail -n 1 "$RUNNER_TEMP/select.out")
+          fi
+          case "$verdict" in
+            mode=affected | mode=full) ;;
+            *)
+              echo "::warning::the affected-test selector reached no verdict (exit $status); running the full suite rather than skipping silently."
+              verdict='mode=full'
+              ;;
+          esac
+          echo "$verdict" >> "$GITHUB_OUTPUT"
+
+      # Vitest's `list --filesOnly` collects without running anything and
+      # without the seven built packages. The plan's slots are the matrix; the
+      # digest is what each leg must derive again before it runs a file.
+      - name: Plan this run's Test UI shards
+        id: plan
+        env:
+          MODE: ${{ steps.select.outputs.mode }}
+        run: |
+          pnpm --dir ui exec vitest list --filesOnly --json="$RUNNER_TEMP/ui-tests-all.json"
+          plan=(node ui/scripts/plan-test-ui-shards.mjs plan --all "$RUNNER_TEMP/ui-tests-all.json" --out "$RUNNER_TEMP/test-ui-plan.json" --github-output "$GITHUB_OUTPUT")
+          if [ "$MODE" = 'affected' ]; then
+            mapfile -t filters < "$RUNNER_TEMP/affected-tests.txt"
+            pnpm --dir ui exec vitest list --filesOnly --json="$RUNNER_TEMP/ui-tests-selected.json" "${filters[@]}"
+            "${plan[@]}" --selected "$RUNNER_TEMP/ui-tests-selected.json" --lane "$RUNNER_TEMP/always-on-tests.txt"
+          else
+            "${plan[@]}"
+          fi
+
   # ── Test UI: the shard count ────────────────────────────────────────────
   # N = 16, objectui's own matrix, chosen the way scripts/partition-test-shards.mjs
   # chooses Test Core's: the slowest leg within MAX_SHARD_OVER_MEAN (1.3) of the
@@ -4168,26 +4326,31 @@ jobs:
   # such diff. Lint UI keeps `ui` alone: its eslint reads none of the seven.
   test-ui:
     name: Test UI (${{ matrix.shard }}/16)
-    needs: [filter, ui-deps, borrowed-verdict]
+    needs: [filter, ui-deps, borrowed-verdict, test-ui-plan]
     # On a push that borrowed the queue's verdict, skipped only when
     # `borrowed-verdict` found the head's queue run ran the whole suite green
-    # (#31519 Q2 = B); `!= 'skip'`, so its absence runs the suite.
-    if: ${{ !cancelled() && needs.filter.outputs.ui_tree != 'false' && (needs.filter.outputs.ui != 'false' || needs.filter.outputs.ui_consumers != 'false') && needs.borrowed-verdict.outputs.test_ui != 'skip' }}
+    # (#31519 Q2 = B); `!= 'skip'`, so its absence runs the suite. Skipped
+    # too when the plan started no slot (`[]`, an empty selection), as Test
+    # Core is; a plan job that failed publishes '' and the legs run.
+    if: ${{ !cancelled() && needs.filter.outputs.ui_tree != 'false' && (needs.filter.outputs.ui != 'false' || needs.filter.outputs.ui_consumers != 'false') && needs.borrowed-verdict.outputs.test_ui != 'skip' && needs.test-ui-plan.outputs.shards != '[]' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
       contents: read
     # Fail-fast on `merge_group` only, as on Test Core (#31517, ruling record
     # 6730013883; the reasons are on the `test` job's strategy). Every other
-    # event runs all sixteen shards to their end. The `Test UI` aggregate
-    # passes only `success` or a skip `filter` explains, so the matrix of a
-    # red shard and the siblings it cancelled reads red there. A fail-fast queue run is red, so a push never
+    # event runs every started shard to its end. The `Test UI` aggregate
+    # passes only `success` or a skip it can explain, and counts a credential
+    # from every planned slot, so the matrix of a red shard and the siblings
+    # it cancelled reads red there. A fail-fast queue run is red, so a push never
     # borrows it: `queue-verdict` takes only a `success` queue run, and
     # `ui_full_green` counts only shards that concluded `success`.
+    # The slots are the plan's (`test-ui-plan` above): every one on a full
+    # run, the first N on an affected one, all sixteen when the plan is dead.
     strategy:
       fail-fast: ${{ github.event_name == 'merge_group' }}
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+        shard: ${{ fromJSON(needs.test-ui-plan.outputs.shards || '[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]') }}
 
     steps:
       # Depth 1, then the step below: the select step diffs against the base
@@ -4284,8 +4447,8 @@ jobs:
       # and a lockfile change among it would make every long-open PR a full
       # run (Test Core's "WHERE THE AFFECTED DIFF STARTS" above is the same
       # fact). A merge group diffs from its `base_sha`. Every shard computes
-      # the same selection from the same checkout, so `--shard` partitions
-      # one set.
+      # the same selection from the same checkout as `test-ui-plan` did, so
+      # every leg derives the same plan (the slot step below checks that).
       - name: Select the tests this change affects
         id: select
         env:
@@ -4314,7 +4477,7 @@ jobs:
           else
             echo "Diff base: $base"
             node ui/scripts/select-affected-tests.mjs --base "$base" --out "$RUNNER_TEMP/affected-tests.txt" \
-              > "$RUNNER_TEMP/select.out" || status=$?
+              --lane-out "$RUNNER_TEMP/always-on-tests.txt" > "$RUNNER_TEMP/select.out" || status=$?
             cat "$RUNNER_TEMP/select.out"
           fi
           verdict=''
@@ -4330,13 +4493,55 @@ jobs:
           esac
           echo "$verdict" >> "$GITHUB_OUTPUT"
 
-      # `$MODE` is the VALUE of the select step's output `mode`: its
+      # THIS LEG'S SLOT (objectstack#31914). The leg derives the plan again,
+      # from its own checkout, select step and `vitest list`, and refuses to
+      # run unless it is the plan the matrix was built from (the digest), as
+      # Test Core's legs do: a slot `test-ui-plan` left unstarted could
+      # otherwise hold a file no leg runs. Which plan:
+      #   - no digest: the plan job failed or was skipped, and the matrix fell
+      #     back to all sixteen slots, so this leg is a full one;
+      #   - a full plan: a full leg, whatever this leg's selector says;
+      #   - an affected plan: this leg's selector must say `affected` too, and
+      #     its slot's files are the ones the next step runs.
+      # Every branch writes the plan file the ran-set check below reads.
+      - name: Find this slot's test files
+        id: slot
+        env:
+          MODE: ${{ steps.select.outputs.mode }}
+          PLAN_MODE: ${{ needs.test-ui-plan.outputs.mode }}
+          PLAN_DIGEST: ${{ needs.test-ui-plan.outputs.digest }}
+        run: |
+          pnpm --dir ui exec vitest list --filesOnly --json="$RUNNER_TEMP/ui-tests-all.json"
+          plan=(node ui/scripts/plan-test-ui-shards.mjs plan --all "$RUNNER_TEMP/ui-tests-all.json" --out "$RUNNER_TEMP/test-ui-plan.json")
+          if [ -z "$PLAN_DIGEST" ]; then
+            echo "::warning::Plan Test UI shards published no plan, so the matrix started all sixteen slots: this leg runs slot ${{ matrix.shard }} of the whole suite."
+            "${plan[@]}"
+            echo 'mode=full' >> "$GITHUB_OUTPUT"
+          elif [ "$PLAN_MODE" = 'affected' ]; then
+            if [ "$MODE" != 'affected' ]; then
+              echo "::error title=Test UI::the plan is an affected one, but this leg's selector answered '$MODE'. The matrix started only the planned slots, so a full leg here would leave files unrun; this leg stops instead."
+              exit 1
+            fi
+            mapfile -t filters < "$RUNNER_TEMP/affected-tests.txt"
+            pnpm --dir ui exec vitest list --filesOnly --json="$RUNNER_TEMP/ui-tests-selected.json" "${filters[@]}"
+            "${plan[@]}" --selected "$RUNNER_TEMP/ui-tests-selected.json" --lane "$RUNNER_TEMP/always-on-tests.txt" --expect-digest "$PLAN_DIGEST"
+            node ui/scripts/plan-test-ui-shards.mjs files --plan "$RUNNER_TEMP/test-ui-plan.json" --slot ${{ matrix.shard }} > "$RUNNER_TEMP/slot-tests.txt"
+            echo 'mode=affected' >> "$GITHUB_OUTPUT"
+          else
+            "${plan[@]}" --expect-digest "$PLAN_DIGEST"
+            echo 'mode=full' >> "$GITHUB_OUTPUT"
+          fi
+
+      # `$MODE` is the VALUE of the slot step's output `mode`: its
       # `mode=affected` line is GitHub's `key=value` form, so what arrives here
       # is `affected` or `full`, never the line itself.
-      # ui/scripts/__tests__/select-affected-tests-wiring.test.ts runs both
-      # steps as written, so neither end can be renamed alone. The filters are
-      # paths relative to ui/, the vitest root, passed as positionals with no
-      # `--`, the only spelling ui/scripts/vitest-invocation-guard.mjs admits.
+      # ui/scripts/__tests__/select-affected-tests-wiring.test.ts runs the
+      # select, slot and run steps as written, so no end can be renamed alone.
+      # The slot's files are paths relative to ui/, the vitest root, passed as
+      # positionals with no `--`, the only spelling
+      # ui/scripts/vitest-invocation-guard.mjs admits. Both speeds also write
+      # vitest's `json` report, which the ran-set check after the timings
+      # upload reads.
       #
       # THE PER-FILE TIMINGS (objectstack#29517). The whole suite also passes
       # ui/scripts/test-file-timings.mjs, the per-file timings reporter, beside
@@ -4356,15 +4561,16 @@ jobs:
       # key a `./scripts/` path to the ROOT `scripts/`, where it is not.
       - name: Run the ui tests (shard ${{ matrix.shard }}/16)
         env:
-          MODE: ${{ steps.select.outputs.mode }}
+          MODE: ${{ steps.slot.outputs.mode }}
           OBJECTUI_TEST_TIMINGS_OUT: ${{ runner.temp }}/test-file-timings/shard-${{ matrix.shard }}.json
         run: |
+          ran=(--reporter=json --outputFile.json="$RUNNER_TEMP/test-ui-ran.json")
           if [ "$MODE" = 'affected' ]; then
-            mapfile -t filters < "$RUNNER_TEMP/affected-tests.txt"
-            echo "Affected speed: ${#filters[@]} vitest filter(s), shard ${{ matrix.shard }} of 16."
-            pnpm --dir ui exec vitest run --shard=${{ matrix.shard }}/16 --reporter=default --reporter=github-actions "${filters[@]}"
+            mapfile -t files < "$RUNNER_TEMP/slot-tests.txt"
+            echo "Affected speed: ${#files[@]} test file(s) planned into slot ${{ matrix.shard }} of 16."
+            pnpm --dir ui exec vitest run --reporter=default --reporter=github-actions "${ran[@]}" "${files[@]}"
           else
-            pnpm --dir ui run test --shard=${{ matrix.shard }}/16 --reporter=default --reporter=github-actions --reporter="${GITHUB_WORKSPACE}/ui/scripts/test-file-timings.mjs"
+            pnpm --dir ui run test --shard=${{ matrix.shard }}/16 --reporter=default --reporter=github-actions --reporter="${GITHUB_WORKSPACE}/ui/scripts/test-file-timings.mjs" "${ran[@]}"
           fi
 
       # Diagnostics only, so it can never red a shard: `continue-on-error`, and
@@ -4386,6 +4592,36 @@ jobs:
           path: ${{ runner.temp }}/test-file-timings/
           if-no-files-found: warn
           retention-days: ${{ github.event_name == 'schedule' && 7 || 2 }}
+          overwrite: true
+
+      # The files vitest ran (its `json` report) against this slot's planned
+      # files, as a multiset: a file missing, extra or run twice is red, so the
+      # leg publishes no credential below. On a full leg the plan is the
+      # sequencer's own `--shard=k/16` split, so this checks that split too.
+      - name: Check this slot ran exactly its planned files
+        run: |
+          node ui/scripts/plan-test-ui-shards.mjs verify-ran --plan "$RUNNER_TEMP/test-ui-plan.json" \
+            --slot ${{ matrix.shard }} --report "$RUNNER_TEMP/test-ui-ran.json"
+
+      # ── This shard's positive attestation (#6082, objectstack#31914) ──────
+      # Test Core's pair, for the reason its comment gives: LAST, and with no
+      # `if:`, so the credential means "every earlier step of this leg passed",
+      # the ran-set check above included. The `Test UI` aggregate counts one
+      # from every slot the plan started. check:shard-attestation holds both
+      # properties, and the artifact name, statically.
+      - name: Attest this shard ran and passed
+        run: |
+          node scripts/check-shard-attestation.mjs --emit \
+            --job test-ui --shard ${{ matrix.shard }} --total 16 \
+            --out "$RUNNER_TEMP/shard-attestation"
+
+      - name: Publish this shard's attestation
+        uses: actions/upload-artifact@v7
+        with:
+          name: shard-attest-test-ui-${{ matrix.shard }}-of-16
+          path: ${{ runner.temp }}/shard-attestation/
+          if-no-files-found: error
+          retention-days: 1
           overwrite: true
 
   test-ui-gate:
@@ -4416,25 +4652,37 @@ jobs:
     # `timeout-minutes` reads (on a superseded push this paints the OLD sha
     # red, which no required check reads); a `skipped` that `filter` does not
     # explain; and any lifecycle value such as the `abandoned` test-gate met
-    # (run 31120902911). Unlike test-gate it counts no shard credentials: the
-    # Test UI shards publish none, and adding them is a change to `test-ui`,
-    # which is the ui lane's job.
+    # (run 31120902911). A third skip passes too: `test-ui-plan` succeeded
+    # and planned no slot (`[]`, an empty selection), Test Core's reading.
+    #
+    # Then it counts credentials, as test-gate does (objectstack#31914): one
+    # `shard-attest-test-ui-k-of-16` from every slot the plan started, read
+    # through the very expression the matrix reads, so a slot that never
+    # published one (its ran-set check red, or never started) is red here even
+    # when the rollup reads `success`. With the plan's own invariant (its
+    # slots partition vitest's collection) and each leg's ran-set check, that
+    # is "every selected file ran in exactly one slot".
     name: Test UI
-    needs: [test-ui, filter, queue-verdict]
+    needs: [test-ui, filter, test-ui-plan, queue-verdict]
     # ── ROSTER DECLARATION (#10490) ───────────────────────────────────────
     # `check:aggregator-roster` holds this equal to `needs:` in both
-    # directions. `filter` is the #4928 input, not a lane.
+    # directions. `filter` is the #4928 input and `test-ui-plan` the roster
+    # input, as `test-plan` is test-gate's; neither is a lane.
     env:
       OS_AGGREGATOR_MEMBERS: test-ui
-      OS_AGGREGATOR_NON_MEMBERS: filter queue-verdict
+      OS_AGGREGATOR_NON_MEMBERS: filter test-ui-plan queue-verdict
     # Skipped on a push that borrowed the queue's verdict (#31519), as `Test
     # Core` is. When Test UI still runs on that push, its shards' own
     # conclusions are the push run's verdict on it.
     if: always() && needs.queue-verdict.outputs.covered != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # `actions` and `checks` read for the cancel-cause read of a cancelled
+    # shard, as on test-gate (check:shard-attestation requires both).
     permissions:
       contents: read
+      actions: read
+      checks: read
     steps:
       - name: Verify Test UI shard results
         env:
@@ -4443,15 +4691,19 @@ jobs:
           OS_UI_TREE: ${{ needs.filter.outputs.ui_tree }}
           OS_UI: ${{ needs.filter.outputs.ui }}
           OS_UI_CONSUMERS: ${{ needs.filter.outputs.ui_consumers }}
+          OS_PLAN_RESULT: ${{ needs.test-ui-plan.result }}
+          OS_PLAN_SHARDS: ${{ needs.test-ui-plan.outputs.shards }}
         run: |
-          echo "Test UI (k/16) rollup: '$OS_TEST_UI_RESULT'; filter: '$OS_FILTER_RESULT' (ui_tree='$OS_UI_TREE', ui='$OS_UI', ui_consumers='$OS_UI_CONSUMERS')."
+          echo "Test UI (k/16) rollup: '$OS_TEST_UI_RESULT'; filter: '$OS_FILTER_RESULT' (ui_tree='$OS_UI_TREE', ui='$OS_UI', ui_consumers='$OS_UI_CONSUMERS'); plan: '$OS_PLAN_RESULT' (shards='$OS_PLAN_SHARDS')."
           case "$OS_TEST_UI_RESULT" in
             success)
-              echo "✓ Test UI: every shard concluded success."
+              echo "✓ Test UI: every started shard concluded success; the credentials are counted below."
               ;;
             skipped)
               if [ "$OS_FILTER_RESULT" = 'success' ] && { [ "$OS_UI_TREE" = 'false' ] || { [ "$OS_UI" = 'false' ] && [ "$OS_UI_CONSUMERS" = 'false' ]; }; }; then
                 echo "✓ Test UI: the shards were skipped because filter found no ui path and no ui-consumed package in this diff."
+              elif [ "$OS_PLAN_RESULT" = 'success' ] && [ "$OS_PLAN_SHARDS" = '[]' ]; then
+                echo "✓ Test UI: the shards were skipped because Plan Test UI shards selected no test file."
               else
                 echo "::error title=Test UI::the Test UI shards were skipped, but filter (result '$OS_FILTER_RESULT', ui_tree='$OS_UI_TREE', ui='$OS_UI', ui_consumers='$OS_UI_CONSUMERS') does not explain the skip. A skip passes only when filter succeeded and said the diff reaches no ui path and none of the seven packages ui consumes (#4928)."
                 exit 1
@@ -4462,6 +4714,41 @@ jobs:
               exit 1
               ;;
           esac
+
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      # test-gate's step, for this gate's own credentials (its comment says
+      # why `continue-on-error`).
+      - name: Download Test UI shard attestations
+        id: attestations
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          pattern: shard-attest-test-ui-*
+          path: ${{ runner.temp }}/shard-attestations
+          merge-multiple: true
+
+      # OS_TEST_UI_PLAN is the matrix's own expression (check:shard-attestation
+      # holds the two equal), so the count is against the slots that started.
+      - name: Count Test UI shard attestations
+        env:
+          OS_ATTEST_DIR: ${{ runner.temp }}/shard-attestations
+          OS_TEST_UI_RESULT: ${{ needs['test-ui'].result }}
+          OS_FILTER_RESULT: ${{ needs.filter.result }}
+          OS_DOWNLOAD_OUTCOME: ${{ steps.attestations.outcome }}
+          OS_TEST_UI_PLAN: ${{ needs.test-ui-plan.outputs.shards || '[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]' }}
+          OS_TEST_UI_PLAN_RESULT: ${{ needs.test-ui-plan.result }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          node scripts/check-shard-attestation.mjs --verify \
+            --gate 'Test UI' \
+            --dir "$OS_ATTEST_DIR" \
+            --filter-result "$OS_FILTER_RESULT" \
+            --download-outcome "$OS_DOWNLOAD_OUTCOME" \
+            --leg "test-ui/16:$OS_TEST_UI_RESULT" \
+            --planned "test-ui=$OS_TEST_UI_PLAN" \
+            --plan-result "$OS_TEST_UI_PLAN_RESULT"
 
   # ── Lint UI and Build & E2E UI: the ceilings (#25869 row F13) ──────────
   # objectui's rule (its lint.yml `Lint` ceiling): the smallest round number

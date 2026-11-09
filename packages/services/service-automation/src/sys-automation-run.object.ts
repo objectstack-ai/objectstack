@@ -151,6 +151,23 @@ export const SysAutomationRun = ObjectSchema.create({
       group: 'Identity',
     }),
 
+    // [ADR-0150 D8 row R8] The package that holds the flow `flow_name` names,
+    // beside the name (ADR-0126 §4: two facts, two columns). A paused run
+    // resumes by it once the flow's reader moves onto it. Backfilled at boot
+    // on paused rows from the flow's one package holder
+    // (`stored-reference-package-backfill.ts`); terminal history stays as
+    // written. Empty for an environment-authored flow and for a name no
+    // single package holds. Nothing reads it yet and no writer stamps it.
+    // Width: the package-id class (`sys_metadata.package_id`).
+    flow_package: Field.text({
+      label: 'Flow Package',
+      required: false,
+      readonly: true,
+      maxLength: 255,
+      description: 'The app the flow comes from. Filled in by the platform; empty for flows created here.',
+      group: 'Identity',
+    }),
+
     flow_version: Field.number({ label: 'Flow Version', required: false, group: 'Identity' }),
 
     // [#28405, ADR-0146 D9 item 4] The content identity of the flow body the

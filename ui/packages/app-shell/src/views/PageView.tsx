@@ -15,8 +15,10 @@
 import { lazy, Suspense, useEffect, useMemo, useState, type ReactElement, type ReactNode } from 'react';
 import { useParams, useSearchParams, useNavigate, useLocation, useHref } from 'react-router-dom';
 import {
+  ElementApiRereadScope,
   ElementDataSourceGate,
   SchemaRenderer,
+  createElementApiReread,
   answeredLoadFailure,
   classifyLoadError,
   noDataSourceMessage,
@@ -26,6 +28,7 @@ import {
   useFilterScope,
   useResolvedFilter,
   type AnsweredLoadFailure,
+  type ElementApiReread,
   type ElementDataSourceMapping,
   type RelatedRecordActionsValue,
 } from '@object-ui/react';
@@ -66,16 +69,33 @@ const InterfaceListPage = lazy(() =>
  * binds no object and the runtime's refresh carries none, so the scope is the
  * bus's documented unknown-scope value.
  *
+ * Then ask the page's own `api`-bound elements to read again (`reread`, the
+ * page's `ElementApiRereadScope` signal). An endpoint names no object, so those
+ * readers do not read the bus: the unknown-scope change above is declared from
+ * every surface of the app, and only this page knows its own action wrote. The
+ * bus goes first, so the kept answers of the console's open are already
+ * dropped when the readers ask.
+ *
  * This host used to bump a counter into the `key` of both render branches
  * below, which remounted the whole page on every page action: scroll, collapsed
  * sections and in-progress edits in every block went with it, and every block
  * refetched from scratch (objectui#10519). Both branches are now keyed on
  * identity; `no-refresh-key-remount.ratchet` holds this file in scope.
- * Module-level so its identity is stable across renders (the runtime names it
- * in dependency lists).
  */
-function declarePageDataChanged(): void {
+function declarePageDataChanged(reread: ElementApiReread): void {
   notifyDataChanged({ objectName: '*' });
+  reread.reread();
+}
+
+/**
+ * The page's re-read signal and the refresh the runtime calls, made once per
+ * page mount: the runtime names the refresh in dependency lists, so its
+ * identity must hold for the page's life (a `useState` initializer, never a
+ * memo, AGENTS.md #10).
+ */
+function createPageRefresh(): { reread: ElementApiReread; onRefresh: () => void } {
+  const reread = createElementApiReread();
+  return { reread, onRefresh: () => declarePageDataChanged(reread) };
 }
 
 /**
@@ -327,6 +347,8 @@ export function PageView() {
   // set for the page's life, added to while a block renders: never state that
   // re-renders, since the answer landing is what re-renders the page.
   const [requestedObjects] = useState(() => new Set<string>());
+  // What a successful page action refreshes: see `declarePageDataChanged`.
+  const [pageRefresh] = useState(createPageRefresh);
   // ADR-0048 Phase 2 — prefer the page owned by the current app's package so
   // two packages shipping `page/<same-name>` each resolve within their own
   // container instead of by load order.
@@ -463,103 +485,107 @@ export function PageView() {
     <ConsoleActionRuntimeProvider
       dataSource={dataSource}
       objects={objects}
-      onRefresh={declarePageDataChanged}
+      onRefresh={pageRefresh.onRefresh}
       // A `type: 'form'` action on the page opens its form in this app's shell
       // (objectui#13433).
       routeAppSegment={appName}
     >
-      <div className="flex flex-row h-full w-full overflow-hidden relative">
-        <div className="flex-1 overflow-auto h-full relative">
-          {canEditInStudio && (
-            <button
-              type="button"
-              onClick={openInStudio}
-              className="absolute right-3 top-3 z-30 inline-flex h-7 w-7 items-center justify-center rounded-md border border-input bg-background/90 text-muted-foreground shadow-sm backdrop-blur hover:bg-accent hover:text-accent-foreground"
-              data-testid="page-edit-in-studio-button"
-              title={t('common.editInStudio', { defaultValue: 'Edit in studio' })}
-              aria-label={t('common.editInStudio', { defaultValue: 'Edit in studio' })}
-            >
-              <Pencil className="h-3.5 w-3.5" />
-            </button>
-          )}
-          {(page as any).interfaceConfig?.source ? (
-            // ADR-0047 interface mode: the page binds a source view into a
-            // curated list surface — rendered directly, not via regions.
-            <Suspense
-              fallback={
-                <div className="h-full flex items-center justify-center p-8" data-testid="interface-page-loading">
-                  <Spinner className="h-5 w-5 text-muted-foreground" />
-                </div>
-              }
-            >
-              <InterfaceListPage page={page} reserveEditAffordance={canEditInStudio} />
-            </Suspense>
-          ) : (
-            // The record page's bridge, mounted inside this page's action
-            // runtime so its executor dispatches through the page's runner;
-            // `serve` publishes the page's own value over it (objectui#12870).
-            <RelatedRecordActionsBridge
-              appName={appName}
-              objects={objects}
-              dataSource={dataSource}
-              serve={servePageRecordActions}
-              parentFromList
-            >
-              <AppPageRecord binding={appPageRecordBinding(page as Record<string, unknown>)} dataSource={dataSource}>
-                <SchemaRenderer
-                  schema={{
-                    ...page,
-                    // `type` stays the SchemaNode discriminator ComponentRegistry
-                    // dispatches on. The spec's page KIND (`record|home|app|utility|
-                    // list`) rides `pageType`, which PageRenderer reads — without
-                    // this mapping every page fell back to `pageType: 'record'`,
-                    // so non-record pages got the record max-width, a wrong
-                    // `data-page-type` and a suppressed header (framework#1878 §3
-                    // naming-drift recheck).
-                    //
-                    // ⭐ This is the WRITING end of the page-kind to node-type
-                    // channel, and a comment here was not enough: two cards audited
-                    // the READING end and concluded the registrations it feeds were
-                    // undeclared (objectui#9263, re-ruled letter E "⛔ not a
-                    // defect", and objectui#9576). The channel is now declared at
-                    // both reading ends — `@object-ui/types`' `SchemaRegistry` map
-                    // at its `'page'` entry, and the `PageRenderer` registrations in
-                    // `@object-ui/components`. Each END is pinned by a DIFFERENT
-                    // file, because no one package can import both.
-                    //
-                    // ⛔ Change this mapping and `page-kind-writing-end-9718`, in
-                    // this package's `views/__tests__`, goes red by design and names
-                    // the kind that stopped being written (objectui#9718): it is the
-                    // declaration, not an incidental assertion.
-                    //
-                    // ⚠️ The reading end's pin — `page-kind-node-type-channel-9642`
-                    // (objectui#9642) — does NOT answer for this line. It lives in
-                    // `@object-ui/components`, which does not depend on this
-                    // package, so its module graph cannot reach this file: gutting
-                    // this mapping leaves it green, and deleting a registration
-                    // turns it red. Both directions were measured on objectui#9718.
-                    //
-                    // The pair is built by `pageKindNode`, the ONE builder this
-                    // writer shares with Studio's page previews (objectui#11933):
-                    // they used to write `type` alone, so they drew an app or
-                    // home page as a record page.
-                    ...pageKindNode(page),
-                    // `context` is built here, never read off the page: `PageSchema`
-                    // refuses a page-level `context` key, so no parsed page can
-                    // carry one (objectui#9673). Written after `...page`, it also
-                    // overrides whatever an unparsed document smuggled in.
-                    context: { params },
-                  }}
-                />
-              </AppPageRecord>
-            </RelatedRecordActionsBridge>
-          )}
+      {/* The page's `api`-bound elements read again after its own actions
+          (see `declarePageDataChanged`). */}
+      <ElementApiRereadScope reread={pageRefresh.reread}>
+        <div className="flex flex-row h-full w-full overflow-hidden relative">
+          <div className="flex-1 overflow-auto h-full relative">
+            {canEditInStudio && (
+              <button
+                type="button"
+                onClick={openInStudio}
+                className="absolute right-3 top-3 z-30 inline-flex h-7 w-7 items-center justify-center rounded-md border border-input bg-background/90 text-muted-foreground shadow-sm backdrop-blur hover:bg-accent hover:text-accent-foreground"
+                data-testid="page-edit-in-studio-button"
+                title={t('common.editInStudio', { defaultValue: 'Edit in studio' })}
+                aria-label={t('common.editInStudio', { defaultValue: 'Edit in studio' })}
+              >
+                <Pencil className="h-3.5 w-3.5" />
+              </button>
+            )}
+            {(page as any).interfaceConfig?.source ? (
+              // ADR-0047 interface mode: the page binds a source view into a
+              // curated list surface — rendered directly, not via regions.
+              <Suspense
+                fallback={
+                  <div className="h-full flex items-center justify-center p-8" data-testid="interface-page-loading">
+                    <Spinner className="h-5 w-5 text-muted-foreground" />
+                  </div>
+                }
+              >
+                <InterfaceListPage page={page} reserveEditAffordance={canEditInStudio} />
+              </Suspense>
+            ) : (
+              // The record page's bridge, mounted inside this page's action
+              // runtime so its executor dispatches through the page's runner;
+              // `serve` publishes the page's own value over it (objectui#12870).
+              <RelatedRecordActionsBridge
+                appName={appName}
+                objects={objects}
+                dataSource={dataSource}
+                serve={servePageRecordActions}
+                parentFromList
+              >
+                <AppPageRecord binding={appPageRecordBinding(page as Record<string, unknown>)} dataSource={dataSource}>
+                  <SchemaRenderer
+                    schema={{
+                      ...page,
+                      // `type` stays the SchemaNode discriminator ComponentRegistry
+                      // dispatches on. The spec's page KIND (`record|home|app|utility|
+                      // list`) rides `pageType`, which PageRenderer reads — without
+                      // this mapping every page fell back to `pageType: 'record'`,
+                      // so non-record pages got the record max-width, a wrong
+                      // `data-page-type` and a suppressed header (framework#1878 §3
+                      // naming-drift recheck).
+                      //
+                      // ⭐ This is the WRITING end of the page-kind to node-type
+                      // channel, and a comment here was not enough: two cards audited
+                      // the READING end and concluded the registrations it feeds were
+                      // undeclared (objectui#9263, re-ruled letter E "⛔ not a
+                      // defect", and objectui#9576). The channel is now declared at
+                      // both reading ends — `@object-ui/types`' `SchemaRegistry` map
+                      // at its `'page'` entry, and the `PageRenderer` registrations in
+                      // `@object-ui/components`. Each END is pinned by a DIFFERENT
+                      // file, because no one package can import both.
+                      //
+                      // ⛔ Change this mapping and `page-kind-writing-end-9718`, in
+                      // this package's `views/__tests__`, goes red by design and names
+                      // the kind that stopped being written (objectui#9718): it is the
+                      // declaration, not an incidental assertion.
+                      //
+                      // ⚠️ The reading end's pin — `page-kind-node-type-channel-9642`
+                      // (objectui#9642) — does NOT answer for this line. It lives in
+                      // `@object-ui/components`, which does not depend on this
+                      // package, so its module graph cannot reach this file: gutting
+                      // this mapping leaves it green, and deleting a registration
+                      // turns it red. Both directions were measured on objectui#9718.
+                      //
+                      // The pair is built by `pageKindNode`, the ONE builder this
+                      // writer shares with Studio's page previews (objectui#11933):
+                      // they used to write `type` alone, so they drew an app or
+                      // home page as a record page.
+                      ...pageKindNode(page),
+                      // `context` is built here, never read off the page: `PageSchema`
+                      // refuses a page-level `context` key, so no parsed page can
+                      // carry one (objectui#9673). Written after `...page`, it also
+                      // overrides whatever an unparsed document smuggled in.
+                      context: { params },
+                    }}
+                  />
+                </AppPageRecord>
+              </RelatedRecordActionsBridge>
+            )}
+          </div>
+          <MetadataPanel
+            open={showDebug}
+            sections={[{ title: 'Page Configuration', data: page }]}
+          />
         </div>
-        <MetadataPanel
-          open={showDebug}
-          sections={[{ title: 'Page Configuration', data: page }]}
-        />
-      </div>
+      </ElementApiRereadScope>
     </ConsoleActionRuntimeProvider>
   );
 }

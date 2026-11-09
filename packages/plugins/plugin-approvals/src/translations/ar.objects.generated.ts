@@ -35,6 +35,10 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
         label: "المصدر",
         help: "مصدر الطلب — `flow:<flowName|nodeId>` للموافقات التي تقودها العُقد"
       },
+      process_package: {
+        label: "Source Package",
+        help: "The app the flow that opened this request comes from. Filled in by the platform; empty for flows created here."
+      },
       process_label: {
         label: "التدفق",
         help: "تسمية التدفق الذي فتح هذا الطلب، كما كانت عند فتحه"

@@ -164,7 +164,8 @@
 import { isUniqueViolationError } from '@objectstack/types';
 import type { Knex } from 'knex';
 import { StorageNameMapping } from '@objectstack/spec/system';
-import { carriesNullSafeTenantKeyPart, ceremonyOwnedDropFinding, describeMissingIndexColumns, diffManagedIndexes, diffManagedTable, diffUnbuildableIndexes, driftKey, expectedIndexes, fieldHasColumn, GLOBAL_TENANT, indexedKeyColumns, isCeremonyOwnedColumnDrop, isIndexDriftOp, legacyUniqueReplacements, normalizeDeclaredIndex, type DeclaredIndexInput, type DriftOp, type ManagedDriftEntry, type PendingSchemaWork, type PhysicalColumn } from './schema-drift.js';
+import { carriesNullSafeTenantKeyPart, ceremonyOwnedDropFinding, describeMissingIndexColumns, diffManagedIndexes, diffManagedTable, diffUnbuildableIndexes, driftKey, expectedIndexes, fieldHasColumn, GLOBAL_TENANT, indexedKeyColumns, isCeremonyOwnedColumnDrop, isIndexDriftOp, isManagedIndexName, legacyUniqueReplacements, normalizeDeclaredIndex, type DeclaredIndexInput, type DriftOp, type ManagedDriftEntry, type PendingSchemaWork, type PhysicalColumn } from './schema-drift.js';
+import { activeConcurrentIndexDeferral, attachUniqueConstraintSql, clearConcurrentIndexDeferral, concurrentIndexSql, type ConcurrentIndexSpec, dropInvalidIndexSql, invalidIndexNames, isPostgresLockTimeout, openConcurrentIndexDeferral, withAutocommitSession, withLockTimeout } from './pg-concurrent-index.js';
 import { isJsonColumnType, mediaColumnMoveDialect, mediaColumnMovePlan, type MediaColumnMovePlan, type MediaColumnMoveRefusal, type MediaColumnMoveScan } from './media-column-move.js';
 import { StandardErrorCode } from '@objectstack/spec/api';
 import { recoverUnencodedJsonText } from './unencoded-json-text.js';
@@ -199,6 +200,7 @@ export interface SchemaSyncHost {
   readonly canonicalTimeFields: SqlDriver['canonicalTimeFields'];
   readonly columnFieldByObject: SqlDriver['columnFieldByObject'];
   computeAndRecordTenantField: SqlDriver['computeAndRecordTenantField'];
+  readonly concurrentIndexState: SqlDriver['concurrentIndexState'];
   convergeJsonColumn: SqlDriver['convergeJsonColumn'];
   countNonTemporalTextRows: SqlDriver['countNonTemporalTextRows'];
   createHashShadowUniqueIndex: SqlDriver['createHashShadowUniqueIndex'];
@@ -364,8 +366,10 @@ export async function applyIndexDriftOp(this: Pick<SchemaSyncHost, 'dropIndexIfE
   // `default` arm below would say the same; this names the reason.
   if (op.type === 'unbuildable_index') return false;
   const physicalColumns = new Set(Object.keys(await this.knex(op.table).columnInfo()));
+  // #31901: every op here is on a table that exists, so PostgreSQL builds
+  // concurrently (`existingTable`), the same path the boot sync takes.
   const ensure = (name: string, columns: string[], unique: boolean, nullSafeColumns?: string[]) =>
-    this.syncDeclaredIndexes(op.table, [{ name, fields: columns, unique, nullSafeColumns }], physicalColumns);
+    this.syncDeclaredIndexes(op.table, [{ name, fields: columns, unique, nullSafeColumns }], physicalColumns, undefined, undefined, { existingTable: true });
 
   switch (op.type) {
     case 'replace_unique_index': {
@@ -472,6 +476,11 @@ export async function restoreBareIndexAfterFailedTighten(this: Pick<SchemaSyncHo
       op.table,
       [{ name: op.indexName, fields: op.columns, unique: op.unique }],
       new Set(Object.keys(await this.knex(op.table).columnInfo())),
+      undefined,
+      undefined,
+      // #31901: the table exists, so PostgreSQL rebuilds concurrently, and an
+      // INVALID index the failed tighten left under this name is dropped first.
+      { existingTable: true },
     );
   } catch {
     /* the error below reports the state either way */
@@ -647,8 +656,12 @@ export async function rebuildSqliteTablePatched(this: Pick<SchemaSyncHost, 'appl
 }
 
 /** The body of `SqlDriver#syncDeclaredIndexes`; the method's docblock there is its contract. */
-export async function syncDeclaredIndexes(this: Pick<SchemaSyncHost, 'createHashShadowUniqueIndex' | 'createNullSafeUniqueIndex' | 'explainUnkeyableTextColumn' | 'getExistingIndexNames' | 'knex' | 'logDurabilityFailure' | 'probeNullSafeUniqueDuplicates' | 'resolveTenantField'>, tableName: string, indexes: DeclaredIndexInput[], physicalColumns: Set<string>, tenantField?: string | null, fields?: Record<string, any>): Promise<void> {
+export async function syncDeclaredIndexes(this: Pick<SchemaSyncHost, 'concurrentIndexState' | 'createHashShadowUniqueIndex' | 'createNullSafeUniqueIndex' | 'explainUnkeyableTextColumn' | 'flushingDeferredDdl' | 'getExistingIndexNames' | 'isPostgres' | 'knex' | 'logDurabilityFailure' | 'logger' | 'probeNullSafeUniqueDuplicates' | 'resolveTenantField'>, tableName: string, indexes: DeclaredIndexInput[], physicalColumns: Set<string>, tenantField?: string | null, fields?: Record<string, any>, options: { existingTable?: boolean } = {}): Promise<void> {
   const existing = await this.getExistingIndexNames(tableName);
+  // #31901: on PostgreSQL an index missing from a table that already existed is
+  // built CONCURRENTLY, so writes are not blocked during the build. A table this
+  // sync just created is empty and keeps the plain path; other dialects too.
+  const concurrent = this.isPostgres && options.existingTable === true;
   const resolvedTenantField = tenantField !== undefined ? tenantField : this.resolveTenantField(tableName);
 
   for (const idx of indexes) {
@@ -683,6 +696,18 @@ export async function syncDeclaredIndexes(this: Pick<SchemaSyncHost, 'createHash
     if (existing.has(name)) continue;
 
     try {
+      if (concurrent) {
+        const outcome = await buildIndexConcurrently.call(this, {
+          table: tableName,
+          name,
+          columns,
+          unique,
+          nullSafe,
+          globalTenant: GLOBAL_TENANT,
+        });
+        if (outcome === 'built') existing.add(name);
+        continue;
+      }
       if (nullSafe.size > 0) {
         await this.createNullSafeUniqueIndex(tableName, name, columns, nullSafe);
       } else {
@@ -696,6 +721,10 @@ export async function syncDeclaredIndexes(this: Pick<SchemaSyncHost, 'createHash
       }
       existing.add(name);
     } catch (e: any) {
+      // #31901: the lock-wait refusal of an `os migrate apply` must reach the
+      // operator. Its wording says "exists" nowhere, but it is rethrown before
+      // any arm below can read it, so no arm can ever absorb it.
+      if (e && typeof e === 'object' && (e as Record<symbol, unknown>)[LOCK_WAIT_REFUSAL]) throw e;
       const msg = String(e?.message ?? e);
       // A concurrent creator or a pre-existing equivalent index under a
       // different name can race us here — both are benign for our intent
@@ -859,14 +888,7 @@ export async function syncDeclaredIndexes(this: Pick<SchemaSyncHost, 'createHash
         // visible. Do not take the boot down: the declared constraint is not
         // enforced yet, say so at `error` (from the outside everything looks
         // normal), and let the D4 drift pre-flight report the exact rows.
-        this.logDurabilityFailure(
-          `[sql-driver] cannot create NULL-safe unique index '${name}' on "${tableName}" — existing rows ` +
-            `violate it (duplicates the previous NULL-distinct index admitted: it never constrained rows ` +
-            `without an organization). The constraint ` +
-            `'${columns.join(', ')}' is NOT enforced until the data is deduplicated: run "os migrate plan" ` +
-            `for the conflicting rows (ADR-0120 D4).`,
-          msg,
-        );
+        this.logDurabilityFailure(nullSafeUniqueViolatedLine(tableName, name, columns), msg);
         continue;
       }
       if (unique && isUniqueViolationError(e)) {
@@ -895,17 +917,169 @@ export async function syncDeclaredIndexes(this: Pick<SchemaSyncHost, 'createHash
         } catch {
           // The probe is a diagnostic; the report below stands without it.
         }
-        this.logDurabilityFailure(
-          `[sql-driver] cannot create unique index '${name}' on "${tableName}" — existing rows violate ` +
-            `it.${report} The constraint '${columns.join(', ')}' is NOT enforced until the data is ` +
-            `deduplicated: run "os migrate plan" for the conflicting rows.`,
-          msg,
-        );
+        this.logDurabilityFailure(plainUniqueViolatedLine(tableName, name, columns, report), msg);
         continue;
       }
       throw e;
     }
   }
+}
+
+/**
+ * The durability line for a NULL-safe unique index that existing rows violate.
+ * One wording for the two places that find it: the DDL that failed on the
+ * duplicates, and (#31901) the probe the PostgreSQL concurrent build runs
+ * before its DDL.
+ */
+function nullSafeUniqueViolatedLine(tableName: string, name: string, columns: readonly string[]): string {
+  return (
+    `[sql-driver] cannot create NULL-safe unique index '${name}' on "${tableName}" — existing rows ` +
+    `violate it (duplicates the previous NULL-distinct index admitted: it never constrained rows ` +
+    `without an organization). The constraint ` +
+    `'${columns.join(', ')}' is NOT enforced until the data is deduplicated: run "os migrate plan" ` +
+    `for the conflicting rows (ADR-0120 D4).`
+  );
+}
+
+/** The plain-unique twin of {@link nullSafeUniqueViolatedLine}; `report` names the groups, or is empty. */
+function plainUniqueViolatedLine(tableName: string, name: string, columns: readonly string[], report: string): string {
+  return (
+    `[sql-driver] cannot create unique index '${name}' on "${tableName}" — existing rows violate ` +
+    `it.${report} The constraint '${columns.join(', ')}' is NOT enforced until the data is ` +
+    `deduplicated: run "os migrate plan" for the conflicting rows.`
+  );
+}
+
+/**
+ * #31901: build one index CONCURRENTLY on a PostgreSQL table that already
+ * exists. Called by {@link syncDeclaredIndexes} in place of the plain DDL; the
+ * mechanism and its measurements are in `pg-concurrent-index.ts`.
+ *
+ * In order:
+ *
+ *   1. A lock wait already timed out in this driver's sync: defer without
+ *      waiting again, one durability line per index. `CREATE INDEX
+ *      CONCURRENTLY` waits for every older transaction in the whole database,
+ *      so one long read would otherwise hold the boot for the full bound once
+ *      per missing index. Under `os migrate apply` (the deferred-DDL flush)
+ *      the refusal is thrown instead.
+ *   2. A UNIQUE index: the duplicate probe runs BEFORE the DDL. A concurrent
+ *      build over duplicates fails only after the whole build and leaves an
+ *      INVALID index, so on dirty data no DDL is sent at all, and the line the
+ *      plain path writes after its failed DDL is written instead.
+ *   3. On one autocommit session with `lock_timeout` armed at the driver's
+ *      DDL lock-wait bound: an INVALID index under this name that the driver
+ *      manages is dropped CONCURRENTLY (with a warn line), then the index is
+ *      built with `IF NOT EXISTS`. A plain UNIQUE is then attached as the
+ *      constraint the plain path makes.
+ *   4. A lock timeout: boot logs at `error` and carries on, and the deferral
+ *      in step 1 starts. `os migrate apply` refuses with the lock-wait
+ *      refusal (`LOCK_WAIT_REFUSAL`, `DATABASE_ERROR` / 500). The INVALID index
+ *      the timeout left is cleaned up by step 3 of the next sync.
+ *
+ * Any other failure is thrown to {@link syncDeclaredIndexes}'s catch, whose
+ * arms already answer a unique violation (a duplicate written between the
+ * probe and the build) and an "already exists" race.
+ */
+async function buildIndexConcurrently(
+  this: Pick<SchemaSyncHost, 'concurrentIndexState' | 'flushingDeferredDdl' | 'knex' | 'logDurabilityFailure' | 'logger' | 'probeNullSafeUniqueDuplicates'>,
+  spec: ConcurrentIndexSpec,
+): Promise<'built' | 'not-built'> {
+  const state = this.concurrentIndexState;
+  const seconds = state.lockWaitMs / 1000;
+  const what = `${spec.unique ? 'UNIQUE ' : ''}index '${spec.name}' on "${spec.table}"`;
+  const unenforced = spec.unique ? ' The uniqueness it declares is NOT enforced until then.' : '';
+
+  // The one-wait window (`ConcurrentIndexDeferral`): for one lock-wait bound
+  // after a build timed out, every other concurrent build defers without
+  // waiting, so a process waits at most once per bound however many indexes
+  // are missing. The window closes itself when the bound has passed, and an
+  // operator's explicit run closes it at entry.
+  const deferredBy = activeConcurrentIndexDeferral(state);
+  if (deferredBy !== null) {
+    if (this.flushingDeferredDdl) throw deferredDdlLockWaitError(spec.table, seconds, undefined, 'postgres');
+    this.logDurabilityFailure(
+      `[sql-driver] ${what} was NOT built in this sync: the concurrent index build on ${deferredBy} ` +
+        `timed out less than ${seconds}s ago waiting for an older transaction, so the concurrent builds in that ` +
+        `window are deferred to the next sync without waiting again.${unenforced} To build it now, end the ` +
+        `long-running transaction (pg_stat_activity, the oldest xact_start) and run "os migrate apply".`,
+      { tableName: spec.table, index: spec.name, unique: spec.unique, deferredBy },
+    );
+    return 'not-built';
+  }
+
+  if (spec.unique) {
+    let duplicates: Array<{ key: string; rows: number }>;
+    try {
+      duplicates = await this.probeNullSafeUniqueDuplicates(spec.table, [...spec.columns], [...spec.nullSafe]);
+    } catch (e: any) {
+      // Fail safe, as the plan's pre-flight does: without evidence the data is
+      // clean, no build is started that could end in an INVALID index.
+      this.logDurabilityFailure(
+        `[sql-driver] ${what} was NOT built: the duplicate probe that runs before a concurrent UNIQUE build ` +
+          `failed, so the build was not started. The uniqueness it declares is NOT enforced until a later sync ` +
+          `builds it; "os migrate plan" reports it meanwhile.`,
+        String(e?.message ?? e),
+      );
+      return 'not-built';
+    }
+    if (duplicates.length > 0) {
+      this.logDurabilityFailure(
+        spec.nullSafe.size > 0
+          ? nullSafeUniqueViolatedLine(spec.table, spec.name, spec.columns)
+          : plainUniqueViolatedLine(spec.table, spec.name, spec.columns, ` Conflicting group(s): ${formatDuplicateGroups(duplicates)}.`),
+        { tableName: spec.table, index: spec.name, duplicateGroups: duplicates.length },
+      );
+      return 'not-built';
+    }
+  }
+
+  try {
+    await withAutocommitSession(this.knex, (run) =>
+      withLockTimeout(run, state.lockWaitMs, async () => {
+        if ((await invalidIndexNames(run, spec.table)).has(spec.name)) {
+          if (!isManagedIndexName(spec.table, { name: spec.name, columns: [...spec.columns], unique: spec.unique })) {
+            // Not a name this driver gives, so not this driver's to drop.
+            // `IF NOT EXISTS` below then skips it, and it stays INVALID.
+            this.logger.warn(
+              `[sql-driver] index '${spec.name}' on "${spec.table}" exists but is INVALID, and its name is not one ` +
+                `this driver manages, so it is left in place. Drop it ("DROP INDEX CONCURRENTLY") for the next sync ` +
+                `to build it.`,
+            );
+          } else {
+            this.logger.warn(
+              `[sql-driver] dropping INVALID index '${spec.name}' on "${spec.table}", left by a concurrent build that ` +
+                `did not finish, and building it again.`,
+            );
+            await run(dropInvalidIndexSql(this.knex, spec.name));
+          }
+        }
+        await run(concurrentIndexSql(this.knex, spec));
+        if (spec.unique && spec.nullSafe.size === 0) {
+          const res: any = await run(
+            `select 1 from pg_constraint where conname = ? and conrelid = ?::regclass`,
+            [spec.name, spec.table],
+          );
+          if (!res?.rows?.length) await run(attachUniqueConstraintSql(this.knex, spec.table, spec.name));
+        }
+      }),
+    );
+  } catch (e) {
+    if (!isPostgresLockTimeout(e)) throw e;
+    openConcurrentIndexDeferral(state, what);
+    if (this.flushingDeferredDdl) throw deferredDdlLockWaitError(spec.table, seconds, e, 'postgres');
+    this.logDurabilityFailure(
+      `[sql-driver] ${what} was NOT built: the concurrent build timed out after ${seconds}s waiting for an older ` +
+        `transaction. CREATE INDEX CONCURRENTLY waits for every transaction older than it, on any table of the ` +
+        `database. The boot carries on, and for the next ${seconds}s every other concurrent index build is deferred ` +
+        `to the next sync without waiting.${unenforced} The next sync drops the INVALID index this left and builds ` +
+        `it again. To build it now, end the long-running transaction (pg_stat_activity, the oldest xact_start) and ` +
+        `run "os migrate apply".`,
+      String((e as any)?.message ?? e),
+    );
+    return 'not-built';
+  }
+  return 'built';
 }
 
 /** The body of `SqlDriver#createNullSafeUniqueIndex`; the method's docblock there is its contract. */
@@ -1201,8 +1375,26 @@ export async function reconcileAndWarnDrift(this: Pick<SchemaSyncHost, 'applyMig
   }
 }
 
-/** The body of `SqlDriver#applyMigrationEntries`; the method's docblock there is its contract. */
-export async function applyMigrationEntries(this: Pick<SchemaSyncHost, 'applyDriftOpInPlace' | 'applyIndexDriftOp' | 'assertSchemaMutable' | 'dialectName' | 'isSqlite' | 'logger' | 'rebuildSqliteTablePatched'>, entries: ManagedDriftEntry[], opts: { allowDestructive?: boolean } = {}): Promise<{ applied: ManagedDriftEntry[]; skipped: ManagedDriftEntry[] }> {
+/**
+ * The body of `SqlDriver#applyMigrationEntries`; the method's docblock there is
+ * its contract.
+ *
+ * #31901: an operator's run waits for itself. It closes the concurrent index
+ * builds' deferral window an earlier sync opened (`ConcurrentIndexDeferral`)
+ * at entry, unconditionally, then applies the entries.
+ */
+export async function applyMigrationEntries(this: Pick<SchemaSyncHost, 'applyDriftOpInPlace' | 'applyIndexDriftOp' | 'assertSchemaMutable' | 'concurrentIndexState' | 'dialectName' | 'isSqlite' | 'logger' | 'rebuildSqliteTablePatched'>, entries: ManagedDriftEntry[], opts: { allowDestructive?: boolean } = {}): Promise<{ applied: ManagedDriftEntry[]; skipped: ManagedDriftEntry[] }> {
+  clearConcurrentIndexDeferral(this.concurrentIndexState);
+  return applyMigrationEntriesKeepingDeferral.call(this, entries, opts);
+}
+
+/**
+ * {@link applyMigrationEntries} without its reset of the concurrent index
+ * builds' deferral window (#31901): the boot's own drift reconcile
+ * ({@link reconcileAndWarnDrift}) applies safe entries once per object inside
+ * one sync, and a reset there would let every object wait the full bound again.
+ */
+export async function applyMigrationEntriesKeepingDeferral(this: Pick<SchemaSyncHost, 'applyDriftOpInPlace' | 'applyIndexDriftOp' | 'assertSchemaMutable' | 'dialectName' | 'isSqlite' | 'logger' | 'rebuildSqliteTablePatched'>, entries: ManagedDriftEntry[], opts: { allowDestructive?: boolean } = {}): Promise<{ applied: ManagedDriftEntry[]; skipped: ManagedDriftEntry[] }> {
   this.assertSchemaMutable('reconcileManagedSchema');
   const allowDestructive = opts.allowDestructive === true;
 
@@ -1340,7 +1532,7 @@ const SQLITE_JSON_BACKFILL_PAGE_SIZE = 500;
  * ruling's explicit minimality. Both wait for measured demand. A knob added now
  * would have to be supported forever on the evidence of one CI stall.
  */
-const DEFERRED_DDL_LOCK_WAIT_TIMEOUT_SECONDS = 120;
+export const DEFERRED_DDL_LOCK_WAIT_TIMEOUT_SECONDS = 120;
 
 /**
  * [#9354] MySQL's lock-wait timeout, as it arrives through mysql2 and knex.
@@ -1403,13 +1595,24 @@ function isMysqlLockWaitTimeout(err: unknown, depth = 0): boolean {
  * and unlike the query-refusal envelope there is no caller-bound literal here
  * to leak: the statement's only bindings are the table and column.
  */
-function deferredDdlLockWaitError(table: string, seconds: number, cause: unknown): Error {
+function deferredDdlLockWaitError(table: string, seconds: number, cause: unknown, dialect: 'mysql' | 'postgres' = 'mysql'): Error {
   const err = new Error(
-    `Migration of table '${table}' timed out after ${seconds}s waiting for a MySQL metadata ` +
-      'lock (lock_wait_timeout). Another session is holding a lock on the table — a long-running ' +
-      'transaction or an open, uncommitted session. No schema change was made. Identify the ' +
-      "holder with `SHOW PROCESSLIST` or by querying `performance_schema.metadata_locks`, end " +
-      'it, then re-run `os migrate apply` — the widening is idempotent, so re-running is safe.',
+    dialect === 'postgres'
+      ? // #31901: the PostgreSQL arm, raised by a concurrent index build. Its
+        // wait is wider than MySQL's: CONCURRENTLY waits for every transaction
+        // older than it, on any table of the database, so the holder need not
+        // touch this table at all, and the sentence says so.
+        `Migration of table '${table}' timed out after ${seconds}s waiting for a PostgreSQL lock ` +
+        '(lock_timeout) while building an index concurrently. CREATE INDEX CONCURRENTLY waits for every ' +
+        'transaction older than it, on any table of the database, so a long-running transaction or an ' +
+        'open, uncommitted session anywhere holds it. The index was not built. Identify the holder in ' +
+        '`pg_stat_activity` (the oldest `xact_start`), end it, then re-run `os migrate apply`: the build is ' +
+        'idempotent, and an INVALID index this attempt left behind is dropped and built again.'
+      : `Migration of table '${table}' timed out after ${seconds}s waiting for a MySQL metadata ` +
+        'lock (lock_wait_timeout). Another session is holding a lock on the table — a long-running ' +
+        'transaction or an open, uncommitted session. No schema change was made. Identify the ' +
+        "holder with `SHOW PROCESSLIST` or by querying `performance_schema.metadata_locks`, end " +
+        'it, then re-run `os migrate apply` — the widening is idempotent, so re-running is safe.',
   ) as Error & { code?: string; status?: number };
   err.code = StandardErrorCode.enum.DATABASE_ERROR;
   err.status = 500;

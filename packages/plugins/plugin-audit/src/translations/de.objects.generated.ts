@@ -18,7 +18,7 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
   sys_audit_log: {
     label: "Audit-Protokoll",
     pluralLabel: "Audit-Protokolle",
-    description: "Unveränderlicher Audit-Trail für Plattformereignisse",
+    description: "Audit-Trail für Plattformereignisse. Einträge schreibt nur die Plattform; über die Daten-API und im Setup sind sie schreibgeschützt.",
     fields: {
       created_at: {
         label: "Zeitstempel"

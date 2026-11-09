@@ -153,6 +153,10 @@ export { SysAutomationRun } from './sys-automation-run.object.js';
 export { InMemoryFlowDispatchStore, ObjectStoreFlowDispatchStore } from './flow-dispatch-store.js';
 export type { FlowDispatchStoreEngine } from './flow-dispatch-store.js';
 export { SysFlowDispatch } from './sys-flow-dispatch.object.js';
+// [ADR-0150 D8 row R10] The dispatch-key grammar the boot re-key reads, which
+// the triggers (`@objectstack/trigger-schedule`) write; their tests hold the
+// two spellings equal.
+export { bareDispatchKeyFlow, scopedDispatchKey } from './flow-dispatch-key-package-backfill.js';
 
 // [#27238] The Setup → Integrations entry of the connector credential door,
 // registered by AutomationServicePlugin at `kernel:ready` and exported for the

@@ -2259,24 +2259,32 @@ export const PER_CHUNK_GZIP_CEILINGS = Object.freeze({
   // REGRESSION_THIS_GATE_MUST_CATCH_BYTES and the other per-chunk rows. No
   // exemption was added and no import was made lazy.
   //
-  // ⚠️ RAISED by objectstack#31893 (2026-11-09), from 61,000 by 1,000 bytes,
-  // with its baseline below moved by the same amount. WHAT THE BYTES ARE —
-  // one container, one instrument: `CI=true pnpm exec vite build` in
-  // `apps/console`, reading `apps/console/dist/eager-closure.json`, twice on
-  // the same tree (`main` at `f3036900` merged into that card's branch): with
-  // the card's two new keys, `list.loadErrorUnknownColumnMessage` and
-  // `list.loadErrorUnknownFieldMessage`, this chunk reads 61,030 gzipped bytes;
-  // with those two `en` lines deleted it reads 60,963. So `main` was 37 bytes
-  // under the line and the keys cost 67. The eager closure read 2,257,258 ->
-  // 2,257,352 (+94), well inside the aggregate ceiling.
+  // ⚠️ RAISED by objectstack#31893 and objectstack#31808 (2026-11-09), from
+  // 61,000 by ONE shared 1,000 bytes, with its baseline below moved by the
+  // same amount. WHAT THE BYTES ARE — one container, one instrument:
+  // `CI=true pnpm exec vite build` in `apps/console`, reading
+  // `apps/console/dist/eager-closure.json`. Each card measured on the same
+  // tree (`main` at `f3036900` merged into its branch), where this chunk read
+  // 60,963 gzipped bytes without the card's `en` lines, 37 under the line:
+  //   - objectstack#31893's two keys, `list.loadErrorUnknownColumnMessage` and
+  //     `list.loadErrorUnknownFieldMessage`: 61,030 with them, so +67 (the
+  //     eager closure 2,257,258 -> 2,257,352, +94);
+  //   - objectstack#31808's seven `actionDialog.preflight.*` keys: 61,120 with
+  //     them, so +157 (the eager closure 2,258,725 -> 2,258,885, +160).
+  // With both landed (`main` at `c385d903` merged into objectstack#31808's
+  // branch) the chunk reads 61,199 gzipped bytes, 801 under 62,000.
   //
-  // WHAT THEY BUY: the 67 bytes are the list's rejected panel naming the field
-  // a `400 INVALID_FIELD` refused, and the view column that asked for it,
-  // where it showed only "This view's query was rejected". The other 933 are
-  // SHARED headroom for the next few error strings of that size, ⛔ not a
-  // budget for a new group: a whole group belongs in a lazy namespace, as
-  // `marketplace` went (objectstack#30588). ⛔ Not moved:
-  // MAX_EAGER_CLOSURE_GZIP_BYTES, BASELINE,
+  // WHAT THEY BUY: objectstack#31893's 67 bytes are the list's rejected panel
+  // naming the field a `400 INVALID_FIELD` refused, and the view column that
+  // asked for it, where it showed only "This view's query was rejected".
+  // objectstack#31808's 157 are the param dialog's panel for an action's
+  // declared `preflight` read (`ActionSchema.preflight`, objectstack#31840):
+  // its heading, the waiting, loading and three refusal sentences, and the
+  // hint on a param the read fills; they sit beside `actionDialog`'s other
+  // strings because the dialog is eager. The rest is SHARED headroom for the
+  // next few error strings of that size, ⛔ not a budget for a new group: a
+  // whole group belongs in a lazy namespace, as `marketplace` went
+  // (objectstack#30588). ⛔ Not moved: MAX_EAGER_CLOSURE_GZIP_BYTES, BASELINE,
   // REGRESSION_THIS_GATE_MUST_CATCH_BYTES and the other per-chunk rows. No
   // exemption was added and no import was made lazy.
   'i18n-locale-en': 62_000,
@@ -2529,9 +2537,10 @@ export const PER_CHUNK_BASELINE = Object.freeze({
   // which keeps the ceiling-minus-baseline gap this key carried. ⚠️ So this is
   // no longer one build's reading.
   //
-  // Moved with its ceiling by objectstack#31893 (2026-11-09), from 41,415 by
-  // the same +1,000 bytes (the entry on that key of PER_CHUNK_GZIP_CEILINGS),
-  // which keeps the ceiling-minus-baseline gap this key carried.
+  // Moved with its ceiling by objectstack#31893 and objectstack#31808
+  // (2026-11-09), from 41,415 by the same one shared +1,000 bytes (the entry
+  // on that key of PER_CHUNK_GZIP_CEILINGS), which keeps the
+  // ceiling-minus-baseline gap this key carried.
   'i18n-locale-en': 42_415,
   // `3f775eeb8`, its OWN console build — ⛔ not the one above it and not
   // BASELINE's. Moved with the ceiling in the same commit, per the maintainer

@@ -70,10 +70,16 @@ export default defineConfig({
     // attach verb's pins run its REAL `enable.files` gate on the
     // `sys_attachment` insert, and a gate read from `dist/` would make those
     // pins a verdict about build state.
+    //
+    // `@objectstack/service-cluster` joins them for the same reason
+    // (cloud#3814): the plugin asks its `declaresMultiReplicaOnRedis` whether
+    // a local root is refused under declared replicas, and that predicate read
+    // from `dist/` would make those pins a verdict about build state.
     alias: [
       { find: /^@objectstack\/core$/, replacement: path.resolve(__dirname, '../../core/src/index.ts') },
       { find: /^@objectstack\/driver-sql$/, replacement: path.resolve(__dirname, '../../drivers/driver-sql/src/index.ts') },
       { find: /^@objectstack\/plugin-audit$/, replacement: path.resolve(__dirname, '../../plugins/plugin-audit/src/index.ts') },
+      { find: /^@objectstack\/service-cluster$/, replacement: path.resolve(__dirname, '../service-cluster/src/index.ts') },
     ],
   },
 });

@@ -266,7 +266,7 @@ export function useConsoleActionRuntime(opts: ConsoleActionRuntimeOptions): Cons
   // whole function under the compiler — every other read below is a declared
   // `ActionDef` field, and the one that was not is the reason objectui#4282
   // backed the narrowing out.
-  const paramCollectionHandler = useCallback<ParamCollectionHandler>((params: ActionParamDef[], action?: ConsoleActionDispatch, interpolate?: (text: string) => string, run?: Parameters<ParamCollectionHandler>[3]) => {
+  const paramCollectionHandler = useCallback<ParamCollectionHandler>((params: ActionParamDef[], action?: ConsoleActionDispatch, interpolate?: (text: string) => string, run?: Parameters<ParamCollectionHandler>[3], interpolateRead?: Parameters<ParamCollectionHandler>[4]) => {
     return new Promise<Record<string, any> | null>((resolve) => { void (async () => {
       // ⭐ Ask the store for the object type BEFORE resolving (`6cc910b6d`).
       // `ensureType` is idempotent and answers from cache in a microtask once
@@ -371,8 +371,15 @@ export function useConsoleActionRuntime(opts: ConsoleActionRuntimeOptions): Cons
         // The runner's `run`, so Confirm runs the action from inside the
         // dialog and a refusal keeps what the user typed (objectui#13161).
         run,
-        // The host-composed panel above the params (objectstack#30205).
-        companion: resolveParamDialogCompanion(objForI18n, action?.name, row),
+        // The panel above the params (objectstack#30205).
+        // The action's declared `preflight` read joins the same slot
+        // (objectstack#31808): judged against the params the runner handed
+        // over, its URL filled by the runner's `interpolateRead`.
+        companion: resolveParamDialogCompanion(objForI18n, action?.name, row, {
+          preflight: action?.preflight,
+          params,
+          interpolateRead,
+        }),
       });
     })(); });
   }, [objectName, objectDef, objects, metadata, fieldLabel, fieldOptionLabel, actionParamText, actionParamOptionLabel, actionSubmitText, actionCancelText, language]);

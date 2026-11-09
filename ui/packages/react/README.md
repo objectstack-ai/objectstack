@@ -317,6 +317,18 @@ function PageOpen({ visit, children }: { visit: string; children: ReactNode }) {
 }
 ```
 
+A mounted reader asks once per binding; a change declared with
+`notifyDataChanged` alone does not make it read again, since an endpoint names
+no object and that change comes from every surface of the app. A host that runs
+a page's actions mounts `<ElementApiRereadScope reread={signal}>` around the
+page, with one `createElementApiReread()` signal per page mount, and calls
+`signal.reread()` after an action on that page succeeds (the console's page does
+it from the action runtime's refresh). Every reader below reads again and no
+reader outside it does. The last answer stays on screen while the new read is in
+flight, with no loading panel; the new answer replaces it in place, and a failed
+read draws the error panel, never the answer from before the write. A read asked
+after `reread()` never joins a request asked before it.
+
 ### useSettledSchema
 
 The settled-schema RESOLUTION half, shared by every view that gates a record
