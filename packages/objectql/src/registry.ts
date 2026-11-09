@@ -9286,6 +9286,11 @@ export class SchemaRegistry {
     this.forgetDefaultRecordPageClaims(id);
     // …and its bare names of the covered types.
     this.forgetBareNameClaims(id);
+    // [#31720] …and the namespace names a stack's residual holds under this
+    // id: the residual's items are registered under their owner id, so
+    // `unregisterItemsByPackage(id)` above has just withdrawn them (the
+    // owner id is one of the stack's own bodies in the `preserve` shape).
+    this.residualNamespaceHolders.delete(id);
     // [#30581] …and the navigation entries it put into other packages' apps:
     // with no row left, the fold's disabled check cannot withhold them.
     this.setPackageNavContributions(id, []);

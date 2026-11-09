@@ -190,13 +190,18 @@ describe('what the residual rule leaves alone', () => {
     expect((ql.registry.getItem('page', 'release_home') as { label?: string } | undefined)?.label).toBe('release page');
   });
 
-  it('CONTROL — a residual item of a type outside the twelve is not judged (a dataset alpha also holds)', async () => {
-    const dataset = { name: NAME, label: 'ds', object: 'crm_account', measures: [{ name: 'count', aggregate: 'count' }], dimensions: [] };
+  it('CONTROL — a residual item of a type outside the twelve is not judged (a doc alpha also holds)', async () => {
+    // Outside the twelve AND outside every other name rule (a dataset is phase
+    // 1's one-holder type, a position the security catalog's, each refusing
+    // on its own terms), so nothing judges it.
+    // A fresh literal per registration: the registry stamps `_packageId` onto
+    // the object it registers, and a shared literal would carry alpha's stamp.
+    const doc = (label: string) => ({ name: NAME, label, content: `# ${label}` });
     const env = await boot();
-    expect((await env.register({ packages: [{ manifest: body(ALPHA, 'crm', { objects: [account], datasets: [dataset] }) }] }))?.message)
+    expect((await env.register({ packages: [{ manifest: body(ALPHA, 'crm', { docs: [doc('alpha doc')] }) }] }))?.message)
       .toBeUndefined();
-    const err = await env.register(stack('crm', [betaOf('crm')], { datasets: [{ ...dataset, label: 'release ds' }] }));
-    expect(err?.code, err?.message).not.toBe('NAMESPACE_CONFLICT');
+    const err = await env.register(stack('crm', [betaOf('crm')], { docs: [doc('release doc')] }));
+    expect(err?.message).toBeUndefined();
   });
 
   it('CONTROL — a shareable platform namespace is not judged', async () => {
@@ -218,6 +223,17 @@ describe('order does not decide', () => {
       { namespace: 'crm', type: 'page', name: NAME, incomingPackageId: ALPHA, existingPackageIds: [RELEASE] },
     ]);
     expect(ql.registry.getPackage(ALPHA)).toBeUndefined();
+  });
+
+  it('uninstalling the residual\'s owner (a body id, the preserve shape) frees the residual\'s names: a package holding the name then installs', async () => {
+    const { ql, register } = await boot();
+    expect((await register(stack('crm', [betaOf('crm')], residualOf('page'), BETA)))?.message).toBeUndefined();
+    expect((ql.registry.getItem('page', NAME) as { label?: string } | undefined)?.label).toBe('release page');
+    expect(ql.registry.uninstallPackage(BETA)).toBe(true);
+    expect(ql.registry.getItem('page', NAME)).toBeUndefined();
+    expect((await register({ packages: [{ manifest: body(ALPHA, 'crm', { pages: [item('page', NAME, 'alpha')] }) }] }))?.message)
+      .toBeUndefined();
+    expect((ql.registry.getItem('page', NAME) as { label?: string } | undefined)?.label).toBe('alpha page');
   });
 
   it('CONTROL — the same stack registering again is not judged against its own residual', async () => {

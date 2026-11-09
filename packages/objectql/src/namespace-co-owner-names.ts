@@ -64,9 +64,16 @@
  * residual, ADR-0130 D4) register under the stack's own id after every body,
  * never through the package door. {@link residualNamespacePackageOf} reads
  * them as one more holder of the stack's namespace, and the same predicate
- * judges it: at the `manifest` service, once the bodies have installed
- * (`SchemaRegistry.refuseResidualNamespaceNameConflicts`), and in
- * `os validate` / `os build` against the stack's bodies.
+ * judges it at one door, the `manifest` service, once the bodies have
+ * installed (`SchemaRegistry.refuseResidualNamespaceNameConflicts`). A
+ * residual that registers is recorded as a holder
+ * (`SchemaRegistry.recordResidualNamespaceHolder`), so what registers after it
+ * is judged against it too; uninstalling its owner id frees its names.
+ *
+ * `os validate` / `os build` do not judge the residual, and need not: inside
+ * one artifact a residual can never share a covered name with one of the
+ * stack's bodies (a body holding the name claims the slot, so the item is not
+ * residual), and the packages other artifacts installed are invisible there.
  *
  * ⛔ No package-scoped resolution here (that is ADR-0150 child R), and phase
  * 1's one-holder rule is not touched.
