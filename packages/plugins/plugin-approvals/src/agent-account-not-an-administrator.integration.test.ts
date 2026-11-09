@@ -200,7 +200,7 @@ describe('[ADR-0151 D3] an AI service account is never an approvals administrato
   it('an account holding organization_admin is not on the admin_rescue slate; a person holding it is', async () => {
     const row = await open([{ type: 'position', value: 'sales_manager' }]);
     expect(row.status).toBe('pending');
-    expect([...row.pending_approvers].sort()).toEqual(['u_owner']);
+    expect([...(row.pending_approvers ?? [])].sort()).toEqual(['u_owner']);
   });
 
   it.each(['u_bot_root', 'u_bot_org'])(
