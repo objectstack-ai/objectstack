@@ -30,6 +30,14 @@ import {
   type SeedTenancyExec,
 } from '@objectstack/metadata-protocol';
 import { collectDuplicateIdentifierReport } from './duplicates.js';
+// Paid at collection, not inside a clocked case: the command's schema-migration
+// boot reaches these through dynamic imports (check:test-source-alias).
+import '@objectstack/driver-turso';
+import '@objectstack/platform-objects/plugin';
+import '@objectstack/plugin-security';
+import '@objectstack/rest';
+import '@objectstack/runtime';
+import '@objectstack/service-datasource';
 
 /**
  * The registry view the booted stack hands the command — the same objects

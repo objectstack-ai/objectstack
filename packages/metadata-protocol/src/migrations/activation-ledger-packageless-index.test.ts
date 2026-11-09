@@ -20,7 +20,7 @@ import type { IndexExec } from './partial-index-probe.js';
  *
  * Real SQLite (`node:sqlite`, as the sibling migration suites use), because the
  * claim is about what a UNIQUE index does with NULLs over real rows. PostgreSQL
- * and MySQL/MariaDB are measured in the `.live.test.ts` sibling; the engine and
+ * and MySQL/MariaDB are measured in the `.live-dialects.test.ts` sibling; the engine and
  * boot half is the dogfood file `activation-ledger-package-key.dogfood.test.ts`.
  */
 describe('sys_metadata_activation: one package-less row per (metadata_type, name)', () => {
