@@ -115,10 +115,11 @@ export function configureExtractionWorkerEntry(entry: ExtractionWorkerEntry | un
   resetExtractionWorkerPool();
 }
 
-/** Terminate the idle workers and forget a recorded "cannot start". */
+/** Terminate the idle workers, forget a recorded "cannot start", and count started workers from zero. */
 export function resetExtractionWorkerPool(): void {
   for (const worker of idle.splice(0)) void worker.terminate();
   unavailableReason = undefined;
+  started = 0;
 }
 
 /** How many workers the pool has started, and how many sit idle. */
