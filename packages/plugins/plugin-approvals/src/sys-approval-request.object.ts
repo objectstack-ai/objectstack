@@ -88,7 +88,7 @@ export const SysApprovalRequest = ObjectSchema.create({
   // search sweep, into a 403. A structured filter on the snapshot is
   // unchanged, for the readers the guard admits.
   searchableFields: [
-    'process_name', 'process_label', 'object_name', 'record_id', 'submitter_comment', 'status',
+    'process_name', 'process_package', 'process_label', 'object_name', 'record_id', 'submitter_comment', 'status',
     'cancel_reason', 'current_step', 'current_step_label', 'pending_approvers', 'pending_approver_labels',
     'flow_run_id', 'flow_node_id', 'node_config_json',
   ],
