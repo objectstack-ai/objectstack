@@ -266,7 +266,7 @@ describe('[ADR-0149 D2] dataset tools on MCP — calls', () => {
     });
     expect(json.result?.isError).toBe(true);
     const envelope = JSON.parse(json.result!.content[0].text);
-    expect(envelope).toMatchObject({ code: 'NOT_FOUND', status: 404 });
+    expect(envelope.error).toMatchObject({ code: 'NOT_FOUND', status: 404 });
   });
 });
 
