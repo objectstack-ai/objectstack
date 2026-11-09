@@ -56,7 +56,7 @@ enforcing code path (explaining another user needs `manage_users`).
 ## Row-Level Security (RLS)
 
 The **enforced** RLS surface is a list of `rowLevelSecurity` policies on a
-**permission set / profile** (`PermissionSetSchema.rowLevelSecurity`), *not* a
+**permission set / profile**, *not* a
 CEL predicate on the object. Each policy's `using` and/or `check` is a **string**
 predicate. `using` admits rows: what a `select` policy lets the
 caller read, and the existing rows an `update`/`delete` policy lets it change
@@ -72,7 +72,7 @@ none applies the policies restrict nothing (the tenant wall still applies) — a
 `select` policies.
 
 ```typescript
-// in a permission set (definePermissionSet)
+// in a permission set
 rowLevelSecurity: [
   {
     name: 'own_records',
@@ -94,8 +94,7 @@ Predicates are **canonical CEL** (ADR-0058): `field == current_user.<prop>`,
 `field == 'literal'`, `field in current_user.<array>`, comparisons (`>`/`<`/`>=`/`<=`),
 `&&`/`||`/`!`, and `== null` checks all lower to a pushdown filter. **No** cross-object
 traversal or subqueries — those are a compile error (ADR-0055), never silently dropped.
-A legacy SQL-style `=` / `IN (...)` predicate still compiles via a **deprecated**
-bridge (warns). The compiler resolves these
+The compiler resolves these
 `current_user.*` placeholders:
 
 | Placeholder | Resolves to |
@@ -103,10 +102,10 @@ bridge (warns). The compiler resolves these
 | `current_user.id` | the caller's user id (ownership) |
 | `current_user.email` | the caller's email (ADR-0056) |
 | `current_user.organization_id` | the caller's tenant |
-| `current_user.org_user_ids` | ids of users in the same org (for `IN`) |
-| `current_user.positions` | the caller's positions (for `IN`; ADR-0090 D3) |
-| `current_user.queues` | the ownership queues the caller sits in (for `IN`; ADR-0142 D3) |
-| `current_user.KEY` | the set an object's `membershipKeys.KEY` declares (for `IN`) |
+| `current_user.org_user_ids` | ids of users in the same org |
+| `current_user.positions` | the caller's positions (ADR-0090 D3) |
+| `current_user.queues` | the ownership queues the caller sits in (ADR-0142 D3) |
+| `current_user.KEY` | the set an object's `membershipKeys.KEY` declares |
 
 - Prefer the built-in `member_default` owner scoping (`owner_only_writes` /
   `owner_only_deletes`) and the object's `sharingModel` (ADR-0056 D1) over
@@ -169,6 +168,13 @@ rowLevelSecurity: [
   one record, once → a sharing rule or a manual share; a team's records → a
   sharing rule whose `sharedWith: { type: 'queue', value: '<queue name>' }`
   reaches an ownership queue's members (SKILL.md § Ownership queues).
+- A package's rule reads `value` as its package's queue, else the one
+  holder in its declared `dependencies` closure plus `sys`, else, if none
+  declares it, an org's `sys_queue` row. Else it grants no one new, warned
+  `RESOURCE_CONFLICT`: `outside-closure` (only a non-dependency
+  `com.acme.billing` or an environment item holds `support`),
+  `ambiguous-in-closure` (two dependencies do; `ambiguous-in-environment` if
+  a non-dependency does too).
 
 ## Positions grant only what they name; portal users are `external`
 
@@ -211,7 +217,6 @@ fields: {
 - **Locks, never grants.** On unmatched rows the entry is absent; another held
   set's `editable: true` still wins (most-permissive merge).
 - Docs: https://objectstack.ai/docs/permissions/field-level-security#row-conditioned-edit-locks-when
-  and the recipe https://objectstack.ai/docs/permissions/access-recipes#data-lock-fields-for-a-position-once-a-record-reaches-a-stage
 
 ## Sensitive fields — `secret` type + `requiredPermissions`
 
@@ -290,7 +295,7 @@ none — e.g. identity tables a plugin writes via its own adapter
 **Recipe — env-global, admin-only object that admins can fully see:**
 
 ```typescript
-tenancy: { enabled: false }, // not a tenant object → Layer 0 contributes nothing
+tenancy: { enabled: false },
 requiredPermissions: ['manage_platform_settings'], // capability AND-gate → members get 403
 ```
 
@@ -299,8 +304,7 @@ requiredPermissions: ['manage_platform_settings'], // capability AND-gate → me
 > wildcard (`'*'`) read grant — the shipped `viewer_readonly`, an app-declared
 > default profile, a customer-authored set; not `member_default`, which is
 > explicit-allow — reads every row env-wide. `requiredPermissions` alone leaves a
-> tenant object whose untagged rows the wall denies to everyone (above); it is
-> the half that holds however permissive the grants. Posture model: ADR-0066.
+> tenant object whose untagged rows the wall denies to everyone (above). Posture model: ADR-0066.
 
 ## Renaming or removing a shipped access item
 
