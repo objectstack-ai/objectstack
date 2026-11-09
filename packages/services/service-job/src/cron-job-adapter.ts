@@ -9,6 +9,7 @@ import type {
   JobScheduleOptions,
 } from '@objectstack/spec/contracts';
 import { runWithPolicy, JobTimeoutError } from './run-with-policy.js';
+import { skippedTickMessage, type ScheduledFire } from './scheduled-fire.js';
 
 /**
  * Monotonic counter that makes every adapter instance's registry prefix unique
@@ -86,6 +87,11 @@ export class CronJobAdapter implements IJobService {
    * the outage is warned about once, not once per tick of every job.
    */
   private lockOutage = false;
+  /**
+   * job name → the scheduled fire of it still in flight on THIS node, if any
+   * (#31811). See {@link CronJobAdapter.runScheduled}.
+   */
+  private readonly scheduledInFlight = new Map<string, ScheduledFire>();
 
   /**
    * This instance's prefix in croner's PROCESS-GLOBAL name registry.
@@ -232,10 +238,39 @@ export class CronJobAdapter implements IJobService {
    * case on an NTP-synced deployment). A replica whose clock lags past the
    * window finds the lock already released and reruns the job; `once` has no
    * later tick during which a business-level de-duplication marker could win.
+   *
+   * **A job never overlaps its own scheduled run on this node** (#31811). The
+   * lock does not give that: its lease (`leaseMs`, default 60 s) is never
+   * renewed, so a run that outlasts it frees the key while still running, and
+   * the next tick takes it again — on one node as much as on several (the
+   * in-memory driver honours the TTL too). So before the lock is asked, the
+   * per-job in-flight latch below skips a tick whose previous scheduled fire
+   * has not settled, and says so in one `warn`. It is in-process on purpose:
+   * nothing persisted, so a restart cannot leave it stuck. Across nodes it adds
+   * nothing — a second node's fire is still excluded only for the lease.
+   * Manual `trigger()` neither checks nor sets it.
    */
   private async runScheduled(name: string): Promise<void> {
     const record = this.jobs.get(name);
     if (!record) return;
+    const running = this.scheduledInFlight.get(name);
+    if (running) {
+      this.logger?.warn(skippedTickMessage('CronJobAdapter', name, running));
+      return;
+    }
+    // Set before the first await, so a tick landing while this one is still
+    // asking for the lock reads it too.
+    const fire: ScheduledFire = { startedAt: new Date().toISOString() };
+    this.scheduledInFlight.set(name, fire);
+    try {
+      await this.runElected(name, record);
+    } finally {
+      if (this.scheduledInFlight.get(name) === fire) this.scheduledInFlight.delete(name);
+    }
+  }
+
+  /** The leader-elected half of {@link CronJobAdapter.runScheduled}. */
+  private async runElected(name: string, record: CronJobRecord): Promise<void> {
     const lock = this.cluster?.lock;
     if (!lock) { await this.execute(record); return; }
     // The timers above fire this as `void this.runScheduled(...)`, so a
