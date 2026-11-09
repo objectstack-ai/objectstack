@@ -291,6 +291,22 @@ export interface McpActionSummary {
   name: string;
   /** The object the action operates on (omitted for object-less actions). */
   objectName?: string;
+  /**
+   * [ADR-0150 D2/D5] The manifest namespace of the package that holds the
+   * action, passed to `run_action` as `namespace` to name this one action
+   * where two packages hold its name. Absent for an environment-authored
+   * action, or one whose package the host cannot place.
+   */
+  namespace?: string;
+  /**
+   * [ADR-0150 D6] The action's AI face: `deriveAiFaceName` over its address —
+   * `OBJECT-ACTION` for an action bound to an object, `NS-NAME` for a
+   * package's object-less action, the bare name for an environment one. The
+   * flat name a model provider lists the action under. Left off a row whose
+   * face another listed action derives too: `list_actions` then names that
+   * face once, under `refusedFaces`, with every action that derives it.
+   */
+  face?: string;
   /** Human label. */
   label?: string;
   /** What the action does (the authored `ai.description` when present). */
@@ -358,7 +374,17 @@ export interface McpActionBridge {
    */
   runAction(
     name: string,
-    input: { objectName?: string; recordId?: string; params?: Record<string, unknown> } & AIActionConfirmation,
+    input: {
+      objectName?: string;
+      /**
+       * [ADR-0150 D5] The namespace of the package whose action is meant: the
+       * exact qualifier. Omitted, the bare name resolves as it always has,
+       * and a name two packages hold is refused naming both.
+       */
+      namespace?: string;
+      recordId?: string;
+      params?: Record<string, unknown>;
+    } & AIActionConfirmation,
   ): Promise<unknown>;
   /**
    * [#30771] The capability refusal `runAction` would throw for an action on
@@ -454,6 +480,49 @@ function isSystemObject(name: string): boolean {
  */
 function isListableAction(action: McpActionSummary): boolean {
   return !action.objectName || !isSystemObject(action.objectName) || action.aiExposed === true;
+}
+
+/**
+ * [ADR-0150 D6, Q3] The face list's duplicate refusal on `list_actions`: a face
+ * two listed actions derive is named ONCE, with every action that derives it,
+ * and left off each of those rows — never one of them picked to carry it, and
+ * never a row dropped (each stays addressable by `namespace`, `objectName` and
+ * `name`). Rows without a face pass through unchanged.
+ */
+function faceListOfActions(actions: readonly McpActionSummary[]): {
+  actions: McpActionSummary[];
+  refusedFaces: Array<{ face: string; reason: string }>;
+} {
+  const byFace = new Map<string, McpActionSummary[]>();
+  for (const action of actions) {
+    if (typeof action.face !== 'string') continue;
+    const holders = byFace.get(action.face);
+    if (holders) holders.push(action);
+    else byFace.set(action.face, [action]);
+  }
+  const refusedFaces: Array<{ face: string; reason: string }> = [];
+  for (const [face, holders] of byFace) {
+    if (holders.length < 2) continue;
+    const named = holders.map((a) =>
+      `action "${a.name}"${a.objectName ? ` on "${a.objectName}"` : ''}`
+      + (a.namespace ? ` of namespace "${a.namespace}"` : ' authored in this environment'));
+    refusedFaces.push({
+      face,
+      reason: `The face "${face}" is derived for ${holders.length} actions: ${named.join('; ')}. `
+        + 'A face names one action, so none of them is listed under it: call each by its name, objectName '
+        + 'and namespace.',
+    });
+  }
+  if (refusedFaces.length === 0) return { actions: [...actions], refusedFaces };
+  const refused = new Set(refusedFaces.map((r) => r.face));
+  return {
+    actions: actions.map((a) => {
+      if (typeof a.face !== 'string' || !refused.has(a.face)) return a;
+      const { face: _face, ...rest } = a;
+      return rest;
+    }),
+    refusedFaces,
+  };
 }
 
 function systemObjectActionRefusal(actionName: string, objectName: string): string {
@@ -2726,7 +2795,13 @@ export function registerActionTools(
       try {
         const actions = await bridge.listActions();
         const visible = allowSystem ? actions : actions.filter(isListableAction);
-        return textResult({ actions: visible, totalCount: visible.length });
+        // [ADR-0150 D6, Q3] A face two listed actions derive is refused once.
+        const faced = faceListOfActions(visible);
+        return textResult({
+          actions: faced.actions,
+          totalCount: faced.actions.length,
+          ...(faced.refusedFaces.length > 0 ? { refusedFaces: faced.refusedFaces } : {}),
+        });
       } catch (err) {
         return metaDoorErrorResult(err, 'list_actions');
       }
@@ -2771,6 +2846,15 @@ export function registerActionTools(
           .string()
           .optional()
           .describe('The object the action belongs to. Optional; required only to disambiguate a name shared by multiple objects.'),
+        // [ADR-0150 D5] The exact qualifier: the package (by its namespace)
+        // whose action is meant. Optional: a name one package holds needs none.
+        namespace: z
+          .string()
+          .optional()
+          .describe(
+            'The namespace of the package whose action to run, from list_actions. Optional; required only when '
+            + 'two packages hold an action of this name, which is refused without it.',
+          ),
         recordId: z
           .string()
           .optional()
@@ -2813,7 +2897,7 @@ export function registerActionTools(
       annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
     },
     async (args) => {
-      const { actionName, objectName, recordId, params } = args;
+      const { actionName, objectName, namespace, recordId, params } = args;
       // Read off the constant, so the member's spelling has exactly one
       // authority in this package (the schema key above is the same constant).
       const confirm = args[AI_ACTION_CONFIRMATION_MEMBER];
@@ -2829,7 +2913,8 @@ export function registerActionTools(
         if (objectName && !allowSystem && isSystemObject(objectName)) {
           const listed = await bridge.listActions();
           const admitted = listed.some(
-            (a) => a.name === actionName && a.objectName === objectName && isListableAction(a),
+            (a) => a.name === actionName && a.objectName === objectName
+              && (namespace === undefined || a.namespace === namespace) && isListableAction(a),
           );
           if (!admitted) {
             // [#30771] An exposed action the caller's declared gate refuses is
@@ -2843,6 +2928,9 @@ export function registerActionTools(
         }
         const result = await bridge.runAction(actionName, {
           objectName,
+          // [ADR-0150 D5] Forwarded only when given: a call that names no
+          // namespace reaches the bridge exactly as before.
+          ...(namespace !== undefined ? { namespace } : {}),
           recordId,
           params,
           // [#15942] Forwarded, not rebuilt-without. This line and the schema

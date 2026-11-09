@@ -4,7 +4,8 @@
  * @objectstack/plugin-audit
  *
  * Audit Plugin for ObjectStack
- * Provides the sys_audit_log system object definition for immutable audit trails.
+ * Provides the sys_audit_log system object definition: an audit trail the platform
+ * writes, read-only through the data API and in Setup.
  */
 
 export { AuditPlugin } from './audit-plugin.js';

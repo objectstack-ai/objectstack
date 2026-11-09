@@ -4498,6 +4498,10 @@ export default class Serve extends Command {
             await kernel.use(new AuthPlugin({
               secret,
               baseUrl,
+              // No base-URL variable set: `baseUrl` is this boot's own
+              // loopback fallback, so plugin-auth may correct its port to the
+              // one the transport bound. A configured value is kept as written.
+              baseUrlDefaulted: baseUrlResolution.source === null,
               // The deployment's product name, from the resolver the email
               // capability's template context uses: the auth emails'
               // `{{appName}}` and the TOTP issuer. Unpassed, auth answered

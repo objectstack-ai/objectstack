@@ -18,7 +18,7 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
   sys_audit_log: {
     label: "سجل التدقيق",
     pluralLabel: "سجلات التدقيق",
-    description: "سجل تدقيق غير قابل للتعديل لأحداث المنصّة",
+    description: "سجل تدقيق لأحداث المنصّة. لا يكتب سجلاته إلا المنصّة، وهي للقراءة فقط عبر واجهة البيانات البرمجية وفي الإعداد.",
     fields: {
       created_at: {
         label: "الطابع الزمني"

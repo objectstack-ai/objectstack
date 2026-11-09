@@ -1,6 +1,7 @@
 # @objectstack/plugin-audit
 
-System audit-trail objects for ObjectStack: the immutable `sys_audit_log` ledger, the
+System audit-trail objects for ObjectStack: the `sys_audit_log` ledger (the platform writes its
+rows, and they are read-only through the data API and in Setup), the
 `sys_activity` stream, `sys_comment`, and the ObjectQL hooks that write them.
 
 ## What this package actually does

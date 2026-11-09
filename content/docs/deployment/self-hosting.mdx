@@ -482,6 +482,20 @@ redis cluster driver, `os serve` refuses to start on one, exits 1 and names a
 Postgres `OS_DATABASE_URL` instead. A libSQL server URL (`libsql://…`) is one
 shared database and is not refused.
 
+**Uploads need S3 or one shared volume once replicas are declared.** The
+default local storage adapter writes uploads to the replica's own disk, so a
+file uploaded through one replica would be missing on the others. When the
+deployment declares several replicas (`OS_EXPECT_MULTI_NODE=true` or
+`OS_CLUSTER_REPLICAS` greater than 1) over the redis cluster driver, a boot on
+the local adapter is refused, and a storage settings change onto it is not
+applied. Either use S3 — `OS_STORAGE_ADAPTER=s3` with `OS_STORAGE_S3_BUCKET` and
+`OS_STORAGE_S3_REGION` (plus the endpoint and keys your store needs), or
+**Setup → Settings → File Storage** — or, when every replica mounts the same
+volume at `OS_STORAGE_LOCAL_ROOT` (several Compose replicas on one host sharing
+a named volume), set `OS_STORAGE_LOCAL_ROOT_SHARED=true`. That variable is a
+declaration, not a check. A `ReadWriteOnce` volume, as on Kubernetes, cannot be
+shared across replicas: use S3 there.
+
 **`/ready` reports the cluster driver's health once replicas are declared.**
 When the deployment declares itself multi-node — `OS_EXPECT_MULTI_NODE=true` or
 `OS_CLUSTER_REPLICAS` greater than 1; `OS_CLUSTER_DRIVER` alone is not a

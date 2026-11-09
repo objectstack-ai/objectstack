@@ -18,7 +18,7 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
   sys_audit_log: {
     label: "감사 로그",
     pluralLabel: "감사 로그",
-    description: "플랫폼 이벤트의 변경 불가능한 감사 추적",
+    description: "플랫폼 이벤트의 감사 추적입니다. 레코드는 플랫폼만 기록하며, 데이터 API와 설정에서는 읽기 전용입니다.",
     fields: {
       created_at: {
         label: "타임스탬프"

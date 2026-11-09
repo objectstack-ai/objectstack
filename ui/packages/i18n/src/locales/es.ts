@@ -851,6 +851,8 @@ const es = {
     loadErrorUnauthorizedMessage: "Su sesión ha expirado o ha cerrado sesión. Inicie sesión de nuevo para ver estos registros.",
     loadErrorRejectedTitle: "La consulta de esta vista fue rechazada",
     loadErrorRejectedMessage: "El servidor no pudo procesar el filtro ni las opciones de consulta de esta vista. Borrar los filtros suele resolverlo; si la vista está guardada así, un administrador debe corregirla.",
+    loadErrorUnknownColumnMessage: "La columna «{{column}}» muestra el campo «{{field}}», que {{object}} no tiene. Un administrador debe corregir o quitar la columna de esta vista.",
+    loadErrorUnknownFieldMessage: "La consulta de esta vista nombra el campo «{{field}}», que {{object}} no tiene. Borrar los filtros suele resolverlo; si la vista está guardada así, un administrador debe corregirla.",
     loadErrorApiDisabledTitle: "Este objeto no está disponible a través de la API",
     loadErrorApiDisabledMessage: "Esta página no puede cargar sus registros porque el objeto no está expuesto a través de la API. Es un ajuste del propio objeto, no un permiso: un administrador debe habilitar el acceso por API para que esta página funcione.",
     retry: "Reintentar",

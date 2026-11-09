@@ -93,6 +93,15 @@ export {
     type ClusterDriverLivenessOptions,
 } from './cluster-resync.js';
 
+// [cloud#3814] Cluster membership: under a declared multi-replica deployment on
+// Redis each replica beats a TTL key; `readClusterMembers()` lists the live ones,
+// and answers a degraded reading (never a throw) while the store is unreachable.
+export {
+    readClusterMembers,
+    type ClusterMember,
+    type ClusterMembership,
+} from './cluster-membership.js';
+
 export { MetadataClusterBridgePlugin } from './metadata-cluster-bridge-plugin.js';
 
 // [#11968] The `authz.invalidated` bridge + the non-optional boot-time posture

@@ -2953,6 +2953,10 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
         label: "名稱",
         help: "點分隔的 snake_case 識別資訊（例如 auth.password_reset）"
       },
+      package_id: {
+        label: "套件",
+        help: "範本來自的應用。由平台填寫;在此建立的範本為空。"
+      },
       label: {
         label: "標籤",
         help: "在 Studio 中顯示的人類可讀名稱"

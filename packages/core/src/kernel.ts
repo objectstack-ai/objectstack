@@ -195,6 +195,11 @@ export class ObjectKernel {
     private services: Map<string, any> = new Map();
     private hooks: Map<string, Array<(...args: any[]) => void | Promise<void>>> = new Map();
     private state: 'idle' | 'initializing' | 'running' | 'stopping' | 'stopped' = 'idle';
+    /**
+     * Set once `bootstrap()` has dispatched `kernel:ready` and every handler
+     * has settled; read through {@link ObjectKernel.hasBootPhaseSettled}.
+     */
+    private kernelReadySettled = false;
     private logger: ObjectLogger;
     private context: PluginContext;
     private pluginLoader: PluginLoader;
@@ -612,6 +617,7 @@ export class ObjectKernel {
 
             this.logger.debug('Triggering kernel:ready hook');
             await this.context.trigger('kernel:ready');
+            this.kernelReadySettled = true;
 
             // Phase 3.5: Trigger kernel:bootstrapped AFTER every kernel:ready
             // handler has settled — the "all synchronous bootstrap has settled"
@@ -904,6 +910,26 @@ export class ObjectKernel {
      */
     dispatchesBootPhaseHooks(): boolean {
         return this.config.bootPhaseHooks !== false;
+    }
+
+    /**
+     * Whether this kernel's boot has passed `phase`: the hook was dispatched,
+     * every handler of it settled, and the kernel is still running.
+     *
+     * Only `'kernel:ready'` is answered; any other phase answers `false`. By
+     * then every plugin's `start()` and every `kernel:ready` handler has run,
+     * so something a plugin publishes in either place and is still absent
+     * will not appear later in this boot: "not published yet" has become
+     * "not published". `false` means "not known to be past it", never "it
+     * failed": a kernel still booting, one bootstrapped with
+     * {@link ObjectKernelConfig.bootPhaseHooks} `false` (the hook never fires),
+     * and a stopped kernel all answer `false`.
+     *
+     * Read-only, and meant to be read when it is needed, never cached.
+     */
+    hasBootPhaseSettled(phase: 'kernel:ready'): boolean {
+        if (phase !== 'kernel:ready') return false;
+        return this.kernelReadySettled && this.state === 'running';
     }
 
     // Private methods

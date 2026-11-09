@@ -78,6 +78,21 @@ export const SysConnectorConnection = ObjectSchema.create({
       description: 'The declarative connector instance this connection authorizes, exactly as declared.',
     }),
 
+    // [ADR-0150 D8 row R11] The package that holds the connector instance
+    // `connector_name` names, beside the name (ADR-0126 §4). Backfilled at
+    // boot from the instance's one package holder
+    // (`stored-reference-package-backfill.ts`); empty for an instance the
+    // environment authored or a plugin registers in code, and for a name no
+    // single package holds. Nothing reads it yet, no writer stamps it, and the
+    // unique key is unchanged. Width: the package-id class.
+    connector_package: Field.text({
+      label: 'Connector Package',
+      required: false,
+      readonly: true,
+      maxLength: 255,
+      description: 'The app the connector instance comes from. Filled in by the platform; empty for instances created here.',
+    }),
+
     grant: Field.select(['authorization_code'], {
       label: 'Grant',
       required: true,
