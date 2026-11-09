@@ -221,7 +221,7 @@ export const INSTALL_FIX = 'pnpm install';
  * places: `check-test-completeness.mjs` (`EXIT_PREREQUISITE_NOT_MET`, argued at
  * length in its header), `check-dual-build-cjs-loads.mjs` (`EXIT_PREREQ`),
  * `check-type-check-coverage.mjs`, and `pm/check-half-states.mjs` — whose
- * constant `pm/ci-failure.mjs` IMPORTS rather than re-picks. It is not only
+ * constant `pm/board-snapshot.mjs` and others IMPORT rather than re-pick. It is not only
  * declared: `half-state-patrol.yml` branches on the number (`exitCode === 3`)
  * to render "the runner could not reach the board" instead of "the sweep
  * failed", so a consumer that reads 3 by value already exists.

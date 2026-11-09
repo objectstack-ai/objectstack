@@ -438,9 +438,21 @@ one mapping model, two sources.
 `groups`: `mapping.extraFields.groups` names the OIDC claim or the SAML attribute
 that carries the user's groups, for example `extraFields: { groups: 'groups' }`
 in `oidcConfig.mapping` (or `samlConfig.mapping`) when the provider is registered
-through `POST /api/v1/auth/sso/register`. The **Setup → SSO Providers** form does
-not set it. The value may be one string or a list of strings. A provider whose
-mapping fills no `groups` signs users in as before.
+through `POST /api/v1/auth/sso/register`. The claim's value may be one string or
+a list of strings. A provider whose mapping fills no `groups` signs users in as
+before.
+
+In **Setup → SSO Providers**, a platform administrator sets the same member
+without the API:
+
+- **Register SSO Provider** and **Register SAML Provider** take it as
+  **Map: Groups claim** (OIDC) or **Map: Groups attribute** (SAML). Leave it blank
+  to map no groups.
+- **Show Groups Claim** on a provider shows the claim it reads now, whichever way
+  it was set.
+- **Edit Groups Claim** changes it, and a blank value removes it. Every other
+  member of the provider's mapping is kept as stored. A provider without a
+  groups claim signs users in as one registered without it.
 
 **Saving a mapping.** A platform administrator saves one mapping per group and
 permission set through `POST /api/v1/auth/admin/scim/set-group-mapping`, naming

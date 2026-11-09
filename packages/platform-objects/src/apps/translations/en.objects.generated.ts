@@ -88,6 +88,18 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "AI Access",
         help: "Whether this user holds an AI seat. A seat grants the `ai_seat` capability, which opens the AI assistants in the app (build and ask). How many users can hold one is limited by the seats your license includes."
       },
+      principal_kind: {
+        label: "Principal Kind",
+        help: "Whether this user is a person or an AI service account. An AI service account never signs in and acts only through its own API keys. Set when the user is created; it never changes.",
+        options: {
+          human: "Person",
+          agent: "AI Service Account"
+        }
+      },
+      accountable_user_id: {
+        label: "Accountable Owner",
+        help: "For an AI service account, the person accountable for it. Empty for a person. The owner's own permissions never pass to the account."
+      },
       image: {
         label: "Profile Image"
       },
@@ -2123,6 +2135,11 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
             label: "Map: Name claim",
             helpText: "Optional. Claim mapped to display name. Defaults to \"name\".",
             placeholder: "name"
+          },
+          mapGroups: {
+            label: "Map: Groups claim",
+            helpText: "Optional. Claim that carries the user’s groups, e.g. \"groups\". Each sign-in grants the permission sets mapped to those groups. Leave blank to map no groups.",
+            placeholder: "groups"
           }
         }
       },
@@ -2153,6 +2170,11 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
             label: "NameID Format",
             helpText: "Optional. Requested SAML NameID format. Defaults to the IdP’s configured format.",
             placeholder: "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
+          },
+          mapGroups: {
+            label: "Map: Groups attribute",
+            helpText: "Optional. Assertion attribute that carries the user’s groups. Each sign-in grants the permission sets mapped to those groups. Leave blank to map no groups.",
+            placeholder: "groups"
           }
         }
       },
@@ -2181,6 +2203,35 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       edit_sso_sign_in_options: {
         label: "Edit Sign-In Options",
         successMessage: "Sign-in options saved"
+      },
+      show_sso_groups_claim: {
+        label: "Show Groups Claim",
+        resultDialog: {
+          title: "Groups claim",
+          description: "The OIDC claim or SAML attribute this provider reads the user’s groups from at each sign-in. Empty means the provider maps no groups. Change it with “Edit Groups Claim”.",
+          acknowledge: "Done",
+          fields: {
+            groupsClaim: "Groups claim"
+          }
+        }
+      },
+      edit_sso_groups_claim: {
+        label: "Edit Groups Claim",
+        params: {
+          groupsClaim: {
+            label: "Groups claim",
+            helpText: "The OIDC claim or SAML attribute that carries the user’s groups. Each sign-in grants the permission sets mapped to those groups. Leave blank to remove it: the provider then maps no groups.",
+            placeholder: "groups"
+          }
+        },
+        resultDialog: {
+          title: "Groups claim saved",
+          description: "The groups claim this provider now reads at each sign-in. Empty means it maps no groups.",
+          acknowledge: "Done",
+          fields: {
+            groupsClaim: "Groups claim"
+          }
+        }
       }
     }
   },

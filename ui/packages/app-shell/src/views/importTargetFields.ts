@@ -23,7 +23,7 @@
  * matching leaks the column's values by existence.
  */
 
-import { resolveFieldAffordance } from '@object-ui/core';
+import { resolveFieldAffordance, isExpressionComputedField } from '@object-ui/core';
 
 export interface ImportTargetField {
   name: string;
@@ -52,7 +52,12 @@ export function importTargetFields(
   const out: ImportTargetField[] = [];
   for (const [name, def] of Object.entries(fields || {})) {
     const computed = COMPUTED_TYPES.has(def?.type);
+    // A stored field carrying an `expression` is computed by the engine on
+    // every write, so an imported value never stands (objectstack#31759). It
+    // has a real column, so it stays a match key, as a `readonly` field does;
+    // a `formula` has none and is not offered at all.
     const writable = !computed
+      && !isExpressionComputedField(def)
       && def?.type !== 'autonumber'
       && !def?.readonly
       && resolveFieldAffordance('listImport', perms, objectName, name);

@@ -520,3 +520,36 @@ describe('autoLayout', () => {
     });
   });
 });
+
+describe('autoLayout: a field carrying an expression is computed (objectstack#31759)', () => {
+  const schema = {
+    fields: {
+      quantity: { type: 'number' },
+      unit_price: { type: 'currency' },
+      amount: { type: 'currency', expression: 'record.quantity * record.unit_price' },
+      margin: { type: 'number', expression: { dialect: 'cel', source: 'record.a - record.b' } },
+      total: { type: 'formula', expression: 'record.quantity * 2' },
+    },
+  };
+  const fields: FormField[] = ['quantity', 'unit_price', 'amount', 'margin', 'total'].map((name) => ({
+    name,
+    label: name,
+    type: name === 'total' ? 'field:formula' : 'input',
+  }));
+  const names = (fs: FormField[]) => fs.map((f) => f.name);
+
+  it('a create form drops it, as it drops a formula', () => {
+    expect(names(applyAutoLayout(fields, schema, undefined, 'create').fields)).toEqual(['quantity', 'unit_price']);
+    expect(names(filterCreateModeFields(fields, schema))).toEqual(['quantity', 'unit_price']);
+  });
+
+  it('an edit form keeps it, as it keeps a formula, so its value can be read', () => {
+    expect(names(applyAutoLayout(fields, schema, undefined, 'edit').fields)).toEqual(names(fields));
+  });
+
+  it('CONTROL: a plain currency field of the same shape stays on the create form', () => {
+    const plain = { fields: { unit_price: { type: 'currency' } } };
+    const one: FormField[] = [{ name: 'unit_price', label: 'Price', type: 'input' }];
+    expect(names(applyAutoLayout(one, plain, undefined, 'create').fields)).toEqual(['unit_price']);
+  });
+});

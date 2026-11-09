@@ -19,6 +19,7 @@
  * - Embedding       — embedding model + vector store references
  * - Usage           — token accounting + per-call cost
  * - MCP             — references and bindings to external MCP servers
+ * - AI face name    — the derived flat name an item is listed under (ADR-0150 D6)
  * - Dataset tools   — `list_datasets` / `query_dataset` inputs and outputs (ADR-0149 D2)
  * - Build Progress  — phase vocabulary for the agent loop's `data-build-progress` frames
  */
@@ -34,6 +35,7 @@ export * from './model-registry.zod';
 export * from './embedding.zod';
 export * from './usage.zod';
 export * from './mcp.zod';
+export * from './face-name';
 export * from './dataset-tools.zod';
 export * from './knowledge-source.zod';
 export * from './knowledge-document.zod';

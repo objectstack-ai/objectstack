@@ -3386,7 +3386,7 @@ export class ObjectStackClient {
    * - GET    /api/v1/cloud/environments/:id        → get one (with database info)
    * - POST   /api/v1/cloud/environments            → provision a new environment
    * - PATCH  /api/v1/cloud/environments/:id        → update (display_name, is_default, metadata)
-   * - POST   /api/v1/cloud/environments/:id/activate → set as session's active environment
+   * - POST   /api/v1/cloud/environments/:id/activate → confirm the caller can use it (writes no server state)
    * - POST   /api/v1/cloud/environments/:id/credentials/rotate → rotate credential
    *
    * That PATCH accept-set is the WHOLE set. `plan`, `status` and `visibility`
@@ -3701,9 +3701,13 @@ export class ObjectStackClient {
     },
 
     /**
-     * Activate this environment for the current session. The server writes
-     * `active_environment_id` on the better-auth session; subsequent requests
-     * are routed to this environment's database.
+     * Confirm the caller can use this environment. The control plane reads
+     * the environment, checks the caller is a member of it, and answers it
+     * back. It writes no server state: the session is not changed (the answer
+     * carries `sessionUpdated: false`), and later requests are not routed by
+     * this call. Which environment a client targets is the caller's own
+     * choice: the CLI keeps it in its local credentials and sends it on each
+     * request.
      */
     activate: async (id: string) => {
       const res = await this.fetch(`${this.baseUrl}/api/v1/cloud/environments/${encodeURIComponent(id)}/activate`, {

@@ -6,7 +6,8 @@
  * `databaseHooks`: the unlink records, the walled owner-verified stamp, the
  * ADR-0093 D2 membership reconciler on `user.create.after`, the ADR-0093 D9
  * default active organization on `session.create.before`, the `login` and
- * `logout` audit rows and the principal-session renewal hold — and the
+ * `logout` audit rows, the principal-session renewal hold and the ADR-0151 D2
+ * refusal of a session or a sign-in credential for an AI service account — and the
  * `sys_user.source` provenance stamp (cloud ADR-0024 D4) that
  * `account.create.after` runs, moved out of `auth-manager.ts` whole.
  *
@@ -61,6 +62,7 @@ import { holdPrincipalSessionExpiry } from './principal-session-mint.js';
 import { canonicalClientAddress } from './client-address-canonical.js';
 import { readRequestClientAddress } from './request-client-address.js';
 import { SESSION_SCOPING_REFUSAL } from './organization-access-policy.js';
+import { refuseAgentAccountCredential, refuseAgentAccountSession } from './service-account-identity.js';
 
 /**
  * The `AuthManager` members the functions below read — every one of them, and
@@ -113,6 +115,14 @@ export function composeDatabaseHooks(
   const stamp = async (account: any, ctx: any) => {
     await clearUnlink(account, ctx);
     await this.stampIdentitySource(account, ctx);
+  };
+  // [ADR-0151 D2] An AI service account holds no password and no sign-in
+  // provider link. Asked FIRST, before the host's own `create.before`, for
+  // every writer of a credential row. See service-account-identity.ts.
+  const hostAccountBefore = (host as any)?.account?.create?.before;
+  const accountBefore = async (account: any, ctx: any) => {
+    await refuseAgentAccountCredential(this.config.dataEngine, account);
+    return hostAccountBefore ? hostAccountBefore(account, ctx) : undefined;
   };
   const hostAccountAfter = (host as any)?.account?.create?.after;
   const after = hostAccountAfter
@@ -344,7 +354,12 @@ export function composeDatabaseHooks(
     const { APIError } = await import('better-auth/api');
     throw new APIError('FORBIDDEN', { code: SESSION_SCOPING_REFUSAL.code, message: SESSION_SCOPING_REFUSAL.message });
   };
+  // [ADR-0151 D2] An AI service account never holds a session. Asked FIRST,
+  // before the host's hook and every step below, so no sign-in method,
+  // impersonation or minted session gets a session for one, whatever runs
+  // after it. See service-account-identity.ts.
   const sessionBefore = async (session: any, ctx: any) => {
+    await refuseAgentAccountSession(this.config.dataEngine, session);
     const captured = await captureSessionAddress(session);
     const result = sessionActiveOrgBefore ? await sessionActiveOrgBefore(captured, ctx) : undefined;
     if (result === false) return false;
@@ -515,6 +530,7 @@ export function composeDatabaseHooks(
       ...((host as any)?.account ?? {}),
       create: {
         ...((host as any)?.account?.create ?? {}),
+        before: accountBefore,
         after,
       },
       delete: {

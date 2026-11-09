@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
+import { ROUTER_ADDRESSABLE_NAME_MESSAGE, ROUTER_ADDRESSABLE_NAME_PATTERN } from '../kernel/address-grammar';
 import { ProtectionSchema } from '../shared/protection.zod';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 
@@ -169,7 +170,7 @@ export const ToolSchema = lazySchema(() => strictObject({
   guidance: TOOL_RETIRED_KEY_GUIDANCE,
 }, {
   /** Machine name (snake_case, globally unique) */
-  name: z.string().regex(/^[a-z_][a-z0-9_]*$/).describe('Tool unique identifier (snake_case)'),
+  name: z.string().regex(ROUTER_ADDRESSABLE_NAME_PATTERN, { message: ROUTER_ADDRESSABLE_NAME_MESSAGE }).describe('Tool unique identifier (snake_case)'),
 
   /** Human-readable display name */
   label: z.string().describe('Tool display name'),

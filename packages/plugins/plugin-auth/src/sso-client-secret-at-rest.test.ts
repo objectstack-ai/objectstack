@@ -332,6 +332,44 @@ describe('[#8009] sys_sso_provider OIDC clientSecret at rest', () => {
     } finally { restore(); }
   }, 60_000);
 
+  it('③b update-provider with an oidcConfig that carries no secret (a mapping-only edit) is accepted, and the stored secret still reads back', async () => {
+    // The vendor merges the edit into the provider its row lock answers, and
+    // that lock is an adapter `update` — so the update's echo needs the same
+    // read half as `findOne`, or the merged config has no `clientSecret` and
+    // the edit is refused 400 "clientSecret is required".
+    const restore = stubDiscovery();
+    try {
+      const engine = await bootEngine();
+      const auth = makeAuth(engine);
+      const cookie = await signUpAdmin(auth);
+      const reg = await auth.handler(new Request(`${BASE}/api/v1/auth/sso/register`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', origin: BASE, cookie },
+        body: JSON.stringify(registerBody(SECRET_UNDER_TEST)),
+      }));
+      expect(reg.status).toBe(200);
+
+      const upd = await auth.handler(new Request(`${BASE}/api/v1/auth/sso/update-provider`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', origin: BASE, cookie },
+        body: JSON.stringify({ providerId: 'acme-okta', oidcConfig: { mapping: { email: 'email', name: 'name', extraFields: { groups: 'groups' } } } }),
+      }));
+      expect(upd.status, await upd.clone().text()).toBe(200);
+
+      const row = await readRowAtRest(engine);
+      expect(JSON.stringify(row)).not.toContain(SECRET_UNDER_TEST);
+      expect(JSON.parse(String(row.oidc_config)).mapping).toEqual({ email: 'email', name: 'name', extraFields: { groups: 'groups' } });
+      const ctx = await (auth as unknown as {
+        $context: Promise<{ adapter: { findOne(a: unknown): Promise<Record<string, unknown> | null> } }>;
+      }).$context;
+      const provider = await ctx.adapter.findOne({
+        model: 'ssoProvider',
+        where: [{ field: 'providerId', value: 'acme-okta', operator: 'eq', connector: 'AND' }],
+      });
+      expect(JSON.parse(String(provider!.oidcConfig)).clientSecret).toBe(SECRET_UNDER_TEST);
+    } finally { restore(); }
+  }, 60_000);
+
   it('④ fail-closed: with no CryptoProvider the write is REFUSED, never stored cleartext', async () => {
     const restore = stubDiscovery();
     try {

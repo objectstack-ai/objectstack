@@ -120,7 +120,7 @@ describe('AgentSchema', () => {
     });
 
     it('should enforce snake_case for agent name', () => {
-      const validNames = ['support_agent', 'sales_bot', 'hr_assistant', '_internal'];
+      const validNames = ['support_agent', 'sales_bot', 'hr_assistant'];
       validNames.forEach(name => {
         expect(() => AgentSchema.parse({
           name,
@@ -130,7 +130,8 @@ describe('AgentSchema', () => {
         })).not.toThrow();
       });
 
-      const invalidNames = ['supportAgent', 'Support-Agent', '123agent'];
+      // `_internal`: a leading `_` is router-reserved (ADR-0150 D5).
+      const invalidNames = ['supportAgent', 'Support-Agent', '123agent', '_internal'];
       invalidNames.forEach(name => {
         expect(() => AgentSchema.parse({
           name,

@@ -75,7 +75,7 @@ export const SysSsoProvider = ObjectSchema.create({
   // /api/v1/auth/sso/* (register / delete-provider) rather than the generic
   // data layer, so server-side config validation + secret handling run.
   //
-  // The four `/admin/sso/*` bridge actions are OFFERED only to the one
+  // The `/admin/sso/*` bridge actions are OFFERED only to the one
   // standing their door admits (ADR-0068 D4): each bridge runs the
   // platform-admin gate before it delegates and answers every other caller
   // 403 `PERMISSION_DENIED`. So each authors
@@ -128,6 +128,10 @@ export const SysSsoProvider = ObjectSchema.create({
         // non-form callers). Removing it restores declared = enforced.
         { name: 'mapEmail', label: 'Map: Email claim', type: 'text', required: false, placeholder: 'email', helpText: 'Optional. Claim mapped to email. Defaults to "email".' },
         { name: 'mapName', label: 'Map: Name claim', type: 'text', required: false, placeholder: 'name', helpText: 'Optional. Claim mapped to display name. Defaults to "name".' },
+        // The groups claim: stored as the provider's `mapping.extraFields.groups`,
+        // the member an SSO sign-in reads the user's IdP groups from to grant
+        // their mapped permission sets (plugin-auth `sso-group-projection.ts`).
+        { name: 'mapGroups', label: 'Map: Groups claim', type: 'text', required: false, placeholder: 'groups', helpText: 'Optional. Claim that carries the user’s groups, e.g. "groups". Each sign-in grants the permission sets mapped to those groups. Leave blank to map no groups.' },
       ],
     },
     {
@@ -159,6 +163,7 @@ export const SysSsoProvider = ObjectSchema.create({
         { name: 'entryPoint', label: 'IdP SSO URL', type: 'text', required: true, helpText: 'The IdP’s SAML single sign-on (redirect) endpoint that receives the SAMLRequest.' },
         { name: 'cert', label: 'IdP Signing Certificate', type: 'textarea', required: true, helpText: 'The IdP’s X.509 signing certificate (PEM body). Used to verify assertion signatures.' },
         { name: 'identifierFormat', label: 'NameID Format', type: 'text', required: false, placeholder: 'urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress', helpText: 'Optional. Requested SAML NameID format. Defaults to the IdP’s configured format.' },
+        { name: 'mapGroups', label: 'Map: Groups attribute', type: 'text', required: false, placeholder: 'groups', helpText: 'Optional. Assertion attribute that carries the user’s groups. Each sign-in grants the permission sets mapped to those groups. Leave blank to map no groups.' },
       ],
     },
     {
@@ -282,6 +287,64 @@ export const SysSsoProvider = ObjectSchema.create({
         { name: 'allowIdpInitiated', field: 'allow_idp_initiated', defaultFromRow: true, required: false },
         { name: 'allowJit', field: 'allow_jit', defaultFromRow: true, required: false },
       ],
+    },
+    // The provider's groups claim, shown and changed where the register forms
+    // set it: `mapping.extraFields.groups` inside the stored protocol
+    // configuration, the one place it lives. That configuration is `internal`
+    // and the vendor answers no mapping, so no field of this record can carry
+    // the claim; both actions go through plugin-auth bridges that read the
+    // stored configuration and answer only the claim name. Platform-admin
+    // standing, as for the register actions (ADR-0068 D4). No `ai` block on the
+    // edit: it changes what a sign-in grants, so it stays human-only (ADR-0011
+    // bucket H's test, as for "Edit Sign-In Options").
+    {
+      name: 'show_sso_groups_claim',
+      label: 'Show Groups Claim',
+      icon: 'users',
+      variant: 'secondary',
+      locations: ['list_item', 'record_header'],
+      type: 'api',
+      method: 'POST',
+      target: '/api/v1/auth/admin/sso/get-groups-claim',
+      requiredPermissions: [...PLATFORM_ADMIN_SETTINGS_GATE],
+      visible: 'current_user.isPlatformAdmin == true',
+      params: [
+        { name: 'providerId', field: 'provider_id', defaultFromRow: true, required: true },
+      ],
+      resultDialog: {
+        title: 'Groups claim',
+        description:
+          'The OIDC claim or SAML attribute this provider reads the user’s groups from at each sign-in. Empty means the provider maps no groups. Change it with “Edit Groups Claim”.',
+        acknowledge: 'Done',
+        fields: [
+          { path: 'groupsClaim', label: 'Groups claim', format: 'text' },
+        ],
+      },
+    },
+    {
+      name: 'edit_sso_groups_claim',
+      label: 'Edit Groups Claim',
+      icon: 'users',
+      variant: 'secondary',
+      locations: ['list_item', 'record_header'],
+      type: 'api',
+      method: 'POST',
+      target: '/api/v1/auth/admin/sso/set-groups-claim',
+      requiredPermissions: [...PLATFORM_ADMIN_SETTINGS_GATE],
+      visible: 'current_user.isPlatformAdmin == true',
+      refreshAfter: true,
+      params: [
+        { name: 'providerId', field: 'provider_id', defaultFromRow: true, required: true },
+        { name: 'groupsClaim', label: 'Groups claim', type: 'text', required: false, placeholder: 'groups', helpText: 'The OIDC claim or SAML attribute that carries the user’s groups. Each sign-in grants the permission sets mapped to those groups. Leave blank to remove it: the provider then maps no groups.' },
+      ],
+      resultDialog: {
+        title: 'Groups claim saved',
+        description: 'The groups claim this provider now reads at each sign-in. Empty means it maps no groups.',
+        acknowledge: 'Done',
+        fields: [
+          { path: 'groupsClaim', label: 'Groups claim', format: 'text' },
+        ],
+      },
     },
   ],
 

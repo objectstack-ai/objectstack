@@ -4,7 +4,7 @@
     {
       "id": 1,
       "prompt": "Add `src/skills/case-triage.skill.ts` for our support app: the assistant should be able to query and read support cases and run our existing `crm_escalate_case` Action on a case. Only activate it when the user is working on the `support_case` object.",
-      "expected_output": "Emits a `defineSkill` with a namespace-prefixed snake_case `name`, `label`, `instructions`, and a `tools` list where every name resolves: platform tools `query_records` / `get_record` plus the action tool `action_crm_escalate_case` materialised from the stack's own Action. Routing is a `triggerConditions` entry `{ field: 'objectName', operator: 'eq', value: 'support_case' }` (a string value for `eq`). No `permissions` key on the skill (removed in 17) and no `*.agent.ts` file.",
+      "expected_output": "Emits a `defineSkill` with a snake_case `name`, `label`, `instructions`, and a `tools` list where every name resolves: platform tools `query_records` / `get_record` plus the action tool `action_crm_escalate_case` materialised from the stack's own Action. Routing is a `triggerConditions` entry `{ field: 'objectName', operator: 'eq', value: 'support_case' }` (a string value for `eq`). No `permissions` key on the skill (removed in 17) and no `*.agent.ts` file.",
       "files": [],
       "assertions": {
         "must_contain": ["defineSkill", "tools", "action_crm_escalate_case", "triggerConditions"],

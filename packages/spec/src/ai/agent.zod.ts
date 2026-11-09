@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
+import { ROUTER_ADDRESSABLE_NAME_MESSAGE, ROUTER_ADDRESSABLE_NAME_PATTERN } from '../kernel/address-grammar';
 import { enumWithRetiredValues, retiredKey } from '../shared/retired-key';
 import { ProtectionSchema } from '../shared/protection.zod';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
@@ -329,7 +330,7 @@ export const AgentSchema = lazySchema(() => strictObject({
   },
 }, {
   /** Identity */
-  name: z.string().regex(/^[a-z_][a-z0-9_]*$/).describe('Agent unique identifier'),
+  name: z.string().regex(ROUTER_ADDRESSABLE_NAME_PATTERN, { message: ROUTER_ADDRESSABLE_NAME_MESSAGE }).describe('Agent unique identifier'),
   label: z.string().describe('Agent display name'),
   avatar: z.string().optional(),
   role: z.string().describe('The persona/role (e.g. "Senior Support Engineer")'),

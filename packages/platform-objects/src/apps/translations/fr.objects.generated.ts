@@ -88,6 +88,18 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
         label: "Accès IA",
         help: "Indique si cet utilisateur dispose d’un siège IA. Un siège accorde la capacité `ai_seat`, qui ouvre les assistants IA dans l’application (créer et demander). Le nombre d’utilisateurs pouvant en détenir un est limité par les sièges inclus dans votre licence."
       },
+      principal_kind: {
+        label: "Type de principal",
+        help: "Indique si cet utilisateur est une personne ou un compte de service IA. Un compte de service IA ne se connecte jamais et n’agit qu’au moyen de ses propres clés d’API. Défini à la création de l’utilisateur ; ne change jamais.",
+        options: {
+          human: "Personne",
+          agent: "Compte de service IA"
+        }
+      },
+      accountable_user_id: {
+        label: "Responsable",
+        help: "Pour un compte de service IA, la personne qui en est responsable. Vide pour une personne. Les autorisations propres du responsable ne passent jamais au compte."
+      },
       image: {
         label: "Photo de profil"
       },
@@ -2123,6 +2135,11 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
             label: "Mappage : revendication nom",
             helpText: "Facultatif. Revendication associée au nom d’affichage. Par défaut : « name ».",
             placeholder: "name"
+          },
+          mapGroups: {
+            label: "Mappage : revendication groupes",
+            helpText: "Facultatif. Revendication qui contient les groupes de l’utilisateur, par ex. « groups ». Chaque connexion accorde les ensembles d’autorisations mappés à ces groupes. Laissez vide pour ne mapper aucun groupe.",
+            placeholder: "groups"
           }
         }
       },
@@ -2153,6 +2170,11 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
             label: "Format du NameID",
             helpText: "Facultatif. Format de NameID SAML demandé. Par défaut, le format configuré sur l’IdP.",
             placeholder: "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
+          },
+          mapGroups: {
+            label: "Mappage : attribut groupes",
+            helpText: "Facultatif. Attribut d’assertion qui contient les groupes de l’utilisateur. Chaque connexion accorde les ensembles d’autorisations mappés à ces groupes. Laissez vide pour ne mapper aucun groupe.",
+            placeholder: "groups"
           }
         }
       },
@@ -2181,6 +2203,35 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
       edit_sso_sign_in_options: {
         label: "Modifier les options de connexion",
         successMessage: "Options de connexion enregistrées"
+      },
+      show_sso_groups_claim: {
+        label: "Afficher la revendication des groupes",
+        resultDialog: {
+          title: "Revendication des groupes",
+          description: "La revendication OIDC ou l’attribut SAML dans lequel ce fournisseur lit les groupes de l’utilisateur à chaque connexion. Vide signifie que le fournisseur ne mappe aucun groupe. Modifiez-la avec « Modifier la revendication des groupes ».",
+          acknowledge: "Terminé",
+          fields: {
+            groupsClaim: "Revendication des groupes"
+          }
+        }
+      },
+      edit_sso_groups_claim: {
+        label: "Modifier la revendication des groupes",
+        params: {
+          groupsClaim: {
+            label: "Revendication des groupes",
+            helpText: "La revendication OIDC ou l’attribut SAML qui contient les groupes de l’utilisateur. Chaque connexion accorde les ensembles d’autorisations mappés à ces groupes. Laissez vide pour la supprimer : le fournisseur ne mappe alors aucun groupe.",
+            placeholder: "groups"
+          }
+        },
+        resultDialog: {
+          title: "Revendication des groupes enregistrée",
+          description: "La revendication des groupes que ce fournisseur lit désormais à chaque connexion. Vide signifie qu’aucun groupe n’est mappé.",
+          acknowledge: "Terminé",
+          fields: {
+            groupsClaim: "Revendication des groupes"
+          }
+        }
       }
     }
   },
