@@ -47,17 +47,22 @@ export interface WindowFunctionsHost {
   formatOutput: SqlDriver['formatOutput'];
   getBuilder: SqlDriver['getBuilder'];
   readonly isMssql: SqlDriver['isMssql'];
+  readonly isOracle: SqlDriver['isOracle'];
   readonly knex: SqlDriver['knex'];
   mapSortField: SqlDriver['mapSortField'];
   primeMssqlGuidColumns: SqlDriver['primeMssqlGuidColumns'];
+  primeOracleRawUuidColumns: SqlDriver['primeOracleRawUuidColumns'];
 }
 
 /** The bodies of the "Window Functions" section of `SqlDriver`: a stateless facet, called by the class's stubs. */
 export class WindowFunctionsFacet {
   /** The body of `SqlDriver#findWithWindowFunctions`; the method's docblock there is its contract. */
-  static async findWithWindowFunctions(this: Pick<WindowFunctionsHost, 'aliasIdentifierSql' | 'applyFilters' | 'applyTenantScope' | 'buildWindowFunction' | 'formatOutput' | 'getBuilder' | 'isMssql' | 'knex' | 'mapSortField' | 'primeMssqlGuidColumns'>, object: string, query: SqlWindowFunctionQuery, options?: DriverOptions): Promise<any[]> {
+  static async findWithWindowFunctions(this: Pick<WindowFunctionsHost, 'aliasIdentifierSql' | 'applyFilters' | 'applyTenantScope' | 'buildWindowFunction' | 'formatOutput' | 'getBuilder' | 'isMssql' | 'isOracle' | 'knex' | 'mapSortField' | 'primeMssqlGuidColumns' | 'primeOracleRawUuidColumns'>, object: string, query: SqlWindowFunctionQuery, options?: DriverOptions): Promise<any[]> {
     // [#31395] SQL Server: which columns are GUIDs, before a text operator compiles.
     if (this.isMssql) await this.primeMssqlGuidColumns(object, query.where);
+    // [#31390] On Oracle a federated object's RAW(16) uuid columns are read from
+    // the remote catalog before a comparand or a written value is bound.
+    if (this.isOracle) await this.primeOracleRawUuidColumns(object);
     const builder = this.getBuilder(object, options);
     // ROWS, so this is the read-side wall itself — not a consistency tidy-up
     // (#6792). This door returned every tenant's rows to a caller that passed

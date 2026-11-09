@@ -11,6 +11,7 @@ import { frMetadataForms } from '../apps/translations/fr.metadata-forms.generate
 import { ptBRMetadataForms } from '../apps/translations/pt-BR.metadata-forms.generated.js';
 import { ruMetadataForms } from '../apps/translations/ru.metadata-forms.generated.js';
 import { deMetadataForms } from '../apps/translations/de.metadata-forms.generated.js';
+import { koMetadataForms } from '../apps/translations/ko.metadata-forms.generated.js';
 import { zhCNGeneratedSourceHashes } from '../apps/translations/zh-CN.source-hashes.generated.js';
 import { jaJPGeneratedSourceHashes } from '../apps/translations/ja-JP.source-hashes.generated.js';
 import { esESGeneratedSourceHashes } from '../apps/translations/es-ES.source-hashes.generated.js';
@@ -20,6 +21,7 @@ import { frGeneratedSourceHashes } from '../apps/translations/fr.source-hashes.g
 import { ptBRGeneratedSourceHashes } from '../apps/translations/pt-BR.source-hashes.generated.js';
 import { ruGeneratedSourceHashes } from '../apps/translations/ru.source-hashes.generated.js';
 import { deGeneratedSourceHashes } from '../apps/translations/de.source-hashes.generated.js';
+import { koGeneratedSourceHashes } from '../apps/translations/ko.source-hashes.generated.js';
 import { withSourceFallback } from '../apps/translations/source-hash.js';
 
 /** The source bundle the translated locales are judged against — `en` is a copy of it. */
@@ -61,4 +63,5 @@ export const MetadataFormsTranslations: TranslationBundle = {
   'pt-BR': withSourceFallback({ metadataForms: ptBRMetadataForms }, enSource, undefined, ptBRGeneratedSourceHashes),
   ru: withSourceFallback({ metadataForms: ruMetadataForms }, enSource, undefined, ruGeneratedSourceHashes),
   de: withSourceFallback({ metadataForms: deMetadataForms }, enSource, undefined, deGeneratedSourceHashes),
+  ko: withSourceFallback({ metadataForms: koMetadataForms }, enSource, undefined, koGeneratedSourceHashes),
 };

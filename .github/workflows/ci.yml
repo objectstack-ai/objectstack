@@ -800,8 +800,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      # The `test` job's step of the same name, verbatim (its comment says why).
+      # The `test` job's step of the same name, verbatim but for its budget
+      # (its comment says why and sizes the budget).
       - name: Fetch this commit's history and the base branch
+        timeout-minutes: 8
         env:
           PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
         run: |
@@ -815,7 +817,7 @@ jobs:
             if [ "$(git rev-parse --is-shallow-repository)" = true ]; then deepen=(--unshallow); fi
             if git fetch --no-tags "${deepen[@]}" origin "$head" "${refspecs[@]}"; then break; fi
             if [ "$attempt" = 3 ]; then
-              echo "::error::Could not fetch $head's history and ${refspecs[*]} after 3 attempts. The package selection reads that history, so this job stops here rather than selecting from a shallow clone."
+              echo "::error::Could not fetch $head's history and ${refspecs[*]} after 3 attempts. This job's history readers need it, so this job stops here rather than reading from a shallow clone."
               exit 1
             fi
             sleep $((attempt * 15))
@@ -1078,7 +1080,29 @@ jobs:
       # commit, not a branch tip. Three attempts, like the checkout's own fetch,
       # then a red step: a selection read from a shallow clone is the silent
       # all-packages answer above, never a fallback this job may take quietly.
+      #
+      # FETCH BUDGET: the one line that differs between the four copies. Each
+      # job gives the fetch what its wall leaves after its measured checkout
+      # and body (the max over 2026-11-08's runs on `main` and the queue),
+      # capped at 20 minutes: `test-plan` 8 (wall 10, body 0:37),
+      # `test-ui` 14 (wall 30, body 15:29), `test` 20 (wall 60, body 24:00),
+      # `type-check-ui` 20 (wall 40, body 14:23). lint.yml's CHECKOUT BUDGET
+      # (25) is the same reading for its full-history checkouts.
+      #   - Healthy, over the 22 runs after this step landed: 277 fetches, all
+      #     green, p50 50 s, p99 72 s, max 85 s.
+      #     The smallest budget, 480 s, still holds max x 5.6 and p99 x 6.5
+      #     (the 2026-11-03 incident's slowdown of the full-ref fetch at the
+      #     median) and three attempts plus the two sleeps (300 s).
+      #   - The 2026-11-03 tail: full-history checkouts of 1063-1799 s
+      #     cancelled 19 Test UI shards at their wall. This step pulls the
+      #     whole ancestry, so its tail is assumed no shorter. 20 minutes holds
+      #     the tail's low end (1063 s), not its top. In `test-ui` neither end
+      #     fits beside the body inside the 30-minute wall, so its budget only
+      #     ends the red sooner and names the step. A red `test-plan` falls
+      #     back to all eight shards, and each fetches for itself.
+      # A fetch that hangs ends red here, named, instead of eating the wall.
       - name: Fetch this commit's history and the base branch
+        timeout-minutes: 20
         env:
           PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
         run: |
@@ -1092,7 +1116,7 @@ jobs:
             if [ "$(git rev-parse --is-shallow-repository)" = true ]; then deepen=(--unshallow); fi
             if git fetch --no-tags "${deepen[@]}" origin "$head" "${refspecs[@]}"; then break; fi
             if [ "$attempt" = 3 ]; then
-              echo "::error::Could not fetch $head's history and ${refspecs[*]} after 3 attempts. The package selection reads that history, so this job stops here rather than selecting from a shallow clone."
+              echo "::error::Could not fetch $head's history and ${refspecs[*]} after 3 attempts. This job's history readers need it, so this job stops here rather than reading from a shallow clone."
               exit 1
             fi
             sleep $((attempt * 15))
@@ -1178,7 +1202,7 @@ jobs:
       #     gives this checkout a `ref:`, where parent^1 becomes the PR's
       #     previous commit. `merge-base` is right under BOTH checkouts.
       #   - Dropping the variable and letting turbo default to `main`. Measured
-      #     in a CI-shaped clone: `fetch-depth: 0` populates
+      #     in a CI-shaped clone: the fetch step above populates
       #     `refs/remotes/origin/*`, NOT local heads, so there is no local `main`
       #     — and turbo does not error, it silently returns the ENTIRE
       #     workspace, untouched packages included. Safe, and the whole
@@ -3803,12 +3827,39 @@ jobs:
       TURBO_RUN_SUMMARY: 'true'
 
     steps:
+      # Depth 1, then the step below: this job reads HEAD's ancestry and the
+      # base branch, and no tag or other head (#22034).
       - name: Checkout repository
         uses: actions/checkout@v7
-        with:
-          # The affected scope below asks turbo for the packages changed since
-          # the base commit, which needs the base's history in the clone.
-          fetch-depth: 0
+
+      # The `test` job's step of the same name, verbatim but for its budget
+      # (its comment says why and sizes the budget). Here the readers are check:lockfile-integrity
+      # (`git merge-base origin/<base> HEAD`), check:i18n-drift (the merge base
+      # with origin/<base> or origin/main), the affected type-check scope
+      # (`turbo --filter=...[BASE]`) and spec's build. On a shallow clone the
+      # lockfile alarm finds no merge base and stays green, and the drift check
+      # exits red.
+      - name: Fetch this commit's history and the base branch
+        timeout-minutes: 20
+        env:
+          PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          refspecs=('+refs/heads/main:refs/remotes/origin/main')
+          if [ -n "$PR_BASE_REF" ] && [ "$PR_BASE_REF" != main ]; then
+            refspecs+=("+refs/heads/$PR_BASE_REF:refs/remotes/origin/$PR_BASE_REF")
+          fi
+          head=$(git rev-parse HEAD)
+          for attempt in 1 2 3; do
+            deepen=()
+            if [ "$(git rev-parse --is-shallow-repository)" = true ]; then deepen=(--unshallow); fi
+            if git fetch --no-tags "${deepen[@]}" origin "$head" "${refspecs[@]}"; then break; fi
+            if [ "$attempt" = 3 ]; then
+              echo "::error::Could not fetch $head's history and ${refspecs[*]} after 3 attempts. This job's history readers need it, so this job stops here rather than reading from a shallow clone."
+              exit 1
+            fi
+            sleep $((attempt * 15))
+          done
+          echo "History: $(git rev-list --count HEAD) commit(s) behind HEAD, shallow=$(git rev-parse --is-shallow-repository), no tags, refs: $(git for-each-ref --format='%(refname)' refs/remotes | tr '\n' ' ')"
 
       - name: Setup Node.js
         uses: actions/setup-node@v7
@@ -3865,9 +3916,9 @@ jobs:
       # request's `pnpm-lock.yaml` may not give any package a second physical
       # copy. The script's header has the mechanism and its boundary.
       #
-      # It lives here because this job already checks out with
-      # `fetch-depth: 0`, so `origin/<base>` and the merge base are in the
-      # clone, and because it runs on every change to `pnpm-lock.yaml` (the
+      # It lives here because this job's fetch step already brings HEAD's
+      # ancestry and `origin/<base>`, so the merge base is in the clone, and
+      # because it runs on every change to `pnpm-lock.yaml` (the
       # `ui` filter lists it). Before the install on purpose: the gate reads
       # two text files with Node builtins only, which Lint UI's pre-install
       # import graph check holds. `pull_request` only, because the gate's
@@ -4108,12 +4159,14 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      # The `test` job's step of the same name, verbatim (its comment says why).
+      # The `test` job's step of the same name, verbatim but for its budget
+      # (its comment says why and sizes the budget).
       # Here the readers are the select step below (`git merge-base` against
       # origin/<base ref>, then select-affected-tests.mjs's `git diff
       # base...HEAD`) and spec's build. On a shallow clone the select step
       # would not fail: it would warn and run the full suite.
       - name: Fetch this commit's history and the base branch
+        timeout-minutes: 14
         env:
           PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
         run: |
@@ -4127,7 +4180,7 @@ jobs:
             if [ "$(git rev-parse --is-shallow-repository)" = true ]; then deepen=(--unshallow); fi
             if git fetch --no-tags "${deepen[@]}" origin "$head" "${refspecs[@]}"; then break; fi
             if [ "$attempt" = 3 ]; then
-              echo "::error::Could not fetch $head's history and ${refspecs[*]} after 3 attempts. The package selection reads that history, so this job stops here rather than selecting from a shallow clone."
+              echo "::error::Could not fetch $head's history and ${refspecs[*]} after 3 attempts. This job's history readers need it, so this job stops here rather than reading from a shallow clone."
               exit 1
             fi
             sleep $((attempt * 15))

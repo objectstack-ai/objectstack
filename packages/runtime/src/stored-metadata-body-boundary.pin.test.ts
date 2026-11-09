@@ -41,6 +41,8 @@ import { AuthPlugin } from '@objectstack/plugin-auth';
 import { SecurityPlugin, appSecurityPluginOptions } from '@objectstack/plugin-security';
 import { SharingServicePlugin } from '@objectstack/plugin-sharing';
 import { PlatformObjectsPlugin } from '@objectstack/platform-objects/plugin';
+// Paid at collection: the source under test loads it on first use (`check:test-source-alias`).
+import '@objectstack/metadata';
 import { AppPlugin } from './app-plugin.js';
 import { DefaultDatasourcePlugin } from './default-datasource-plugin.js';
 import { createDispatcherPlugin } from './dispatcher-plugin.js';
@@ -211,7 +213,7 @@ async function signUpMember(): Promise<string> {
   const res = await req('/auth/sign-up/email', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email: MEMBER.email, password: MEMBER.password, name: 'boundary member' }),
+    body: JSON.stringify({ email: MEMBER.email, password: MEMBER.password, name: 'boundary member', invitationId: 'inv_pin_21520' }),
   });
   if (!res.ok) throw new Error(`pin signUp failed: ${res.status}`);
   return (await res.json()).token;

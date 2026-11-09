@@ -346,8 +346,11 @@ export interface CloudConnectionPluginConfig {
     singleEnvironment?: boolean;
     /**
      * Override the on-disk credential store location. Defaults to
-     * `<cwd>/.objectstack/cloud-connection.json` — where the bind flow
-     * persists the `oscc_…` runtime bearer for self-hosted runtimes.
+     * `<OS_HOME>/cloud-connection.json`, or `<cwd>/.objectstack/cloud-connection.json`
+     * when `OS_HOME` is unset — where the bind flow persists the `oscc_…`
+     * runtime bearer for self-hosted runtimes. The default moves a file an
+     * earlier release left under the working directory once, at boot; an
+     * explicit path moves nothing.
      *
      * A single node only: with several replicas declared over the Redis cluster
      * driver the credential lives in the shared database row instead
@@ -428,8 +431,43 @@ export class CloudConnectionPlugin implements Plugin {
     init = async (ctx: PluginContext): Promise<void> => {
         ctx.registerService?.(CLOUD_BINDING_SERVICE, this.binding);
         ctx.registerService?.(CLOUD_BINDING_CREDENTIAL_SERVICE, this.credentialReader);
+        this.moveLegacyCredentialFile(ctx);
         this.ledger = this.chooseLedger(ctx);
     };
+
+    /**
+     * A single node's credential file follows `OS_HOME`
+     * (`resolveConnectionCredentialPath`); a release before that wrote it under
+     * the working directory. Move that file once, before anything reads the
+     * binding — the shared row's adoption at `kernel:ready` included — so the
+     * node stays bound across the upgrade. An explicit `credentialPath` moves
+     * nothing.
+     *
+     * A failed move is a consistency failure, not a choice: the binding is on
+     * disk where this node no longer reads it, so the node reports itself
+     * unbound and an online licence falls back to Community while everything
+     * else looks healthy. It is reported once, at `error`, with the fix.
+     */
+    private moveLegacyCredentialFile(ctx: PluginContext): void {
+        const from = this.store.legacyPath;
+        try {
+            const moved = this.store.moveLegacyFile();
+            if (moved) {
+                ctx.logger?.info?.(
+                    `[CloudConnectionPlugin] moved the cloud binding credential from ${moved.from} to ${moved.to}: `
+                        + 'the file now follows OS_HOME, so it survives a container recreate',
+                );
+            }
+        } catch (err) {
+            this.reportError(
+                ctx,
+                `[CloudConnectionPlugin] the cloud binding credential in ${from} could not be moved to ${this.store.path}, `
+                    + 'where this node now reads it, so the node reports itself unbound and an online licence falls back to '
+                    + 'Community. Move the file there by hand (mode 0600) and restart, or connect again (Setup, Cloud Connection): '
+                    + `${err instanceof Error ? err.message : String(err)}`,
+            );
+        }
+    }
 
     /** Stops the shared row's re-read. */
     destroy = async (): Promise<void> => {

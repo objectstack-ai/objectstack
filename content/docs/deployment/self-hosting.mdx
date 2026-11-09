@@ -613,12 +613,15 @@ dead end this section describes.
 
 **The recovery is out of band, and it is one row.** Write a pending invitation
 directly against the store the deployment reads, then have that person register
-through the ordinary sign-up endpoint — the invitation carve-out admits that
-one creation under every posture, so the `invite_only` default stays where it
-is. One `sys_invitation` row:
+through the ordinary sign-up endpoint, sending the row's `id` as `invitationId`
+beside the email — under `invite_only` a sign-up is admitted only by the
+invitation it presents. The invitation carve-out admits that one creation under
+every posture, so the `invite_only` default stays where it is. One
+`sys_invitation` row:
 
 | Column | Value |
 |:---|:---|
+| `id` | a long random value of your own: it is what the sign-up presents |
 | `email` | the address you intend to administer — one the directory does **not** already hold |
 | `status` | `pending` |
 | `expires_at` | any future timestamp |
@@ -699,6 +702,16 @@ a populated deployment, posting to `/api/v1/auth/sign-up/email`:
 | `invite_only` (default) | **Nothing.** A registered address and an unknown one both answer `403 SELF_REGISTRATION_CLOSED` — same body bytes, same headers. |
 | `email_domain` | **Only inside a domain you allowlisted.** Any address outside the list answers `403 EMAIL_DOMAIN_NOT_ALLOWED`, registered or not, so a caller must already hold an address on an allowlisted domain before they learn anything. |
 | `open` | **Nothing, while the mail transport is live.** A registered address gets the same answer as a new sign-up, nothing is written, and the address's holder is mailed that it already has an account. Without a live transport, or with email verification declared off and auto sign-in left on, a registered address is refused explicitly, so the answer tells a caller that the address is registered. |
+
+**Under `invite_only`, a sign-up is admitted only by the invitation it
+presents.** The sign-up sends the invitation's `id`, the last segment of its
+`/accept-invitation/` link, as `invitationId` beside the email: the Console's
+register page does this for an invitee who arrived from the link, and
+`os register --invitation` does it from a terminal. An address alone gets the
+same `403 SELF_REGISTRATION_CLOSED` as an address nobody invited. The link
+reaches the invitee in the invitation mail; on a deployment with no mail
+transport, an administrator hands it over with the invitation's **Copy Invite
+Link** action. The first account of a new deployment needs no invitation.
 
 **What decides it on `open` and `email_domain`.** A sign-up for an address that
 already has an account gets the same answer as a successful new sign-up, and

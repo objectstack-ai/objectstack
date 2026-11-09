@@ -162,8 +162,8 @@ function post(manager: AuthManager, path: string, body: unknown, bearer?: string
   );
 }
 
-async function signUp(manager: AuthManager, email: string): Promise<Response> {
-  return post(manager, '/sign-up/email', { email, password: PASSWORD, name: email.split('@')[0] });
+async function signUp(manager: AuthManager, email: string, invitationId?: string): Promise<Response> {
+  return post(manager, '/sign-up/email', { email, password: PASSWORD, name: email.split('@')[0], invitationId });
 }
 
 async function userRow(engine: ObjectQL, email: string): Promise<Record<string, unknown>> {
@@ -358,11 +358,11 @@ describe('#12751 — probeWalledOwnerAccountState over a real ObjectQL engine', 
     const engine = await bootEngine();
     const manager = makeManager(engine);
     expect((await signUp(manager, 'bystander@corp.example')).status).toBe(200);
-    await inviteForAudienceGate(manager, OWNER);
+    const invitationId = await inviteForAudienceGate(manager, OWNER);
     // Break the stamp's own lane on purpose: an INVITED self-serve owner
     // arrives unverified (pinned below), which is exactly the probe's
     // `owner-unverified` shape.
-    expect((await signUp(manager, OWNER)).status).toBe(200);
+    expect((await signUp(manager, OWNER, invitationId)).status).toBe(200);
     expect(await probeWalledOwnerAccountState(engine as never)).toBe('owner-unverified');
 
     // Verify it the way better-auth would (the sys_user UPDATE doorway) and
@@ -388,8 +388,8 @@ describe('#12751 — probeWalledOwnerAccountState over a real ObjectQL engine', 
     expect(await probeWalledOwnerAccountState(engine as never)).toBe('owner-absent');
 
     // The SECOND declared member registers (invited ⇒ arrives unverified).
-    await inviteForAudienceGate(manager, SECOND_OWNER);
-    expect((await signUp(manager, SECOND_OWNER)).status).toBe(200);
+    const invitationId = await inviteForAudienceGate(manager, SECOND_OWNER);
+    expect((await signUp(manager, SECOND_OWNER, invitationId)).status).toBe(200);
     expect(await probeWalledOwnerAccountState(engine as never)).toBe('owner-unverified');
 
     // One verified member is all the derivation needs, so it is all the probe
@@ -489,8 +489,8 @@ describe('#12751 — the stamp lands through the REAL creation pipeline', () => 
     const engine = await bootEngine();
     const manager = makeManager(engine);
     expect((await signUp(manager, 'bystander@corp.example')).status).toBe(200); // spends bootstrap
-    await inviteForAudienceGate(manager, OWNER);
-    expect((await signUp(manager, OWNER)).status).toBe(200); // invitation carve-out admits it
+    const invitationId = await inviteForAudienceGate(manager, OWNER);
+    expect((await signUp(manager, OWNER, invitationId)).status).toBe(200); // invitation carve-out admits it
     expect(isEmailVerifiedUserRow(await userRow(engine, OWNER))).toBe(false);
   });
 
