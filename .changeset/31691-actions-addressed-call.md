@@ -14,3 +14,10 @@ Metadata-protocol: none
 - On an object, an addressed call reaches the declaration the holder binds to that object first, then the holder's object-less one. That is what the bare call reaches, and it is the order the engine finds a handler in. The MCP `run_action` call with a `namespace` reads the same rule.
 - The activation write (`/actions/_activation/...`) has no addressed form and answers `404` when addressed.
 - A first segment that is a literal (`global`, `_activation`), or that is not an installed namespace, reads as the bare path, which is unchanged.
+
+Also: a four-segment `POST /api/v1/actions/:x/:y/:z/:w` whose first segment is not an address now reaches the actions domain through the new mount, so its answer changes:
+
+- It is still no route. The domain declines it, and it answers the dispatcher's no-route `404 ROUTE_NOT_FOUND`. Before, the transport answered its unmatched `404 ENDPOINT_NOT_FOUND` for it.
+- A deeper `_activation` path is declined only behind the activation door's two gates, so a caller the gates refuse gets their `403` first.
+- An anonymous caller gets `401`, as on every `/actions` path.
+- Other verbs on a four-segment path get the domain's `405` with `Allow: POST`.

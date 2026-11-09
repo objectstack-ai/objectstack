@@ -182,7 +182,9 @@ describe('POST /actions/_env/... — the environment named exactly', () => {
 describe('a four-segment path whose first segment is no address is no route', () => {
     it('declined (`handled: false`), never served by the bare grammar: a literal, or no installed namespace', async () => {
         const { declined, ran } = dispatcherWith([], [act('close', CRM, { objectName: 'task' })]);
-        for (const path of ['/task/close/rec_1/extra', '/_activation/task/close/extra', '/global/task/close/extra']) {
+        // (A deeper `_activation` path is declined by its own door, behind its
+        // gates: `action-activation-posture-gate.test.ts`.)
+        for (const path of ['/task/close/rec_1/extra', '/global/task/close/extra', '/sales/task/close/extra']) {
             expect(await declined(path), path).toBe(true);
         }
         expect(ran).toEqual([]);

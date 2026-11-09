@@ -192,6 +192,11 @@ async function handleActionActivationWrite(
     const postureRefusal = await refuseUngrantedActivationWrite(deps, context, ACTION_ACTIVATION_SUBJECT);
     if (postureRefusal) return postureRefusal;
 
+    // [ADR-0150 D5] A deeper path is no route of this door: it reaches the
+    // domain only through the addressed call's four-segment mount, and is
+    // declined there AFTER the two gates above (a gate narrower than its route
+    // is a bypass), so the transport answers it as the path nothing serves.
+    if (parts.length > 3) return { handled: false };
     // The shape, refused with the shape named. `parts` is
     // `['_activation', object, action]` — the object segment is mandatory even
     // for an object-less action, which spells it `global` exactly as the
@@ -564,8 +569,9 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
     // four-segment path whose first segment is a literal or no installed
     // namespace reaches this domain only through the addressed call's mount,
     // and is no route of it — declined, so each transport answers it as the
-    // path nothing serves it answered before that mount existed.
-    if (!addressQualifier && parts.length > 3) return { handled: false };
+    // path nothing serves it answered before that mount existed. A deeper
+    // `_activation` path is declined by its own door, behind its gates.
+    if (!addressQualifier && parts.length > 3 && parts[0] !== ACTION_ACTIVATION_SEGMENT) return { handled: false };
     // A single segment is an OBJECT-LESS action (#3913): `POST /actions//log_call`
     // is what an SDK that has no object to name emits, and `filter(Boolean)`
     // already ate the empty segment. Route it at the canonical `'global'` key

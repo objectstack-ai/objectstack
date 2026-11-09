@@ -2138,16 +2138,10 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                     try {
                         const { ns, object, action, recordId } = req.params;
                         const result = await dispatcher.dispatch('POST', `/actions/${ns}/${object}/${action}/${recordId}`, deferRequestBody(req), req.query, { request: req });
-                        // The domain declines a path whose first segment is no
-                        // address (a literal, or no installed namespace): this
-                        // mount is not its route. It gets the transport's own
-                        // unmatched answer, the one it got before the mount
-                        // existed (`HonoHttpServer.unmatchedResponse`'s 404).
-                        if ((result.response?.body as { error?: { code?: unknown } } | undefined)?.error?.code === 'ROUTE_NOT_FOUND') {
-                            res.status(404);
-                            res.json({ success: false, error: { code: 'ENDPOINT_NOT_FOUND', message: 'Not found' } });
-                            return;
-                        }
+                        // A path whose first segment is no address (a literal,
+                        // or no installed namespace) is no route of this mount:
+                        // the domain declines it, and `sendResult` answers the
+                        // dispatcher's no-route 404, as on a catch-all host.
                         sendResult(result, res);
                     } catch (err: any) {
                         errorResponse(err, res);

@@ -95,18 +95,21 @@ describe('[#26572] the action activation door\'s ordered arms, on a booted showc
     expect(anonymous.json.error.code).toBe('UNAUTHENTICATED');
   });
 
-  it('acceptance[1]: the 2-segment path is the door\'s shape 400; the 4-segment path is the router\'s 404', async () => {
+  it('acceptance[1]: the 2-segment path is the door\'s shape 400; the 4-segment path is no route, 404', async () => {
     const two = await call(admin, 'POST', '/actions/_activation/showcase_mark_done', {});
     expect(two.status, two.text).toBe(400);
     expect(two.json.error.message).toBe(
       'Path must be /actions/_activation/:object/:action (use `global` for an object-less action)',
     );
 
+    // [ADR-0150 D5] Four segments reach the dispatcher through the addressed
+    // call's mount (`/actions/:ns/:object/:action/:recordId`). `_activation` is
+    // no address, so the door declines the path behind its two gates and the
+    // dispatcher answers its own no-route 404: still no route, and the switch
+    // is never read. (Before that mount, the transport's unmatched 404.)
     const four = await call(admin, 'POST', `${DOOR}/extra`, {});
-    const control = await call(admin, 'POST', '/definitely-not-a-route-26572', {});
-    expect(control.status).toBe(404);
-    expect(four.status).toBe(404);
-    expect(four.text).toBe(control.text);
+    expect(four.status, four.text).toBe(404);
+    expect(four.json.error.code).toBe('ROUTE_NOT_FOUND');
   });
 
   it('acceptance[2]: the body contract refuses with named field codes, never inverts', async () => {
