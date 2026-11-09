@@ -2108,17 +2108,6 @@ export class ActionRunner {
   }
 
   /**
-   * The `interpolate` a param-collection handler receives: it fills the
-   * dialog's `description` and each param's `helpText`, on the text the user
-   * reads (the handler localizes first). Both slots are in transition to the
-   * `template` dialect (objectstack#27948, ruling A, step 1), one dialect per
-   * sentence (`fillTransitionalCopy`): a sentence with a `{{ }}` hole is
-   * filled by the template engine over `recordCopyRoots`, exactly as
-   * `confirmText` is — so the confirm question an author moves from
-   * `confirmText` to `description` reads the same — and one with none keeps
-   * its `${…}` reading through `templateEvaluatorFor` (objectui#12967).
-   */
-  /**
    * The filler the param dialog interpolates `preflight.read.url` with
    * (`ParamCollectionHandler`'s `interpolateRead`, objectstack#31808): the
    * runner's one `${scope.path}` grammar over `param` (the dialog's current
@@ -2151,6 +2140,17 @@ export class ActionRunner {
     };
   }
 
+  /**
+   * The `interpolate` a param-collection handler receives: it fills the
+   * dialog's `description` and each param's `helpText`, on the text the user
+   * reads (the handler localizes first). Both slots are in transition to the
+   * `template` dialect (objectstack#27948, ruling A, step 1), one dialect per
+   * sentence (`fillTransitionalCopy`): a sentence with a `{{ }}` hole is
+   * filled by the template engine over `recordCopyRoots`, exactly as
+   * `confirmText` is — so the confirm question an author moves from
+   * `confirmText` to `description` reads the same — and one with none keeps
+   * its `${…}` reading through `templateEvaluatorFor` (objectui#12967).
+   */
   private dialogCopyFiller(action: ActionDef): (text: string) => string {
     const templates = this.templateEvaluatorFor(action);
     return (text: string) => fillTransitionalCopy(
