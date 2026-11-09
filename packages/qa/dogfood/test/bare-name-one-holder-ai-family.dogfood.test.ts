@@ -16,9 +16,12 @@
 //     `AppPlugin` packages, `alpha` and `beta`, shipping one agent, one skill
 //     and one tool under the same names — boots, and logs ONE bare-name
 //     warning line naming all three, both packages and the rename for each;
-//     the readers keep serving the first-registered package's item, as
-//     before: `/meta/agent/NAME`, the skill an MCP client's `prompts/get`
-//     resolves and `/meta/tool/NAME`;
+//     the skill an MCP client's `prompts/get` resolves stays the
+//     first-registered package's (the merged list), and [#31680, ADR-0150 D3]
+//     the by-name read that names no package — `/meta/agent/NAME`,
+//     `/meta/skill/NAME`, `/meta/tool/NAME` — refuses `409 RESOURCE_CONFLICT`
+//     naming both holders, where it served the first registered; the read
+//     that names the package (`?package=`) serves each package's own;
 //   - `POST /marketplace/install-local` of a third package declaring the held
 //     agent name, of a fourth declaring the held skill name, and of a fifth
 //     declaring the held tool name, is 422 PLUGIN_REGISTER_FAILED naming both
@@ -125,6 +128,29 @@ describe('one package holder per agent, skill and tool name, on a booted showcas
     return d?._packageId ?? d?.item?._packageId;
   };
 
+  /**
+   * [#31680, ADR-0150 D3] The by-name read that names no package, of a name two
+   * packages hold: refused `409 RESOURCE_CONFLICT`, naming both holders.
+   */
+  const expectMetaRefused = async (type: string, name: string) => {
+    const r = await stack.apiAs(admin, 'GET', `/meta/${type}/${name}`);
+    const body = (await r.json()) as any;
+    expect([r.status, codeOf(body)], JSON.stringify(body)).toEqual([409, 'RESOURCE_CONFLICT']);
+    // The meta door's error envelope: `{ error: <sentence>, code }`.
+    const message = String(typeof body?.error === 'string' ? body.error : body?.error?.message ?? body?.message ?? '');
+    expect(message).toContain('com.qa.bare.alpha');
+    expect(message).toContain('com.qa.bare.beta');
+  };
+
+  /** The package whose item `GET /meta/TYPE/NAME?package=PKG` serves. */
+  const metaPackageAt = async (type: string, name: string, pkg: string): Promise<string | undefined> => {
+    const r = await stack.apiAs(admin, 'GET', `/meta/${type}/${name}?package=${pkg}`);
+    expect(r.status).toBe(200);
+    const body = (await r.json()) as any;
+    const d = body?.data ?? body;
+    return d?._packageId ?? d?.item?._packageId;
+  };
+
   /** The skill an MCP client's `prompts/get` of `name` resolves: the MCP prompt projection over the merged `skill` list. */
   const skillPromptTitle = async (name: string): Promise<string | undefined> => {
     const r = await stack.apiAs(admin, 'GET', '/meta/skill');
@@ -166,11 +192,16 @@ describe('one package holder per agent, skill and tool name, on a booted showcas
     expect(line).toContain('package "com.qa.bare.alpha"');
     expect(line).toContain('package "com.qa.bare.beta"');
     expect(await packageIds(), 'both packages booted').toEqual(expect.arrayContaining(['com.qa.bare.alpha', 'com.qa.bare.beta']));
-    // Unchanged by the rule: the readers keep serving the first-registered package's item.
-    expect(await metaPackage('agent', AGENT)).toBe('com.qa.bare.alpha');
-    expect(await metaPackage('skill', SKILL)).toBe('com.qa.bare.alpha');
+    // Unchanged by the rule: the skill prompt is the first-registered package's.
     expect(await skillPromptTitle(SKILL)).toBe('alpha skill');
-    expect(await metaPackage('tool', TOOL)).toBe('com.qa.bare.alpha');
+    // [#31680, ADR-0150 D3] The by-name read that names no package refuses the
+    // held name naming both holders (it served the first registered); the read
+    // that names the package serves that package's own.
+    for (const [type, name] of [['agent', AGENT], ['skill', SKILL], ['tool', TOOL]] as const) {
+      await expectMetaRefused(type, name);
+      expect(await metaPackageAt(type, name, 'com.qa.bare.alpha')).toBe('com.qa.bare.alpha');
+      expect(await metaPackageAt(type, name, 'com.qa.bare.beta')).toBe('com.qa.bare.beta');
+    }
   });
 
   it('install-local of a third package declaring a held agent name is 422 PLUGIN_REGISTER_FAILED naming both holders and the rename; nothing is installed', async () => {
@@ -183,7 +214,7 @@ describe('one package holder per agent, skill and tool name, on a booted showcas
     expect(message).toContain('com.qa.bare.beta');
     expect(message).toContain(`"gamma_${AGENT}"`);
     expect(await packageIds(), 'the package list is unchanged').toEqual(before);
-    expect(await metaPackage('agent', AGENT)).toBe('com.qa.bare.alpha');
+    await expectMetaRefused('agent', AGENT);
   });
 
   it('install-local of a package declaring a held skill name is refused the same way; the skill prompt is untouched', async () => {
@@ -209,7 +240,7 @@ describe('one package holder per agent, skill and tool name, on a booted showcas
     expect(message).toContain('com.qa.bare.beta');
     expect(message).toContain(`"zeta_${TOOL}"`);
     expect(await packageIds(), 'the package list is unchanged').toEqual(before);
-    expect(await metaPackage('tool', TOOL)).toBe('com.qa.bare.alpha');
+    await expectMetaRefused('tool', TOOL);
   });
 
   it('CONTROL — install-local of a package declaring fresh agent, skill and tool names installs', async () => {
