@@ -21,7 +21,8 @@ import { SchemaRegistry } from '@objectstack/objectql';
 import { AutomationEngine } from './engine.js';
 import type { NodeExecutor } from './engine.js';
 import { installBuiltinNodes } from './builtin/index.js';
-import { flowNameResolver } from './plugin.js';
+import { LiteKernel } from '@objectstack/core';
+import { AutomationServicePlugin, flowNameResolver } from './plugin.js';
 import { connectorNameResolver } from './connector-package-scope.js';
 import { InMemoryFlowActivationStore } from './flow-activation-store.js';
 import { FlowActivationProjection } from './flow-activation-projection.js';
@@ -618,5 +619,39 @@ describe('ADR-0150 D3 — a connector_action names its connector from the callin
         expect(String(result.error)).toContain(A);
         expect(String(result.error)).toContain(Q);
         expect(pings).toEqual([]);
+    });
+
+    it('the automation plugin attaches the resolver at init: a booted engine refuses the outside-closure name for the flow\'s package', async () => {
+        install(Q);
+        install(P);
+        declareConnector('billing', Q);
+        const kernel = new LiteKernel({ logger: { level: 'silent' } } as never);
+        kernel.use(new AutomationServicePlugin());
+        kernel.use({
+            name: 'test.harness',
+            type: 'standard' as const,
+            version: '1.0.0',
+            dependencies: ['com.objectstack.service-automation'],
+            async init(ctx: any) {
+                ctx.registerService('objectql', { registry });
+                // The protocol's loader set: package P ships flow `charge`.
+                ctx.registerService('protocol', {
+                    packagedArtifactOwner: ({ type, name }: { type: string; name: string }) =>
+                        type === 'flow' && name === 'charge' ? P : undefined,
+                });
+            },
+            async start() {},
+        } as never);
+        await kernel.bootstrap();
+        try {
+            const booted = kernel.getService('automation') as AutomationEngine;
+            const refusal = booted.connectorNameRefusal('billing', { flowName: 'charge' } as never);
+            expect(refusal?.status).toBe('refused');
+            expect(refusal?.message).toContain(Q);
+            // An environment-authored flow (no package) is not refused here.
+            expect(booted.connectorNameRefusal('billing', { flowName: 'my_charge' } as never)).toBeUndefined();
+        } finally {
+            await kernel.shutdown();
+        }
     });
 });
