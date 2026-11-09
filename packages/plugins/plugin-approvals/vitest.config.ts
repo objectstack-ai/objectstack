@@ -63,5 +63,12 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     include: ['src/**/*.test.ts'],
+    // #13517: quiet the registry's per-item registration chatter — the
+    // engine's own `OS_REGISTRY_LOG` seam, not a change to its shipped
+    // default. Enforced by scripts/check-registry-log-declared.mjs, which
+    // reads this suite as engine-booting since
+    // `stored-process-package-backfill.test.ts` resolves flow names through a
+    // real `SchemaRegistry` (ADR-0150 D3, #31684).
+    env: { OS_REGISTRY_LOG: 'warn' },
   },
 });
