@@ -19,7 +19,9 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { hashApiKey } from '@objectstack/core';
+// Paid at collection, not inside a clocked case: the REST server's routes load it lazily.
+import '@objectstack/objectql';
+import { currentCredentialUseClient, hashApiKey } from '@objectstack/core';
 import { RestServer } from './rest-server.js';
 
 const HTTP_STUB = {
@@ -145,5 +147,45 @@ describe('[#23367] REST relays the API-key lifecycle refusal through enforceAuth
     const live = await drive(serverWith(auth(), qlWithKey({ expires_at: '2999-01-01T00:00:00.000Z' })), { 'x-api-key': KEY });
     expect(live.ctx?.userId).toBe(OWNER);
     expect(live.blocked).toBe(false);
+  });
+});
+
+/**
+ * [#31821] The REST door hands what it holds about where the request came from
+ * to the auth service (the transport's peer address and the headers), and the
+ * address the auth service establishes is what the key's stamp records, read
+ * inside the stamp write as plugin-audit reads it. The door reads no forwarded
+ * header as an address itself.
+ */
+describe('[#31821] the REST door hands the client facts to the key\'s stamp', () => {
+  it('the stamp runs with the address the auth service established from the peer address, and the user agent', async () => {
+    const handed: Array<{ headers?: Record<string, unknown>; remoteAddress?: string }> = [];
+    const facts: unknown[] = [];
+    const ql = qlWithKey({ expires_at: '2999-01-01T00:00:00.000Z' });
+    ql.update = async () => {
+      facts.push(currentCredentialUseClient() ?? null);
+      return {};
+    };
+    const service = {
+      ...auth(),
+      resolveClientAddress: (transport: { headers?: Record<string, unknown>; remoteAddress?: string }) => {
+        handed.push(transport);
+        return '203.0.113.7';
+      },
+    };
+    const req = {
+      params: {},
+      query: {},
+      headers: { 'x-api-key': KEY, 'user-agent': 'ci-agent/3.1', 'x-forwarded-for': '198.51.100.9' },
+      remoteAddress: '10.0.0.5',
+      method: 'GET',
+      path: '/api/v1/data/account',
+    };
+    const ctx = await serverWith(service, ql).resolvePackageRouteExecutionContext(req);
+    expect(ctx?.userId).toBe(OWNER);
+    expect(handed).toHaveLength(1);
+    expect(handed[0].remoteAddress).toBe('10.0.0.5');
+    expect(handed[0].headers?.['x-forwarded-for'], 'handed over raw: the auth service decides whether it counts').toBe('198.51.100.9');
+    expect(facts).toEqual([{ ipAddress: '203.0.113.7', userAgent: 'ci-agent/3.1' }]);
   });
 });

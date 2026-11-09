@@ -32,6 +32,12 @@ import { accountScopeAuthGate, type AuthGate, type UserAuthGateSource } from './
 import { isMissingTableError } from '@objectstack/types';
 import { AuthzStoreUnavailableError } from './authz-store-unavailable.js';
 import { isUserBanInForce, USER_BAN_FIELDS } from './user-ban.js';
+import {
+  credentialUseClientOf,
+  runWithCredentialUseClient,
+  type CredentialUseClient,
+  type CredentialUseClientInput,
+} from './credential-use-client.js';
 
 /** Default visible prefix for generated keys (helps users identify a key). */
 export const API_KEY_PREFIX = 'osk_';
@@ -438,6 +444,11 @@ const STAMP_FAILURE_REPORTED = new WeakSet<object>();
  * found. It is a durability degradation all the same — the field claims each
  * use, and an unstamped use lets a key in daily use read as idle — so it is
  * said at `error`, once per engine, with the consequence and the remedy.
+ *
+ * [#31821] The write runs inside the use's client-facts scope
+ * (`credential-use-client.ts`), so the `credential_use` ledger row the stamp
+ * produces records where the use came from. The facts change nothing about
+ * when the stamp is written.
  */
 async function stampAdmittedKey(
   ql: any,
@@ -445,6 +456,7 @@ async function stampAdmittedKey(
   keyId: string | undefined,
   nowMs: number,
   policy: ApiKeyLifecyclePolicy | undefined,
+  client: CredentialUseClient,
 ): Promise<void> {
   if (!keyId || !ql || typeof ql.update !== 'function') return;
   const patch: Record<string, string> = {};
@@ -458,7 +470,9 @@ async function stampAdmittedKey(
   }
   if (Object.keys(patch).length === 0) return;
   try {
-    await ql.update('sys_api_key', { id: keyId, ...patch }, { context: { isSystem: true } });
+    await runWithCredentialUseClient(client, () =>
+      ql.update('sys_api_key', { id: keyId, ...patch }, { context: { isSystem: true } }),
+    );
   } catch (err) {
     if (typeof ql === 'object' && STAMP_FAILURE_REPORTED.has(ql)) return;
     if (typeof ql === 'object') STAMP_FAILURE_REPORTED.add(ql);
@@ -707,6 +721,14 @@ export async function resolveApiKeyAdmission(
    * service passes to quiet the compiler.
    */
   apiKeyLifecycle: ApiKeyLifecyclePolicySource | undefined,
+  /**
+   * [#31821] What the door holds about where the request came from
+   * (`CredentialUseClientInput`), recorded on the `credential_use` row the
+   * key's use stamp produces. Never read for the verdict. Omitted: the row
+   * records the address as `not_supplied`; the user agent is still read from
+   * `headers`.
+   */
+  client?: CredentialUseClientInput,
 ): Promise<ApiKeyAdmission> {
   const apiKey = extractApiKey(headers);
   if (!apiKey) return { outcome: 'none' };
@@ -950,7 +972,7 @@ export async function resolveApiKeyAdmission(
   // integration is using it, and ruling C′ item 4 serves it again the moment
   // the owner remediates, which an idle clock run out during the hold would
   // defeat. A key the tenancy posture refused (above) is not.
-  await stampAdmittedKey(ql, row, keyId, nowMs, policy);
+  await stampAdmittedKey(ql, row, keyId, nowMs, policy, credentialUseClientOf(client, headers));
 
   if (gate) return { outcome: 'held', principal, gate };
   return { outcome: 'admitted', principal };

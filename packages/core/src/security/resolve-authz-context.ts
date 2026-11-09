@@ -69,6 +69,7 @@ import type { AuthSessionApi, EffectivePermissionSetOrigin } from '@objectstack/
 
 import { ApiKeyLifecycleRefusalError, resolveApiKeyAdmission } from './api-key.js';
 import type { ApiKeyLifecyclePolicySource, ApiKeyRefusalReason } from './api-key.js';
+import type { CredentialUseClientInput } from './credential-use-client.js';
 import { normalizeAuthGate, type AuthGate, type UserAuthGateSource } from './auth-gate.js';
 import { isGrantActive, nextGrantValidityBoundary } from './grant-validity.js';
 import { openUserGrantsCache } from './resolve-user-grants-cache.js';
@@ -276,6 +277,13 @@ export interface ResolveAuthzInput {
    * at all — ⛔ never to quiet the compiler at a seam that could reach one.
    */
   apiKeyLifecycle: ApiKeyLifecyclePolicySource | undefined;
+  /**
+   * [#31821] Where the request came from, handed to the key-admission seam
+   * for the `credential_use` row an admitted key's use stamp produces
+   * (`credential-use-client.ts`). Never read for any verdict. Omitted: that
+   * row records the address as `not_supplied`.
+   */
+  client?: CredentialUseClientInput;
 }
 
 /**
@@ -583,6 +591,7 @@ async function resolveAuthzContextInScope(input: ResolveAuthzInput): Promise<Res
     input.tenancyPosture,
     input.userAuthGates,
     input.apiKeyLifecycle,
+    input.client,
   );
   // [#23367, ruling A] A key its own lifecycle refuses — revoked, expired,
   // inactive — is RAISED, branded, so a face that relays the brand answers its
