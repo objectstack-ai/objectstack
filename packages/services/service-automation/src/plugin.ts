@@ -2589,14 +2589,6 @@ export class AutomationServicePlugin implements Plugin {
     }
 
     /**
-     * [#28534] The readers {@link nonHostDeclaringPackageOf} judges a
-     * connector entry's origin with, off the `objectql` engine the declared
-     * items are listed out of ({@link readDeclaredConnectorItems}): its package
-     * registry's rows and its residual-owner record. `undefined` when no
-     * `objectql` service is registered: then no door has registered a package
-     * in this kernel either.
-     */
-    /**
      * [ADR-0150 D3] The refusal of every enabled provider-bound declared
      * connector name that resolves to no single holder, read over the ObjectQL
      * registry ({@link refusedConnectorNames}). A composition with no registry
@@ -2621,6 +2613,14 @@ export class AutomationServicePlugin implements Plugin {
         return refusedConnectorNames(registry, names);
     }
 
+    /**
+     * [#28534] The readers {@link nonHostDeclaringPackageOf} judges a
+     * connector entry's origin with, off the `objectql` engine the declared
+     * items are listed out of ({@link readDeclaredConnectorItems}): its package
+     * registry's rows and its residual-owner record. `undefined` when no
+     * `objectql` service is registered: then no door has registered a package
+     * in this kernel either.
+     */
     private declaringPackageReadersOrNone(ctx: PluginContext): DeclaringPackageReaders | undefined {
         let ql: {
             registry?: {
