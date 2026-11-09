@@ -550,6 +550,8 @@ import type {
     MetadataMutationProjector,
     MutationProjectionOutcome,
 } from './protocol-mutation-events.js';
+import type { MetadataMutationResyncLedger, MetadataMutationResyncReport } from './protocol-mutation-resync.js';
+export type { MetadataMutationResyncReport } from './protocol-mutation-resync.js';
 export { METADATA_MUTATION_CLUSTER_CHANNEL } from './protocol-mutation-events.js';
 export type {
     ClusterMetadataMutationPayload,
@@ -1209,6 +1211,8 @@ export class ObjectStackProtocolImplementation implements
             set clusterNodeId(value) { protocol.clusterNodeId = value; },
             get clusterPubSub() { return protocol.clusterPubSub; },
             set clusterPubSub(value) { protocol.clusterPubSub = value; },
+            get clusterResync() { return protocol.clusterResync; },
+            set clusterResync(value) { protocol.clusterResync = value; },
             get clusterUnsubscribe() { return protocol.clusterUnsubscribe; },
             set clusterUnsubscribe(value) { protocol.clusterUnsubscribe = value; },
             codeOnlyCreateError: (...a) => ObjectStackProtocolImplementation.codeOnlyCreateError(...a),
@@ -2296,6 +2300,12 @@ export class ObjectStackProtocolImplementation implements
     private clusterNodeId?: string;
     /** Disposer for the cluster subscription, when attached. */
     private clusterUnsubscribe?: () => void;
+    /**
+     * [#31722] Which stored row each registry entry was last converged on, kept
+     * while a transport is attached: what {@link resyncMetadataMutationPubSub}
+     * diffs `sys_metadata` against.
+     */
+    private clusterResync?: MetadataMutationResyncLedger;
 
     /**
      * [#13331] Attach a cluster pub/sub transport so this protocol's
@@ -2327,6 +2337,35 @@ export class ObjectStackProtocolImplementation implements
     detachMetadataMutationPubSub(): void {
         // [#29985 codemod] The body moved to `protocol-class-head.ts`; it reaches this class through `protocol-host.ts`.
         return ProtocolClassHeadFacet.detachMetadataMutationPubSub(protocolHost(this));
+    }
+
+    /**
+     * [#31722] Re-converge this replica's registry on whatever a lost
+     * {@link METADATA_MUTATION_CLUSTER_CHANNEL} hint would have told it — the
+     * lane's resync seam, called by `MetadataClusterBridgePlugin` in
+     * `@objectstack/service-cluster` on the cluster driver's local
+     * `cluster.resync` event, once per outage the driver recovers from.
+     *
+     * The lane is at-most-once, so a hint published while the shared store was
+     * unreachable is gone. This reads `sys_metadata`'s active rows once
+     * (address and checksum, never a body) and re-converges every item a lost
+     * hint could have touched — a row whose checksum moved since this replica
+     * last converged on it, an item it converged on that has no active row
+     * now, and an item a hint or a local write named since — each through the
+     * delivered-hint applier: a re-read of the item's row from this replica's
+     * OWN `sys_metadata`, then the registry write-through, or the delete's heal
+     * walk when no active row is left. Nothing travels on the wire.
+     *
+     * A failed read is never a delete: when the active-row read fails this
+     * rejects and changes nothing, and an item whose own re-read fails is kept
+     * as this replica holds it, logged once per resync, and re-read on the
+     * next resync.
+     *
+     * @returns what the resync did, or `undefined` when no transport is
+     *   attached (a single node, which never missed a hint).
+     */
+    resyncMetadataMutationPubSub(): Promise<MetadataMutationResyncReport | undefined> {
+        return ProtocolClassHeadFacet.resyncMetadataMutationPubSub(protocolHost(this));
     }
 
     /**

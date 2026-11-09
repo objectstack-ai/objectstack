@@ -95,6 +95,8 @@ const mockCtx = (): PluginContext =>
 async function mountBridges(deps: {
   getSession: (headers: Headers) => unknown | Promise<unknown>;
   handleRequest: (req: Request) => Promise<Response>;
+  /** What the two groups-claim bridges read the stored provider through. */
+  getDataEngine?: () => unknown;
 }) {
   const app = new Hono();
   const ctx = mockCtx();
@@ -113,6 +115,7 @@ async function mountBridges(deps: {
       getSession: async ({ headers }: { headers: Headers }) => deps.getSession(headers),
     }),
     isSsoDomainVerificationEnabled: () => true,
+    getDataEngine: deps.getDataEngine ?? (() => undefined),
   };
   (plugin as any).registerAuthRoutes({ getRawApp: () => app, getPort: () => 0 }, ctx);
   return app;
@@ -352,4 +355,81 @@ describe('#9653 the card’s assertion: on an SSO-ENABLED fixture a real plain m
     expect(member.status, memberBody).toBe(422);
     expect(memberBody).toMatch(/reserved/i);
   });
+});
+
+describe('the groups-claim bridges run the same platform-admin gate as every /admin/sso bridge, before they read or write the provider', () => {
+  // Same session shapes as the matrix above. These two bridges read the stored
+  // provider through the data engine before (show) or ahead of (set) any
+  // delegation, so "never consulted" is asserted on BOTH seams: the engine read
+  // and better-auth.
+  const SESSIONS: Record<string, unknown> = {
+    member: { user: { id: 'usr_member', positions: ['user'], role: 'user' } },
+    'org-admin': { user: { id: 'usr_orgadmin', positions: ['user', 'org_admin', 'org_owner'], role: 'user' } },
+    'position-named-platform-admin': { user: { id: 'usr_tenant', positions: ['org_member', 'platform_admin'], role: 'user' } },
+    'platform-admin': { user: { id: 'usr_admin', positions: ['user', 'platform_admin'], isPlatformAdmin: true, role: 'user' } },
+  };
+  const GROUPS_CLAIM_BODIES: Record<string, Record<string, unknown>> = {
+    [`${BASE}/admin/sso/get-groups-claim`]: { providerId: 'acme' },
+    [`${BASE}/admin/sso/set-groups-claim`]: { providerId: 'acme', groupsClaim: 'groups' },
+  };
+  const STORED = {
+    provider_id: 'acme',
+    oidc_config: JSON.stringify({ clientId: 'cid', mapping: { email: 'email', name: 'name' } }),
+  };
+
+  let app: Hono;
+  let delegated: ReturnType<typeof vi.fn>;
+  let engineRead: ReturnType<typeof vi.fn>;
+
+  beforeAll(async () => {
+    delegated = vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    engineRead = vi.fn(async () => ({ ...STORED }));
+    app = await mountBridges({
+      getSession: (headers) => SESSIONS[headers.get('x-test-session') ?? ''] ?? null,
+      handleRequest: delegated as any,
+      getDataEngine: () => ({ findOne: engineRead }),
+    });
+  });
+
+  const send = (path: string, session?: string) =>
+    app.request(`${ORIGIN}${path}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: ORIGIN, ...(session ? { 'x-test-session': session } : {}) },
+      body: JSON.stringify(GROUPS_CLAIM_BODIES[path]),
+    });
+
+  for (const path of Object.keys(GROUPS_CLAIM_BODIES)) {
+    it(`${path}: anonymous → 401 UNAUTHENTICATED; the provider is neither read nor written`, async () => {
+      delegated.mockClear();
+      engineRead.mockClear();
+      const res = await send(path);
+      const body: any = await res.json();
+      expect(res.status).toBe(401);
+      expect(body.error?.code).toBe('UNAUTHENTICATED');
+      expect(engineRead).not.toHaveBeenCalled();
+      expect(delegated).not.toHaveBeenCalled();
+    });
+
+    for (const session of ['member', 'org-admin', 'position-named-platform-admin']) {
+      it(`${path}: ${session} → 403 PERMISSION_DENIED; the provider is neither read nor written`, async () => {
+        delegated.mockClear();
+        engineRead.mockClear();
+        const res = await send(path, session);
+        const body: any = await res.json();
+        expect(res.status).toBe(403);
+        expect(body.error?.code).toBe('PERMISSION_DENIED');
+        expect(engineRead).not.toHaveBeenCalled();
+        expect(delegated).not.toHaveBeenCalled();
+      });
+    }
+
+    it(`${path}: a platform admin passes the gate and the bridge runs`, async () => {
+      delegated.mockClear();
+      engineRead.mockClear();
+      const res = await send(path, 'platform-admin');
+      const body: any = await res.json();
+      expect(res.status, JSON.stringify(body)).toBe(200);
+      expect(engineRead).toHaveBeenCalled();
+    });
+  }
 });

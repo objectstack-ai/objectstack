@@ -58,6 +58,23 @@
  * (`name`, else `id`); for `app`, also the manifest-as-app and plugin-as-app
  * rows the engine registers under the manifest's (or plugin's) `name`.
  *
+ * ## The residual (#31720)
+ *
+ * A `packages[]` stack's top-level items that no package body declares (the
+ * residual, ADR-0130 D4) register under the stack's own id after every body,
+ * never through the package door. {@link residualNamespacePackageOf} reads
+ * them as one more holder of the stack's namespace, and the same predicate
+ * judges it at one door, the `manifest` service, once the bodies have
+ * installed (`SchemaRegistry.refuseResidualNamespaceNameConflicts`). A
+ * residual that registers is recorded as a holder
+ * (`SchemaRegistry.recordResidualNamespaceHolder`), so what registers after it
+ * is judged against it too; uninstalling its owner id frees its names.
+ *
+ * `os validate` / `os build` do not judge the residual, and need not: inside
+ * one artifact a residual can never share a covered name with one of the
+ * stack's bodies (a body holding the name claims the slot, so the item is not
+ * residual), and the packages other artifacts installed are invisible there.
+ *
  * ⛔ No package-scoped resolution here (that is ADR-0150 child R), and phase
  * 1's one-holder rule is not touched.
  */
@@ -198,6 +215,46 @@ export function namespacePackageOf(manifest: unknown): NamespacePackage | undefi
     namespace: typeof namespace === 'string' ? namespace : undefined,
     names: declaredNamespaceUniqueNames(manifest),
   };
+}
+
+/**
+ * The residual of a `packages[]` stack — the top-level items no package body
+ * declares — in the one shape both of its doors read it: `unclaimedTopLevel`
+ * (`@objectstack/metadata`), the residual rule's own answer. Spelt
+ * structurally here so this module imports nothing above the registry.
+ */
+export interface ResidualItems {
+  /** The id every residual item is registered under (the stack's `manifest.id`). */
+  readonly ownerId: string | undefined;
+  /** The residual items, each with the metadata type it registers as. */
+  readonly items: ReadonlyArray<{ readonly type: string; readonly item: unknown }>;
+}
+
+/**
+ * [#31720] A `packages[]` stack's residual as the predicate sees it: ONE
+ * holder, under the residual's owner id, in the stack's own
+ * `manifest.namespace`, holding the residual's items of the covered types —
+ * named the way {@link declaredNamespaceUniqueNames} names a package's. The
+ * residual registers under that id and is addressed under that namespace, so
+ * it is judged as a package of it would be, by {@link namespaceNameConflicts}:
+ * no second predicate.
+ *
+ * `undefined` when there is no residual (a stack without `packages[]`, or a
+ * normally composed one), when it has no owner id, or when none of its items
+ * is of a covered type.
+ */
+export function residualNamespacePackageOf(stack: unknown, residual: ResidualItems | undefined): NamespacePackage | undefined {
+  if (residual === undefined || residual.ownerId === undefined) return undefined;
+  const body: Record<string, unknown> = { id: residual.ownerId };
+  for (const { type, item } of residual.items) {
+    if (!isNamespaceUniqueType(type)) continue;
+    const key = singularToPlural(type);
+    ((body[key] ??= []) as unknown[]).push(item);
+  }
+  const names = declaredNamespaceUniqueNames(body);
+  if (names.length === 0) return undefined;
+  const namespace = asRecord(asRecord(stack)?.manifest)?.namespace;
+  return { packageId: residual.ownerId, namespace: typeof namespace === 'string' ? namespace : undefined, names };
 }
 
 /** One `(type, name)` an incoming package would hold beside another package of its namespace. */
