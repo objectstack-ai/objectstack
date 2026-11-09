@@ -176,9 +176,17 @@ describe.each(RESIDUAL_TYPES)('%s — a residual item under a name another packa
       .toBe(`alpha ${type}`);
   });
 
-  it('CONTROL — the same residual in a stack of ANOTHER namespace registers', async () => {
+  it('CONTROL — the same residual in a stack of ANOTHER namespace is not judged by the namespace rule', async () => {
     const { register } = await withAlphaHolding(type);
-    expect((await register(stack('hr', [betaOf('hr')], residualOf(type))))?.message).toBeUndefined();
+    const err = await register(stack('hr', [betaOf('hr')], residualOf(type)));
+    if (type === 'tool') {
+      // A tool holds one name per deployment since #31661 (phase 1's
+      // one-holder list), so phase 1 refuses it on its own terms, in every
+      // namespace; the namespace rule still does not judge it.
+      expect(err?.message).toMatch(/^Bare-name conflict:/);
+      return;
+    }
+    expect(err?.message).toBeUndefined();
   });
 });
 
