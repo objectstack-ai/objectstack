@@ -232,7 +232,7 @@ const result = AiAgentCapabilitiesSchema.parse(data);
 | **action_name** | `string` | ✅ | Action name |
 | **tool_name** | `string` | ✅ | Tool that would execute it |
 | **tool_input** | `string` | ✅ | Serialized tool input |
-| **status** | `Enum<'pending' \| 'approved' \| 'executed' \| 'failed' \| 'rejected'>` | ✅ | Lifecycle status |
+| **status** | `Enum<'pending' \| 'approved' \| 'held' \| 'executed' \| 'failed' \| 'rejected'>` | ✅ | Lifecycle status |
 | **result** | `string` | optional | Serialized result, once executed |
 | **error** | `string` | optional | Failure message, when status is failed |
 | **rejection_reason** | `string` | optional | Reason given at rejection |
@@ -252,6 +252,7 @@ const result = AiAgentCapabilitiesSchema.parse(data);
 
 * `pending`
 * `approved`
+* `held`
 * `executed`
 * `failed`
 * `rejected`
@@ -276,8 +277,8 @@ const result = AiAgentCapabilitiesSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **status** | `Enum<'executed' \| 'failed'>` | ✅ | Outcome of executing the approved action |
-| **result** | `any` | optional | Tool result, when executed |
+| **status** | `Enum<'executed' \| 'held' \| 'failed'>` | ✅ | Outcome of the approved action: executed, held for an approval outside the conversation (nothing written yet), or failed |
+| **result** | `any` | optional | Tool result when executed; what the host returned about the hold when held |
 | **error** | `string` | optional | Failure reason, when failed |
 
 
@@ -2221,7 +2222,7 @@ Install package response
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **status** | `Enum<'pending' \| 'approved' \| 'executed' \| 'failed' \| 'rejected'>` | optional | Filter by status |
+| **status** | `Enum<'pending' \| 'approved' \| 'held' \| 'executed' \| 'failed' \| 'rejected'>` | optional | Filter by status |
 | **conversationId** | `string` | optional | Filter by proposing conversation |
 | **limit** | `integer` | optional | Max rows (server default 100) |
 
@@ -2246,7 +2247,7 @@ Install package response
 | **action_name** | `string` | ✅ | Action name |
 | **tool_name** | `string` | ✅ | Tool that would execute it |
 | **tool_input** | `string` | ✅ | Serialized tool input |
-| **status** | `Enum<'pending' \| 'approved' \| 'executed' \| 'failed' \| 'rejected'>` | ✅ | Lifecycle status |
+| **status** | `Enum<'pending' \| 'approved' \| 'held' \| 'executed' \| 'failed' \| 'rejected'>` | ✅ | Lifecycle status |
 | **result** | `string` | optional | Serialized result, once executed |
 | **error** | `string` | optional | Failure message, when status is failed |
 | **rejection_reason** | `string` | optional | Reason given at rejection |

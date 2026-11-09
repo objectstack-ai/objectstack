@@ -117,6 +117,7 @@ type TabKey = 'pending' | 'decided' | 'all';
 const STATUS_VARIANT: Record<string, 'default' | 'secondary' | 'destructive' | 'outline'> = {
   pending:  'secondary',
   approved: 'default',
+  held:     'secondary',
   executed: 'default',
   failed:   'destructive',
   rejected: 'outline',
@@ -143,6 +144,7 @@ function statusLabel(status: string, t: InboxTranslate): string | null {
   switch (status) {
     case 'pending':  return t('aiApprovals.statusPending');
     case 'approved': return t('aiApprovals.statusApproved');
+    case 'held':     return t('aiApprovals.statusHeld');
     case 'executed': return t('aiApprovals.statusExecuted');
     case 'failed':   return t('aiApprovals.statusFailed');
     case 'rejected': return t('aiApprovals.statusRejected');
@@ -239,7 +241,7 @@ export function AiPendingActionsInbox({
   const [rejectReason, setRejectReason] = React.useState('');
   const [busyId, setBusyId] = React.useState<string | null>(null);
   const [mutationError, setMutationError] = React.useState<string | null>(null);
-  const [lastOutcome, setLastOutcome] = React.useState<{ id: string; kind: 'approve' | 'reject'; ok: boolean; message?: string } | null>(null);
+  const [lastOutcome, setLastOutcome] = React.useState<{ id: string; kind: 'approve' | 'reject'; ok: boolean; held?: boolean; message?: string } | null>(null);
 
   const hookOptions: UsePendingActionsOptions = {
     apiBase,
@@ -266,6 +268,13 @@ export function AiPendingActionsInbox({
     setMutationError(null);
     try {
       const out = await approve(id);
+      // `held`: the approval was accepted, and a host policy holds the write
+      // for an approver outside the conversation — nothing written yet, so
+      // neither "Executed" nor a failure.
+      if (out.status === 'held') {
+        setLastOutcome({ id, kind: 'approve', ok: true, held: true, message: t('aiApprovals.statusHeld') });
+        return;
+      }
       const ok = out.status === 'executed';
       setLastOutcome({
         id,
@@ -340,7 +349,13 @@ export function AiPendingActionsInbox({
 
       {lastOutcome && !mutationError ? (
         <Alert variant={lastOutcome.ok ? 'default' : 'destructive'}>
-          {lastOutcome.ok ? <CheckCircle2 className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
+          {lastOutcome.held ? (
+            <Clock className="h-4 w-4" />
+          ) : lastOutcome.ok ? (
+            <CheckCircle2 className="h-4 w-4" />
+          ) : (
+            <XCircle className="h-4 w-4" />
+          )}
           <AlertDescription>
             {/*
               One key with `{{id}}` and `{{message}}` holes, not an English
