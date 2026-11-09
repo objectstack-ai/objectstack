@@ -4062,7 +4062,8 @@ const TRANSLATION_TARGET_UNKNOWN_EXPLANATION: RuleExplanation = {
     'Under an action entry: `params.PARAM` a declared param `name`; `outcomeMessages.OUTCOME` an ' +
       'outcome the action\'s own `outcomeMessages` declares; `resultDialog.title`, `.description` ' +
       'and `.acknowledge` an action that declares a `resultDialog` at all; ' +
-      '`resultDialog.fields.PATH` the literal `path` of a declared dialog field, dots included. A ' +
+      '`resultDialog.fields.PATH` the literal `path` of a declared dialog field, dots included; ' +
+      '`preflight.fields.PATH` the literal `path` of a declared preflight field, dots included. A ' +
       'bundle translates what the action declares and cannot add an outcome or a dialog.',
     'Not judged: a platform object in the registry, an object this stack only extends through ' +
       '`objectExtensions[]`, and a picklist it only extends through `picklistExtensions[]` — the ' +
