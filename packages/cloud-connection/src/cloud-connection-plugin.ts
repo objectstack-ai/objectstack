@@ -166,7 +166,7 @@ import { CLOUD_BINDING_SERVICE, type ICloudBindingService } from '@objectstack/s
 import { CLOUD_CONNECTION_CAPABILITY, CLOUD_CONNECTION_UI_BUNDLE } from './cloud-connection-ui.js';
 import { readJsonRequestBody } from './request-json-body.js';
 // [#30964] The install mode's one declaration, read by reference: never a copy of its two spellings.
-import { InstallModeSchema, type InstallMode } from '@objectstack/spec/kernel';
+import { InstallModeSchema, SEMVER_2_0_0_VERSION_PATTERN, type InstallMode } from '@objectstack/spec/kernel';
 import {
     INSTALL_LOCAL_DOOR_SERVICE, grantRefusalEvent, recordUnmanagedImportEvent,
     type InstallLocalDoor, type InstallLocalDoorGrant, type UnmanagedImportAuditSurface,
@@ -317,6 +317,32 @@ function installModeOf(body: any): { ok: true; mode: InstallMode | undefined } |
         };
     }
     return { ok: true, mode: parsed.data };
+}
+
+/**
+ * [#31799] The package version a `POST /install` body names: `version`, the
+ * spelling the control plane's install action reads, its grant echoes
+ * (`data.version`) and the install-local door takes. One spelling only.
+ * `version` is `undefined` when the body names none (absent or `null`): the
+ * latest version, as every install was before the key, and the control plane
+ * is then sent no `version`. Anything else must be a SemVer 2.0.0 string
+ * ({@link SEMVER_2_0_0_VERSION_PATTERN}, the grammar a package version row
+ * carries); a value it refuses is a 400 here, never read as "latest". Whether
+ * that version exists, is published, or may be installed is the control
+ * plane's to answer.
+ */
+function packageVersionOf(body: any): { ok: true; version: string | undefined } | { ok: false; message: string } {
+    const raw = body?.version;
+    if (raw === undefined || raw === null) return { ok: true, version: undefined };
+    const version = typeof raw === 'string' ? raw.trim() : undefined;
+    if (version === undefined || !SEMVER_2_0_0_VERSION_PATTERN.test(version)) {
+        return {
+            ok: false,
+            message: `\`version\` must be a SemVer 2.0.0 string (e.g. 1.2.3, 2.0.0-beta.1), received ${JSON.stringify(raw)}. `
+                + 'Omit it to install the latest version. Nothing was installed.',
+        };
+    }
+    return { ok: true, version };
 }
 
 export interface CloudConnectionPluginConfig {
@@ -1249,7 +1275,7 @@ export class CloudConnectionPlugin implements Plugin {
                 return c.json({ success: true, data: { environmentId: environmentId ?? null, revoked, cleared } });
             }));
 
-            // POST /install { package_id, seed_sample_data?, install_mode? } — in-environment
+            // POST /install { package_id, version?, seed_sample_data?, install_mode? } — in-environment
             // marketplace install. Authorizes the caller against the
             // environment's own session (SSO-as-owner only ever admits org
             // owners/admins), then performs the install against the cloud
@@ -1287,6 +1313,12 @@ export class CloudConnectionPlugin implements Plugin {
                 const requested = installModeOf(body);
                 if (!requested.ok) return c.json({ success: false, error: { code: 'INVALID_REQUEST', message: requested.message } }, 400);
                 const installMode = requested.mode;
+                // [#31799] The version the caller named, checked for shape only;
+                // absent means the latest, and the control plane is then sent no
+                // `version`, so a versionless install's request is the one it always was.
+                const named = packageVersionOf(body);
+                if (!named.ok) return c.json({ success: false, error: { code: 'INVALID_REQUEST', message: named.message } }, 400);
+                const version = named.version;
 
                 // Call the cloud install endpoint in service mode. We do NOT send
                 // an active org → package-install treats this as platform/CI and
@@ -1307,6 +1339,8 @@ export class CloudConnectionPlugin implements Plugin {
                                 seed_sample_data: seedSampleData,
                                 // [#30964] The cloud half's param name (cloud#3624, PR cloud#3683): snake_case, absent = managed.
                                 ...(installMode !== undefined ? { install_mode: installMode } : {}),
+                                // [#31799] The control plane's pinned-version param; absent = latest.
+                                ...(version !== undefined ? { version } : {}),
                                 // [#30964] The person installing, so the control
                                 // plane's audit row can name a person rather than
                                 // this environment's service principal. A body

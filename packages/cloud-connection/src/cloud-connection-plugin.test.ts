@@ -241,6 +241,48 @@ describe('multi-tenant mode (env-registry + per-env kernel auth)', () => {
         }
     });
 
+    // ── [#31799] a named package version, forwarded; omitted means the latest ──
+
+    it('install forwards a named `version` to the control plane, as named', async () => {
+        for (const version of ['1.2.3', '2.0.0-beta.1', '1.0.0+20260101']) {
+            const { res, sent } = await installWith({ package_id: 'pkg_1', version });
+            expect(res.payload.success, version).toBe(true);
+            expect(sent, version).toEqual({
+                recordId: 'pkg_1',
+                params: { environment_id: ENV, seed_sample_data: false, version, installer_user_id: 'user-1' },
+            });
+        }
+        // Surrounding blanks are not part of the version.
+        const padded = await installWith({ package_id: 'pkg_1', version: ' 1.2.3 ' });
+        expect(padded.sent.params.version).toBe('1.2.3');
+        // Beside an install mode, both travel.
+        const unmanaged = await installWith({ package_id: 'pkg_1', version: '1.2.3', install_mode: 'managed' });
+        expect(unmanaged.sent.params).toMatchObject({ version: '1.2.3', install_mode: 'managed' });
+    });
+
+    it('install refuses a malformed `version`: 400 INVALID_REQUEST naming the key, no control-plane call', async () => {
+        for (const version of ['latest', '1.2', 'v1.2.3', '01.2.3', '', '   ', '1.2.3 || 2.0.0', '^1.2.3', 123, true, { major: 1 }, ['1.2.3']]) {
+            const { res, fetchSpy } = await installWith({ package_id: 'pkg_1', version });
+            expect(res.status, JSON.stringify(version)).toBe(400);
+            expect(res.payload.error.code).toBe('INVALID_REQUEST');
+            expect(res.payload.error.message).toContain('`version`');
+            expect(res.payload.error.message).toContain('Nothing was installed');
+            expect(fetchSpy, JSON.stringify(version)).not.toHaveBeenCalled();
+        }
+    });
+
+    it('CONTROL — install with no `version` (absent or null) sends the body it always sent: no `version` key', async () => {
+        for (const body of [{ package_id: 'pkg_1' }, { package_id: 'pkg_1', version: null }]) {
+            const { res, sent } = await installWith(body);
+            expect(res.payload.success).toBe(true);
+            expect((res as any).status ?? 200).toBe(200);
+            expect(JSON.stringify(sent), JSON.stringify(body)).toBe(JSON.stringify({
+                recordId: 'pkg_1',
+                params: { environment_id: ENV, seed_sample_data: false, installer_user_id: 'user-1' },
+            }));
+        }
+    });
+
     it('installed degrades to an empty disconnected list without cloud credentials', async () => {
         const rawApp = makeRawApp();
         const { ctx, fireKernelReady } = makeCtx({ rawApp, services: mtServices('user-1') });
