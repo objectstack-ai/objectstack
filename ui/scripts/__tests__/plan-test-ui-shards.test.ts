@@ -213,7 +213,7 @@ describe('readSpecs reads `vitest list --filesOnly --json` and nothing it cannot
 
 /* ── the command line, as the workflow calls it ─────────────────────────── */
 
-let scratch = '';
+let scratch: string;
 beforeAll(() => {
   scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'plan-test-ui-shards-31914-'));
 });
