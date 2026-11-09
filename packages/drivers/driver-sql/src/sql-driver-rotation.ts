@@ -37,7 +37,7 @@ import type { AutonumberToken } from '@objectstack/spec/data';
 import { aggregandColumnClass } from '@objectstack/core';
 import { StorageNameMapping, SystemObjectName } from '@objectstack/spec/system';
 import { ExistingTableAdoptionRefusal } from './existing-table-refusal.js';
-import { indexedKeyColumns, isUniqueScopeDeclared } from './schema-drift.js';
+import { indexedKeyColumns, isImplicitlyIndexedReference, isUniqueScopeDeclared } from './schema-drift.js';
 import {
   AUDIT_TIMESTAMP_COLUMNS, MYSQL_DATETIME_PRECISION, NUMERIC_SCALAR_TYPES, declaredValueShapes,
   isDeferredDdlLockWaitRefusal, isMultiValuedColumn, isNowDefaultValue,
@@ -591,7 +591,12 @@ export class RotationFacet {
       const uniqueFields = Object.values<any>(obj.fields ?? {}).some((f) =>
         isUniqueScopeDeclared(f?.unique),
       );
-      if (uniqueFields || (Array.isArray(declaredIndexes) && declaredIndexes.length > 0)) {
+      // [#31882] An authored single-valued reference column is indexed without
+      // a declaration, so it opens this path too.
+      const referenceFields = Object.entries<any>(obj.fields ?? {}).some(([name, f]) =>
+        isImplicitlyIndexedReference(name, f, tenantField),
+      );
+      if (uniqueFields || referenceFields || (Array.isArray(declaredIndexes) && declaredIndexes.length > 0)) {
         const colInfo = await this.knex(tableName).columnInfo();
         const physicalColumns = new Set(Object.keys(colInfo));
         await this.syncTableIndexes(
