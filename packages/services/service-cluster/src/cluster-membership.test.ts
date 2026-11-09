@@ -20,8 +20,9 @@ import { MemoryKV } from './memory/kv.js';
 import { MemoryLock } from './memory/lock.js';
 import { MemoryPubSub } from './memory/pubsub.js';
 
-const HEARTBEAT_MS = 40;
-const TTL_MS = 160;
+// The store takes whole-second TTLs, so the shortest TTL a pin can measure is 1 s.
+const HEARTBEAT_MS = 100;
+const TTL_MS = 1000;
 
 /** One replica's view of the shared store: counts its writes, can go down, can die. */
 class ReplicaKV implements IKV {
@@ -251,7 +252,63 @@ describe('cluster membership without the declaration (CONTROL)', () => {
     });
 });
 
+describe('a cluster instance handed to a second kernel', () => {
+    it('restarts its heartbeat after a shutdown, and reads single-node in between', async () => {
+        vi.stubEnv('OS_EXPECT_MULTI_NODE', 'true');
+        const store = new MemoryKV();
+        const first = await bootReplica('node-a', store);
+        await vi.waitFor(async () => expect((await readClusterMembers(first.cluster)).state).toBe('live'));
+
+        await shutdown(first.kernel);
+        const between = await readClusterMembers(first.cluster);
+        expect(between.state).toBe('single-node');
+
+        const kernel = new LiteKernel({ logger: { level: 'warn', format: 'text' } });
+        kernel.use(
+            new ClusterServicePlugin({ cluster: first.cluster, membership: { heartbeatMs: HEARTBEAT_MS, ttlMs: TTL_MS } }),
+        );
+        await expect(kernel.bootstrap()).resolves.toBeUndefined();
+        kernels.push(kernel);
+        await vi.waitFor(async () => {
+            const reading = await readClusterMembers(first.cluster);
+            expect(reading.state).toBe('live');
+            expect(ids(reading)).toEqual(['node-a']);
+        });
+    });
+});
+
 describe('ClusterMembershipHeartbeat', () => {
+    it('sends the store a whole-second TTL, rounded up', async () => {
+        const ttls: (number | undefined)[] = [];
+        const kv = new MemoryKV();
+        const spy: IKV = Object.assign(Object.create(kv) as IKV, {
+            set: <T>(key: string, value: T, opts?: KVSetOptions) => {
+                if (key.startsWith('cluster:member:')) ttls.push(opts?.ttl);
+                return kv.set(key, value, opts);
+            },
+        });
+        const heartbeat = new ClusterMembershipHeartbeat({ cluster: { nodeId: 'node-a', kv: spy }, heartbeatMs: 500, ttlMs: 1500 });
+        heartbeat.start();
+        await vi.waitFor(() => expect(ttls).toHaveLength(1));
+        await heartbeat.stop();
+        expect(ttls).toEqual([2]);
+    });
+
+    it('a heartbeatMs that is not a finite positive number takes the default instead of a tight loop', async () => {
+        const kv = new ReplicaKV(new MemoryKV());
+        const heartbeat = new ClusterMembershipHeartbeat({
+            cluster: { nodeId: 'node-a', kv },
+            heartbeatMs: Number.NaN,
+            ttlMs: Number.NaN,
+        });
+        heartbeat.start();
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        const writes = kv.writes;
+        await heartbeat.stop();
+        // One beat: the member key and the roster entry. The default interval is 5 s.
+        expect(writes).toBe(2);
+    });
+
     it('one cluster instance runs one heartbeat', () => {
         const cluster = { nodeId: 'node-a', kv: new MemoryKV() };
         const first = new ClusterMembershipHeartbeat({ cluster, heartbeatMs: HEARTBEAT_MS, ttlMs: TTL_MS });

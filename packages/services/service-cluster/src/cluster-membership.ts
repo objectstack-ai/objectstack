@@ -83,7 +83,11 @@ export interface ClusterMember {
     readonly pid: number;
     /** When the replica's process started. */
     readonly startedAt: number;
-    /** When the replica last beat; for the single-node answer, when it was read. */
+    /**
+     * When the replica last beat. Where no beat exists to report — the
+     * single-node answer, and a degraded answer with no earlier good reading —
+     * it is the time this replica was read.
+     */
     readonly lastBeatAt: number;
 }
 
@@ -91,7 +95,8 @@ export interface ClusterMember {
 export interface ClusterMembership {
     /**
      * `single-node`: no multi-replica declaration (or no remote driver), so no
-     * heartbeat runs and `members` is this replica alone. `live`: `members` was
+     * heartbeat runs and `members` is this replica alone; a declared deployment
+     * reads it too before `kernel:ready` and after shutdown. `live`: `members` was
      * read from the store just now. `degraded`: the store could not be read;
      * `members` is the last good reading (or this replica alone) and `asOf` is
      * when that reading was taken.
@@ -115,9 +120,13 @@ export interface ClusterMembershipLogger {
 export interface ClusterMembershipHeartbeatOptions {
     /** The cluster this replica belongs to: its `nodeId` and its `kv`. */
     cluster: { readonly nodeId: string; readonly kv: IKV };
-    /** Beat interval in ms. Default 5000. */
+    /** Beat interval in ms. Default 5000; anything but a finite positive number takes the default. */
     heartbeatMs?: number;
-    /** Member-key TTL in ms. Default 15000; never below two beats. */
+    /**
+     * Member-key TTL in ms. Default 15000; anything but a finite positive
+     * number takes the default; never below two beats. The store receives it
+     * rounded up to whole seconds.
+     */
     ttlMs?: number;
     logger?: ClusterMembershipLogger;
     /** Clock, for tests. */
@@ -147,8 +156,8 @@ export class ClusterMembershipHeartbeat {
         this.cluster = options.cluster;
         this.nodeId = options.cluster.nodeId;
         this.kv = options.cluster.kv;
-        this.heartbeatMs = Math.max(1, options.heartbeatMs ?? DEFAULT_HEARTBEAT_MS);
-        this.ttlMs = Math.max(2 * this.heartbeatMs, options.ttlMs ?? DEFAULT_TTL_MS);
+        this.heartbeatMs = positiveOr(options.heartbeatMs, DEFAULT_HEARTBEAT_MS);
+        this.ttlMs = Math.max(2 * this.heartbeatMs, positiveOr(options.ttlMs, DEFAULT_TTL_MS));
         this.logger = options.logger ?? {};
         this.now = options.now ?? Date.now;
         this.self = {
@@ -169,10 +178,16 @@ export class ClusterMembershipHeartbeat {
         this.tick();
     }
 
-    /** Stop beating and delete this replica's member key (bounded; best-effort). */
+    /**
+     * Withdraw this heartbeat from its cluster instance, stop beating and
+     * delete this replica's member key (bounded; best-effort). After it, the
+     * instance reads `single-node` again and can run a new heartbeat — a host
+     * that hands the same cluster to a second kernel in this process.
+     */
     async stop(): Promise<void> {
         if (this.stopped) return;
         this.stopped = true;
+        withdrawMembership(this.cluster, this);
         if (this.timer) clearTimeout(this.timer);
         this.timer = undefined;
         await this.inFlight;
@@ -235,7 +250,7 @@ export class ClusterMembershipHeartbeat {
 
     private async beat(): Promise<void> {
         const record: ClusterMember = { ...this.self, lastBeatAt: this.now() };
-        await this.kv.set(memberKey(this.nodeId), record, { ttl: this.ttlMs / 1000 });
+        await this.kv.set(memberKey(this.nodeId), record, { ttl: Math.ceil(this.ttlMs / 1000) });
         for (let attempt = 0; attempt < ROSTER_CAS_ATTEMPTS && !this.stopped; attempt++) {
             const roster = await this.readRoster();
             const alive = await Promise.all(
@@ -260,7 +275,8 @@ export class ClusterMembershipHeartbeat {
  * The replicas alive now, as `cluster`'s membership heartbeat reads them from
  * the store. Never throws. Without a heartbeat (no multi-replica declaration,
  * or the in-process driver) the answer is `single-node`: this replica alone,
- * no store read.
+ * no store read. A declared deployment also reads `single-node` until its
+ * heartbeat starts at `kernel:ready`, and again after it stops at shutdown.
  */
 export async function readClusterMembers(cluster: { readonly nodeId: string }): Promise<ClusterMembership> {
     const heartbeat = readMembership(cluster);
@@ -296,8 +312,14 @@ function offerMembership(cluster: object, heartbeat: ClusterMembershipHeartbeat)
         value: heartbeat,
         enumerable: false,
         writable: false,
-        configurable: false,
+        configurable: true,
     });
+}
+
+function withdrawMembership(cluster: object, heartbeat: ClusterMembershipHeartbeat): void {
+    if ((cluster as Record<symbol, unknown>)[MEMBERSHIP_KEY] === heartbeat) {
+        delete (cluster as Record<symbol, unknown>)[MEMBERSHIP_KEY];
+    }
 }
 
 function readMembership(cluster: unknown): ClusterMembershipHeartbeat | undefined {
@@ -309,6 +331,10 @@ function readMembership(cluster: unknown): ClusterMembershipHeartbeat | undefine
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+function positiveOr(value: number | undefined, fallback: number): number {
+    return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : fallback;
+}
 
 function memberKey(nodeId: string): string {
     return `${CLUSTER_MEMBER_KEY_PREFIX}${nodeId}`;

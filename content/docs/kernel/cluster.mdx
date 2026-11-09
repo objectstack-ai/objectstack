@@ -861,7 +861,8 @@ new ClusterServicePlugin({
 });
 ```
 
-`ttlMs` is never below two beats. The spec field `heartbeatMs` on the cluster
+A value that is not a finite positive number takes the default. `ttlMs` is
+never below two beats, and the store receives it rounded up to whole seconds. The spec field `heartbeatMs` on the cluster
 config is a different setting and is not read here.
 
 `readClusterMembers()` never throws and never writes. It returns a
@@ -872,9 +873,9 @@ config is a different setting and is not read here.
 
 | `state` | When | `members` | `asOf` |
 |:--|:--|:--|:--|
-| `single-node` | No declaration, or a driver other than `redis` | This replica alone; `lastBeatAt` is the reading time. The store is not read. | The reading time |
+| `single-node` | No declaration, or a driver other than `redis`; on a declared deployment, also before the kernel is ready and after shutdown | This replica alone; `lastBeatAt` is the reading time. The store is not read. | The reading time |
 | `live` | The store answered | Every replica whose member key is alive | The reading time |
-| `degraded` | The store could not be read | The last good reading, or this replica alone if there was none | **When that last good reading was taken**, not now |
+| `degraded` | The store could not be read | The last good reading, or this replica alone (with `lastBeatAt` the reading time) if there was none | **When that last good reading was taken**, not now |
 
 `reason` is present only on `degraded`. It describes the failure without the
 URL's credentials. A failed beat is logged at `debug` only: the store outage
