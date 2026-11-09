@@ -1151,7 +1151,7 @@ export interface McpDatasetToolsService {
  * `datasetTools`). A lookup that throws is "not served": the tools are then
  * not listed, as for {@link resolveMcpRecordFileService}.
  */
-async function resolveMcpDatasetToolsService(
+export async function resolveMcpDatasetToolsService(
     deps: DomainHandlerDeps,
     context: HttpProtocolContext,
 ): Promise<McpDatasetToolsService | undefined> {

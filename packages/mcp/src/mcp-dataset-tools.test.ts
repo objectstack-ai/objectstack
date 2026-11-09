@@ -13,7 +13,7 @@
  * throws comes back as the coded tool error.
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   LIST_DATASETS_TOOL_NAME,
   MCP_OAUTH_SCOPE_DATA_READ,
@@ -23,7 +23,8 @@ import {
   type QueryDatasetOutput,
 } from '@objectstack/spec/ai';
 import { MCPServerRuntime } from './mcp-server-runtime.js';
-import type { McpDataBridge } from './mcp-http-tools.js';
+import { hasDatasetTools, type McpDataBridge } from './mcp-http-tools.js';
+import { createStdioDataBridge, type StdioDatasetToolsService } from './stdio-data-bridge.js';
 import { renderSkillMarkdown } from './skill-md.js';
 
 const DATASET_TOOLS = [LIST_DATASETS_TOOL_NAME, QUERY_DATASET_TOOL_NAME].sort();
@@ -281,5 +282,59 @@ describe('[ADR-0149 D3] the SKILL.md teaches the selection rule where the pair r
     expect(renderSkillMarkdown({ datasetTools: true, grantedScopes: [MCP_OAUTH_SCOPE_DATA_READ] })).toContain('list_datasets');
     expect(renderSkillMarkdown({ datasetTools: true, grantedScopes: [MCP_OAUTH_SCOPE_DATA_WRITE] })).not.toContain('list_datasets');
     expect(renderSkillMarkdown({})).not.toContain('list_datasets');
+  });
+});
+
+describe('[ADR-0149 D2] the stdio bridge\'s dataset members', () => {
+  const PRINCIPAL = { userId: 'u_key', tenantId: 'org_1' };
+  const SAVED = [{ name: 'sales_analysis', object: 'crm_opportunity' }];
+
+  function stdioHarness(protocolItems: unknown[] | undefined) {
+    const bound: any[] = [];
+    const executor = {
+      definitions: DEFINITIONS,
+      listDatasets: vi.fn(async () => CATALOGUE),
+      queryDataset: vi.fn(async () => ANSWER),
+    };
+    const service: StdioDatasetToolsService = { datasetTools: vi.fn((d) => { bound.push(d); return executor; }) };
+    const metadataService = { list: vi.fn(async () => SAVED) } as any;
+    const protocol = protocolItems === undefined
+      ? undefined
+      : () => ({ getMetaItems: vi.fn(async () => ({ items: protocolItems })) });
+    const deps = {
+      engine: {} as any,
+      metadataService,
+      ...(protocol ? { protocol } : {}),
+      resolvePrincipal: async () => PRINCIPAL as any,
+    };
+    return { deps, service, executor, bound, metadataService };
+  }
+
+  it('a bridge built without the analytics executor carries no dataset member', () => {
+    const { deps } = stdioHarness([]);
+    const bridge = createStdioDataBridge(deps);
+    expect(hasDatasetTools(bridge)).toBe(false);
+    expect(bridge.listDatasets).toBeUndefined();
+  });
+
+  it('runs both tools as the stdio principal, with the page cap, over the merged dataset read', async () => {
+    const { deps, service, executor, bound } = stdioHarness(SAVED);
+    const bridge = createStdioDataBridge({ ...deps, datasetTools: service });
+    expect(hasDatasetTools(bridge)).toBe(true);
+    expect(bridge.datasetToolDefinitions!()).toBe(DEFINITIONS);
+    await bridge.listDatasets!({ terms: ['营收'] });
+    expect(executor.listDatasets).toHaveBeenCalledWith({ terms: ['营收'] }, PRINCIPAL);
+    const input = { datasetName: 'sales_analysis', selection: { measures: ['revenue'] } };
+    await bridge.queryDataset!(input, { maxRows: 9 });
+    expect(executor.queryDataset).toHaveBeenCalledWith(input, PRINCIPAL);
+    expect(bound.at(-1).maxQueryLimit).toBe(9);
+    expect(await bound[0].loadDatasets(PRINCIPAL)).toEqual(SAVED);
+  });
+
+  it('reads the metadata service on a host with no merged read', async () => {
+    const { deps, service, bound, metadataService } = stdioHarness(undefined);
+    createStdioDataBridge({ ...deps, datasetTools: service }).datasetToolDefinitions!();
+    expect(await bound[0].loadDatasets(PRINCIPAL)).toEqual(SAVED);
+    expect(metadataService.list).toHaveBeenCalledWith('dataset');
   });
 });
