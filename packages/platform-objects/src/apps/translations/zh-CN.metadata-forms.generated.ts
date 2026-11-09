@@ -2241,6 +2241,14 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "dimensions.nullLabel": {
         label: "空值标签"
       },
+      "dimensions.synonyms": {
+        label: "同义词",
+        helpText: "人们提问时对这个维度的叫法（如 阶段、销售阶段、stage），用逗号分隔，可中英混写。由数据集 AI 工具匹配，从不显示。最多 20 个，每个最多 60 个字符；同一数据集里一个词只能对应一个成员"
+      },
+      "dimensions.description": {
+        label: "描述",
+        helpText: "用通俗业务语言写的定义：一两句话说明这个维度是什么、何时使用。随分析元数据发布并由数据集 AI 工具读取；它是定义，不是提示词，也不是给 AI 的指令。最多 500 个字符"
+      },
       measures: {
         label: "度量",
         helpText: "每个度量：名称、聚合函数、字段（count 时可省略）、显示格式/货币"
@@ -2274,6 +2282,14 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "measures.duration": {
         label: "时长"
+      },
+      "measures.synonyms": {
+        label: "同义词",
+        helpText: "人们提问时对这个度量的叫法（如 收入、销售额、revenue），用逗号分隔，可中英混写。由数据集 AI 工具匹配，从不显示。最多 20 个，每个最多 60 个字符；同一数据集里一个词只能对应一个成员"
+      },
+      "measures.description": {
+        label: "描述",
+        helpText: "用通俗业务语言写的定义：一两句话说明这个度量是什么、何时使用。随分析元数据发布并由数据集 AI 工具读取；它是定义，不是提示词，也不是给 AI 的指令。最多 500 个字符"
       }
     }
   },

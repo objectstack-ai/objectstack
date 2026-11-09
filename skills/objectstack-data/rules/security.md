@@ -179,7 +179,18 @@ rowLevelSecurity: [
 - A position distributes **only** the sets its `permissionSets` names
   (ADR-0131 D3/D4): `{ name: 'crm_sales_rep', label: 'Sales Rep', permissionSets:
   ['crm_sales_user'] }`. A set that merely shares the position's name is reported,
-  never granted; a name matching no set confers nothing.
+  never granted; a name matching no set, or refused below, confers nothing.
+- A package's position reads each name as its package's set, else the one holder
+  in its declared `dependencies` closure plus `sys`; else it is refused. It
+  still loads; the boot's catalog reference report logs each refusal with every
+  candidate, and the position grants nothing through that name (its other sets
+  still do). `outside-closure`: only a non-dependency holds it (`com.acme.crm`
+  naming `com.acme.helpdesk`'s `hd_agent`, undeclared) or only the environment
+  (a set authored in Setup). `ambiguous-in-closure`: two holders it reaches
+  (dependencies `hr` and `ops` both hold `auditor`; a second package shipping a
+  name is refused at install first). Fix: declare the dependency. Stored grants,
+  environment-authored positions, admin overlays of a package position and the
+  `everyone`/`guest` anchors resolve environment-wide.
 - A portal or partner user is an organization member on the `external`
   membership tier (closed list `owner`, `admin`, `delegated_admin`, `member`,
   `external`, one per member —
@@ -222,8 +233,7 @@ fields: {
 `maskingRule` is **live** (FieldMasker). Two more channels:
 
 **Encrypted-at-rest values — `type: 'secret'` (ADR-0100).** Ciphertext lives in
-`sys_secret`, only an opaque ref on the row. **Fail-closed:** with no crypto
-provider, writes throw rather than persist cleartext.
+`sys_secret`, only an opaque ref on the row.
 
 **Query a credential only for presence.** A `secret` / `password` column is
 never a filter, sort, group-by or import `matchFields` key (`400 INVALID_FIELD`;

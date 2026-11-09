@@ -49,7 +49,22 @@
  * (the stamp runs after the response), the new consent is newer than the old
  * token and is not stamped with the old token's use. A consent deleted
  * between the stamp's read and its write is a no-op (below). A server-only
- * `skip_consent` client has no consent row, so it stamps nothing.
+ * `skip_consent` client has no consent row, so it stamps nothing; its use is
+ * handed on instead (below).
+ *
+ * ## A `skip_consent` client's use (#31796)
+ *
+ * The consent's stamp is also the moment the compliance ledger records the
+ * use (`credential_use`, plugin-audit `credential-use-audit.ts`), so a client
+ * with no consent row would leave no trace at all. When no consent row is
+ * bound to the token's grant and the client is a server-only `skip_consent`
+ * client, the stamper hands the use to `onConsentlessUse`, under the same
+ * throttle a consent's stamp has: this process's memory of the (client, user,
+ * organization) hour, claimed before any I/O. So the hand-off happens at most
+ * once per (client, user, organization) per clock hour in each process; with
+ * no stored stamp to compare against, several processes may each hand off
+ * the same hour once. A consent row that exists but is newer than the token
+ * (a re-grant racing the stamp) is not this case and hands off nothing.
  *
  * ## How coarse, and why an hour
  *
@@ -132,6 +147,26 @@ export interface McpClientLastUseStore {
   consentsFor(clientId: string, userId: string): Promise<StampableConsent[]>;
   /** Write `at` as the consent's stamp. A consent that is gone by now is a no-op. */
   stamp(consentId: string, at: Date): Promise<void>;
+  /**
+   * [#31796] The application row of `clientId` when it is a server-only
+   * `skip_consent` client, else `undefined`. Absent ⇒ no consentless use is
+   * ever handed on.
+   */
+  skipConsentApplication?(clientId: string): Promise<{ id: string } | undefined>;
+}
+
+/**
+ * [#31796] One use of a `skip_consent` client's token, handed to
+ * `onConsentlessUse` once per (client, user, organization) per clock hour.
+ */
+export interface ConsentlessMcpClientUse {
+  userId: string;
+  clientId: string;
+  organizationId?: string;
+  /** The client's `sys_oauth_application` row id. */
+  applicationId: string;
+  /** The start of the clock hour the use fell in. */
+  hour: Date;
 }
 
 /**
@@ -218,6 +253,16 @@ export function mcpClientLastUseStoreFor(getEngine: () => unknown): McpClientLas
         lastUsedAt: toDate(row.last_used_at),
       }));
     },
+    async skipConsentApplication(clientId) {
+      const rows = await engine().find(
+        'sys_oauth_application',
+        { where: { client_id: clientId }, fields: ['id', 'skip_consent'], limit: 1 },
+        { context: SYSTEM_CTX },
+      );
+      const row = (Array.isArray(rows) ? rows[0] : undefined) as Record<string, unknown> | undefined;
+      if (!row || (row.skip_consent !== true && row.skip_consent !== 1)) return undefined;
+      return typeof row.id === 'string' && row.id ? { id: row.id } : undefined;
+    },
     async stamp(consentId, at) {
       try {
         await engine().update('sys_oauth_consent', { id: consentId, last_used_at: at }, { context: SYSTEM_CTX });
@@ -250,6 +295,8 @@ export class McpClientLastUseStamper {
       now?: () => number;
       /** Told about each DISTINCT failure (by message) once in this process. */
       onNewFailure?: (error: unknown) => void;
+      /** [#31796] Handed a `skip_consent` client's use, at most once per key per hour (module note). */
+      onConsentlessUse?: (use: ConsentlessMcpClientUse) => Promise<void> | void;
     } = {},
   ) {}
 
@@ -272,8 +319,12 @@ export class McpClientLastUseStamper {
       if (oldest !== undefined) this.settled.delete(oldest);
     }
     try {
-      const consent = consentForToken(await this.store.consentsFor(clientId, userId), organizationId, issuedAt);
-      if (!consent) return;
+      const consents = await this.store.consentsFor(clientId, userId);
+      const consent = consentForToken(consents, organizationId, issuedAt);
+      if (!consent) {
+        await this.handOffConsentlessUse(consents, { userId, clientId, organizationId }, hour);
+        return;
+      }
       if (consent.lastUsedAt && consent.lastUsedAt.getTime() >= hour) return;
       await this.store.stamp(consent.id, new Date(hour));
     } catch (error) {
@@ -287,5 +338,33 @@ export class McpClientLastUseStamper {
         // A report is best-effort; the stamp never becomes the caller's failure.
       }
     }
+  }
+
+  /**
+   * [#31796] Hand a `skip_consent` client's use on (module note): only when no
+   * consent row is bound to the grant at all and the client's application row
+   * says `skip_consent`. A failure propagates to `record`'s report.
+   */
+  private async handOffConsentlessUse(
+    consents: readonly StampableConsent[],
+    principal: { userId: string; clientId: string; organizationId?: string },
+    hour: number,
+  ): Promise<void> {
+    const onConsentlessUse = this.opts.onConsentlessUse;
+    if (!onConsentlessUse || typeof this.store.skipConsentApplication !== 'function') return;
+    const { organizationId } = principal;
+    const bound = organizationId
+      ? consents.some((row) => row.referenceId === organizationId)
+      : consents.some((row) => !row.referenceId);
+    if (bound) return;
+    const application = await this.store.skipConsentApplication(principal.clientId);
+    if (!application) return;
+    await onConsentlessUse({
+      userId: principal.userId,
+      clientId: principal.clientId,
+      ...(organizationId ? { organizationId } : {}),
+      applicationId: application.id,
+      hour: new Date(hour),
+    });
   }
 }

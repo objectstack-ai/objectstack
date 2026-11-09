@@ -151,6 +151,24 @@ export interface AuthEventAuditSurface {
     context?: Record<string, unknown>;
   }): Promise<unknown>;
   /**
+   * [#31796] plugin-audit's credential-use writer (`credential-use-audit.ts`
+   * there), called by the MCP last-use stamper for a `skip_consent` OAuth
+   * client's use, the one OAuth use with no consent row whose stamp the ledger
+   * could recognise. Optional: a sink without it records no such row.
+   * `kind` and `objectName` are closed literals for the reason `action` is.
+   */
+  recordCredentialUse?(event: {
+    kind: 'oauth_access_token';
+    objectName: 'sys_oauth_application';
+    /** The client's `sys_oauth_application` row id. */
+    credentialId: string;
+    userId: string;
+    organizationId?: string;
+    clientId?: string;
+    /** The start of the use window, as an ISO instant. */
+    usedAt?: string;
+  }): Promise<unknown>;
+  /**
    * [#31829] A SCIM protocol request the door refused (`scim-refusal-audit.ts`).
    * OPTIONAL: an `audit` service without the member writes no such row, and
    * the SCIM answer is the same either way.

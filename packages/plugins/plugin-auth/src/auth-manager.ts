@@ -4796,6 +4796,23 @@ export class AuthManager {
           if (this.config.logger) this.audienceLogError(message, meta);
           else console.error(message, meta);
         },
+        // [#31796] A `skip_consent` client has no consent row to stamp, so its
+        // use reaches the compliance ledger here instead, under the same
+        // throttle (`mcp-client-last-use.ts`, module note). No audit plugin ⇒
+        // no row, as for every other auth event.
+        onConsentlessUse: async (use) => {
+          const sink = this.config.getAuditSink?.();
+          if (!sink || typeof sink.recordCredentialUse !== 'function') return;
+          await sink.recordCredentialUse({
+            kind: 'oauth_access_token',
+            objectName: 'sys_oauth_application',
+            credentialId: use.applicationId,
+            userId: use.userId,
+            clientId: use.clientId,
+            ...(use.organizationId ? { organizationId: use.organizationId } : {}),
+            usedAt: use.hour.toISOString(),
+          });
+        },
       },
     ));
     runAfterResponse(
@@ -6034,13 +6051,13 @@ export class AuthManager {
     const readMustChangeCache = () => this._mustChangeCache;
     const readOrgMfaCache = () => this._orgMfaCache;
     const readConfig = () => this.config;
-    const host: Pick<PasswordSessionPolicyHost, '_mustChangeCache' | '_orgMfaCache' | 'config' | 'getDataEngine' | 'getOrganizationAccessPolicy' | 'isMfaAdministrator' | 'isTwoFactorEnabled' | 'noteMfaRequirementWithoutEnrollment' | 'refreshMustChangeCacheIfStale' | 'refreshOrgMfaCacheIfStale'> = {
+    const host: Pick<PasswordSessionPolicyHost, '_mustChangeCache' | '_orgMfaCache' | 'config' | 'getDataEngine' | 'getOrganizationAccessPolicy' | 'isOrganizationAdministrator' | 'isTwoFactorEnabled' | 'noteMfaRequirementWithoutEnrollment' | 'refreshMustChangeCacheIfStale' | 'refreshOrgMfaCacheIfStale'> = {
       get _mustChangeCache() { return readMustChangeCache(); },
       get _orgMfaCache() { return readOrgMfaCache(); },
       get config() { return readConfig(); },
       getDataEngine: (...a) => this.getDataEngine(...a),
       getOrganizationAccessPolicy: (...a) => this.getOrganizationAccessPolicy(...a),
-      isMfaAdministrator: (...a) => this.isMfaAdministrator(...a),
+      isOrganizationAdministrator: (...a) => this.isOrganizationAdministrator(...a),
       isTwoFactorEnabled: (...a) => this.isTwoFactorEnabled(...a),
       noteMfaRequirementWithoutEnrollment: (...a) => this.noteMfaRequirementWithoutEnrollment(...a),
       refreshMustChangeCacheIfStale: (...a) => this.refreshMustChangeCacheIfStale(...a),
@@ -6665,8 +6682,11 @@ export class AuthManager {
   }
 
   /**
-   * @internal Package-internal: read by the MFA gate at the `administrators`
-   * level; not a supported entry point.
+   * `IAuthService.isOrganizationAdministrator` — the one reading of "is this
+   * user an administrator in this organization". The MFA gate's
+   * `administrators` level asks this very method (`resolveUserAuthGates`), so
+   * a caller outside plugin-auth, through the `auth` service, gets the gate's
+   * own answer. Read-only and in-process: no route reaches it.
    *
    * Is `userId` an administrator in `organizationId`, as ADR-0090 D12 (as
    * amended 2026-10-17) names the three kinds — through the predicates that
@@ -6683,9 +6703,13 @@ export class AuthManager {
    * The two rungs are `resolveUserAuthzGrants`' (`@objectstack/core`), the
    * session payload's own reading. A delegated check that fails counts as an
    * administrator: the requirement holds rather than lapses on an unreadable
-   * grant.
+   * grant. Kind 3 is judged only where the organization access-policy source
+   * is bound with its delegated check (the settings service's `access_policy`
+   * namespace and the `security` service); without it, only the two rungs
+   * answer. With no data engine the answer is `false`; a grant store that
+   * cannot be read throws (`resolveUserAuthzGrants`).
    */
-  public async isMfaAdministrator(userId: string, organizationId: string | undefined): Promise<boolean> {
+  public async isOrganizationAdministrator(userId: string, organizationId: string | undefined): Promise<boolean> {
     const engine = this.getDataEngine();
     if (!engine) return false;
     const grants = await resolveUserAuthzGrants(engine as any, userId, {

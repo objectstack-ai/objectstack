@@ -2241,6 +2241,14 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "dimensions.nullLabel": {
         label: "空値ラベル"
       },
+      "dimensions.synonyms": {
+        label: "同義語",
+        helpText: "質問でこのディメンションを指すときに使われる言葉（例: ステージ、商談ステージ、stage）。カンマ区切りで、複数の言語を混ぜてもかまいません。データセット AI ツールが照合し、画面には表示されません。最大 20 個、各 60 文字まで。1 つの語はこのデータセット内の 1 つのメンバーにしか対応できません"
+      },
+      "dimensions.description": {
+        label: "説明",
+        helpText: "平易な業務用語で書いた定義。このディメンションが何で、いつ使うかを 1〜2 文で説明します。分析メタデータとともに公開され、データセット AI ツールが読み取ります。定義であり、プロンプトや AI への指示ではありません。最大 500 文字"
+      },
       measures: {
         label: "メジャー",
         helpText: "各メジャー：名前、集計関数、フィールド（count の場合は省略可）、表示形式/通貨"
@@ -2274,6 +2282,14 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "measures.duration": {
         label: "所要時間"
+      },
+      "measures.synonyms": {
+        label: "同義語",
+        helpText: "質問でこのメジャーを指すときに使われる言葉（例: 売上、売上高、revenue）。カンマ区切りで、複数の言語を混ぜてもかまいません。データセット AI ツールが照合し、画面には表示されません。最大 20 個、各 60 文字まで。1 つの語はこのデータセット内の 1 つのメンバーにしか対応できません"
+      },
+      "measures.description": {
+        label: "説明",
+        helpText: "平易な業務用語で書いた定義。このメジャーが何で、いつ使うかを 1〜2 文で説明します。分析メタデータとともに公開され、データセット AI ツールが読み取ります。定義であり、プロンプトや AI への指示ではありません。最大 500 文字"
       }
     }
   },

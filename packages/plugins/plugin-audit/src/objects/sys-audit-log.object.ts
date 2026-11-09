@@ -414,6 +414,20 @@ export const SysAuditLog = ObjectSchema.create({
     // deployment-level row), and its shipped surfaces are the unfiltered
     // `recent` and `all_events` views above.
     //
+    // [#31796] `credential_use` joins the enum WRITER-FIRST. Its writer is
+    // `credential-use-audit.ts` (`createCredentialUseAuditWriter` on the
+    // `audit` slot, fed by `installCredentialUseAudit`'s stamp hook): one row
+    // per credential per use window, written when a credential's own throttled
+    // use stamp lands — `sys_api_key.last_used_at` (the shared key-admission
+    // seam, every door that admits a key) and `sys_oauth_consent.last_used_at`
+    // (the `/mcp` door's OAuth token use) — plus, for a `skip_consent` OAuth
+    // client with no consent row, plugin-auth's hand-off at the same stamp
+    // point. The row names the credential's owner (`user_id`, `actor`), the
+    // credential row (`object_name` / `record_id`), its kind and the window in
+    // `metadata`; never a secret, a token, a hash or a prefix. Its shipped
+    // surfaces are the unfiltered `recent` and `all_events` views above, as for
+    // `platform_admin_standing_change`.
+    //
     // [#31829] `scim_refused` joins the enum WRITER-FIRST. Its writer is
     // `scim-refusal-audit.ts` (`createScimRefusalAuditWriter`, on the `audit`
     // slot), called by plugin-auth's SCIM door for each `/scim/v2/*` request it
@@ -451,6 +465,7 @@ export const SysAuditLog = ObjectSchema.create({
           { label: 'Action Invocation', value: 'action_invocation' },
           { label: 'Package Uninstall', value: 'package_uninstall' },
           { label: 'Package Unmanaged Import', value: 'package_unmanaged_import' },
+          { label: 'Credential Use', value: 'credential_use' },
           { label: 'SCIM Refused', value: 'scim_refused' },
         ],
         label: 'Action',

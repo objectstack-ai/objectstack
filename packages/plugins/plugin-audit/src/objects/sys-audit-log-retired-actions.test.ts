@@ -118,6 +118,13 @@ const ACTIONS_WITH_WRITERS: ReadonlyArray<readonly [action: string, writer: stri
       + 'branch both install doors reach) once per copy it attempted (#30964)',
   ],
   [
+    'credential_use',
+    'plugin-audit/src/credential-use-audit.ts — createCredentialUseAuditWriter on the `audit` slot, fed by '
+      + 'installCredentialUseAudit\'s afterUpdate hook on the two credential use stamps (core/src/security/'
+      + 'api-key.ts stampAdmittedKey, plugin-auth/src/mcp-client-last-use.ts) and by plugin-auth\'s hand-off '
+      + 'for a skip_consent OAuth client (#31796)',
+  ],
+  [
     'scim_refused',
     'plugin-audit/src/scim-refusal-audit.ts — createScimRefusalAuditWriter on the `audit` slot; called by '
       + 'plugin-auth/src/auth-manager-request-routing.ts (handleRequest, the SCIM arm every /scim/v2/* request '

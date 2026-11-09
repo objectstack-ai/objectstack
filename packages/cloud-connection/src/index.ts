@@ -36,6 +36,20 @@ export { MarketplaceProxyPlugin } from './marketplace-proxy-plugin.js';
 export type { MarketplaceProxyPluginConfig } from './marketplace-proxy-plugin.js';
 export { MarketplaceInstallLocalPlugin } from './marketplace-install-local-plugin.js';
 export type { MarketplaceInstallLocalPluginConfig } from './marketplace-install-local-plugin.js';
+// [#31801, cloud#3862] The install door's declared-rename planner, read-only,
+// on the kernel service INSTALL_RENAME_PLANNER_SERVICE: what an install of a
+// version would carry and refuse on this environment's tables, answered by the
+// door's own rule, so a hosted install can ask before it writes.
+export { INSTALL_RENAME_PLANNER_SERVICE } from './marketplace-install-declared-renames.js';
+export type {
+    InstallRenameCarry,
+    InstallRenamePlan,
+    InstallRenamePlanRequest,
+    InstallRenamePlannedCarry,
+    InstallRenamePlanner,
+    InstallRenameRefusal,
+    InstallRenameRefusalReason,
+} from './marketplace-install-declared-renames.js';
 // cloud ADR-0007 step ⑤ — the local desired-state ledger, exported as a first-class
 // seam so hosts/reconcilers can read the same ledger without going through HTTP.
 export {

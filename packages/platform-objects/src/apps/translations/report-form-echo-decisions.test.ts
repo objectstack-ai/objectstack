@@ -898,7 +898,9 @@ describe('#19403 round 9 — the population, DERIVED from `reportForm`', () => {
     // 38 since #25330: the dimensions repeater offers `nullLabel`.
     // 39 since the measures repeater offers `duration`.
     // 40 since the measures repeater offers `polarity`.
-    expect(DATASET_LEAVES.length).toBe(40);
+    // 48 since both repeaters offer `synonyms` and `description` (ADR-0149 D1):
+    // four row properties, each a label and a help text.
+    expect(DATASET_LEAVES.length).toBe(48);
     const datasetEchoes = DATASET_LEAVES.filter((l) =>
       TRANSLATED_LOCALES.some(([, forms]) => forms.dataset?.[l.kind === 'section' ? 'sections' : 'fields']?.[l.path]?.[l.prop] === l.en),
     );

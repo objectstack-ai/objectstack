@@ -42,7 +42,7 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
           action_invocation: "작업 호출",
           package_uninstall: "패키지 제거",
           package_unmanaged_import: "Package Unmanaged Import",
-          scim_refused: "SCIM Refused"
+          credential_use: "Credential Use"
         }
       },
       user_id: {

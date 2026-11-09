@@ -35,6 +35,8 @@ describe('sys_audit_log.action option labels', () => {
       'package_uninstall',
       // #30964: a new value, added writer-first; no existing value moved.
       'package_unmanaged_import',
+      // #31796: a new value, added writer-first; no existing value moved.
+      'credential_use',
       // #31829: a new value, added writer-first; no existing value moved.
       'scim_refused',
     ]);

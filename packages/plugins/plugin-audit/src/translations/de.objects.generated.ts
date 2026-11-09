@@ -42,7 +42,7 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
           action_invocation: "Aktionsaufruf",
           package_uninstall: "Paket-Deinstallation",
           package_unmanaged_import: "Package Unmanaged Import",
-          scim_refused: "SCIM Refused"
+          credential_use: "Credential Use"
         }
       },
       user_id: {

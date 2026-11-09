@@ -2241,6 +2241,14 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       "dimensions.nullLabel": {
         label: "Libellé des valeurs nulles"
       },
+      "dimensions.synonyms": {
+        label: "Synonymes",
+        helpText: "Mots que l’on emploie pour cette dimension dans une question (ex. étape, étape de vente, stage), séparés par des virgules ; plusieurs langues peuvent se mélanger. Rapprochés par les outils d’IA du jeu de données, jamais affichés. 20 au plus, 60 caractères au plus chacun ; un mot ne peut désigner qu’un seul membre de ce jeu de données"
+      },
+      "dimensions.description": {
+        label: "Description de la dimension",
+        helpText: "Définition métier en langage simple : une ou deux phrases sur ce qu’est cette dimension et quand l’utiliser. Publiée avec les métadonnées d’analyse et lue par les outils d’IA du jeu de données ; une définition, jamais un prompt ni une instruction à une IA. 500 caractères au plus"
+      },
       measures: {
         label: "Mesures",
         helpText: "Pour chacune : nom, agrégat, champ (facultatif pour count) et format d’affichage/devise"
@@ -2274,6 +2282,14 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "measures.duration": {
         label: "Durée"
+      },
+      "measures.synonyms": {
+        label: "Synonymes",
+        helpText: "Mots que l’on emploie pour cette mesure dans une question (ex. chiffre d’affaires, ventes, revenue), séparés par des virgules ; plusieurs langues peuvent se mélanger. Rapprochés par les outils d’IA du jeu de données, jamais affichés. 20 au plus, 60 caractères au plus chacun ; un mot ne peut désigner qu’un seul membre de ce jeu de données"
+      },
+      "measures.description": {
+        label: "Description de la mesure",
+        helpText: "Définition métier en langage simple : une ou deux phrases sur ce qu’est cette mesure et quand l’utiliser. Publiée avec les métadonnées d’analyse et lue par les outils d’IA du jeu de données ; une définition, jamais un prompt ni une instruction à une IA. 500 caractères au plus"
       }
     }
   },

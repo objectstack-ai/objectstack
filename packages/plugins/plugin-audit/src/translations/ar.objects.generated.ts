@@ -42,7 +42,7 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
           action_invocation: "استدعاء إجراء",
           package_uninstall: "إلغاء تثبيت حزمة",
           package_unmanaged_import: "Package Unmanaged Import",
-          scim_refused: "SCIM Refused"
+          credential_use: "Credential Use"
         }
       },
       user_id: {
