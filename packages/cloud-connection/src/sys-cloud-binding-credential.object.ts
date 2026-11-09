@@ -8,8 +8,10 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  * deployment reads it, when the deployment declares more than one replica
  * over the Redis cluster driver.
  *
- * A single node keeps the credential in `<cwd>/.objectstack/cloud-connection.json`
- * (`connection-credential-store.ts`) and never registers this object. Several
+ * A single node keeps the credential in a file that follows `OS_HOME`:
+ * `<OS_HOME>/cloud-connection.json`, or `<cwd>/.objectstack/cloud-connection.json`
+ * when `OS_HOME` is unset (`resolveConnectionCredentialPath` in
+ * `connection-credential-store.ts`), and never registers this object. Several
  * replicas cannot: a bind lands on whichever replica served the request, and a
  * file under that replica's working directory is invisible to the others, so
  * their online licence check and every control-plane call they make present no
