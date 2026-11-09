@@ -595,6 +595,11 @@ export class HttpDispatcher {
             return null;
         },
         getRegisteredAiRoutes: (context) => (this.requestKernel(context) as any)?.__aiRoutes,
+        isRequestKernelReady: (context) => {
+            const kernel = this.requestKernel(context);
+            return typeof kernel?.hasBootPhaseSettled === 'function'
+                && kernel.hasBootPhaseSettled('kernel:ready') === true;
+        },
     };
 
     /**

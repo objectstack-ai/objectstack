@@ -393,6 +393,23 @@ export interface AuthPluginOptions extends Partial<AuthConfig> {
   registerOrganizationRecordPage?: boolean;
 
   /**
+   * Whether `baseUrl` is the HOST's own loopback fallback rather than a
+   * configured origin. `os serve` sets it when none of `OS_AUTH_URL`,
+   * `BETTER_AUTH_URL` or `OS_BASE_URL` is set and it filled `baseUrl` with
+   * `http://localhost:<port>` itself.
+   *
+   * Only such a base URL, or no `baseUrl` at all, has its port corrected on
+   * `kernel:ready` to the one the HTTP server actually bound (a dev server that
+   * shifted off a busy port, or `--port 0`). A configured `baseUrl` is the
+   * deployment's public origin and is kept as written, `http://localhost`
+   * included: behind a proxy that publishes `http://localhost` while the app
+   * listens on :3000, a corrected origin would send invite links and auth mail
+   * to a port nobody published.
+   * @default false
+   */
+  baseUrlDefaulted?: boolean;
+
+  /**
    * The stack's `demoStaff`: demo accounts the development boot creates for
    * the application's seed data to be dealt to (`demo-staff.ts`). `os serve`
    * hands over the authored config's list; `os build` leaves the key out of
@@ -1491,12 +1508,15 @@ export class AuthPlugin implements Plugin {
         }
 
         if (httpServer) {
-          // Auto-detect the actual server URL when no explicit baseUrl was
-          // configured, or when the configured baseUrl uses a different port
-          // than the running server (e.g. port 3000 configured but 3002 bound).
+          // Auto-detect the actual server URL ONLY when no base URL was
+          // configured: no `baseUrl` option, or one the host filled from its
+          // own loopback fallback (`baseUrlDefaulted`). A configured base URL
+          // is the public origin and is kept as written, `http://localhost`
+          // included (see `AuthPluginOptions.baseUrlDefaulted`).
           // getPort() is optional on IHttpServer; duck-type check for it.
           const serverWithPort = httpServer as IHttpServer & { getPort?: () => number };
-          if (this.authManager && typeof serverWithPort.getPort === 'function') {
+          const baseUrlConfigured = !!this.options.baseUrl && this.options.baseUrlDefaulted !== true;
+          if (!baseUrlConfigured && this.authManager && typeof serverWithPort.getPort === 'function') {
             const actualPort = serverWithPort.getPort();
             if (actualPort) {
               const configuredUrl = this.options.baseUrl || 'http://localhost:3000';

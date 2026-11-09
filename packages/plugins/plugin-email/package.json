@@ -34,6 +34,7 @@
     "nodemailer": "^10.1.4"
   },
   "devDependencies": {
+    "@objectstack/driver-sql": "workspace:*",
     "@objectstack/service-queue": "workspace:*",
     "@objectstack/service-settings": "workspace:*",
     "@types/node": "^26.6.5",

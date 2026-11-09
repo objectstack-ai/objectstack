@@ -35,6 +35,10 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
         label: "Quelle",
         help: "Herkunft der Anfrage — `flow:<flowName|nodeId>` bei knotengesteuerten Genehmigungen"
       },
+      process_package: {
+        label: "Source Package",
+        help: "The app the flow that opened this request comes from. Filled in by the platform; empty for flows created here."
+      },
       process_label: {
         label: "Ablauf",
         help: "Bezeichnung des Ablaufs, der diese Anfrage geöffnet hat, wie sie beim Öffnen lautete"

@@ -866,18 +866,19 @@ describe("[ADR-0090 D12] a delegated answer about a user the caller cannot read 
 
   for (const posture of POSTURES) {
     describe(`posture '${posture}'`, () => {
-      it('ground truth: the delegate reads the subject exactly in the states where it is a user the delegate may read', async () => {
-        for (const state of [...STATES, CONTROL] as State[]) {
+      // Every state boots a rig of its own, so each state is an `it` of its own: its own
+      // time budget and its own failure line. Asked in one `it`, the states shared the
+      // default 5 s budget, which a loaded CI shard used up.
+      describe('ground truth: the delegate reads the subject exactly in the states where it is a user the delegate may read', () => {
+        it.each([...STATES, CONTROL] as State[])('%s', async (state) => {
           const h = await bootWith(posture, state);
           const rows = await h.engine.find('sys_user', { where: { id: SUBJECT }, fields: ['id'], context: delegateFor(state) });
           const reads = (Array.isArray(rows) ? rows : []).some((r: any) => r.id === SUBJECT);
           expect(reads, state).toBe(state !== 'an id naming no user' && state !== UNREADABLE_INSIDE);
-        }
+        });
       });
 
-      // Every state boots a rig of its own, so each state is an `it` of its own: its own
-      // time budget and its own failure line. Asked in one `it`, the states shared the
-      // default 5 s budget, which a loaded CI shard used up. The reference, the id
+      // The same split, for the same reason: one `it` per state. The reference, the id
       // naming no user, is asked once, and every other state is compared to it.
       describe(`the ${STATES.length} states get, at every door, the answer the id naming no user gets`, () => {
         let reference: Awaited<ReturnType<typeof answersFor>> | undefined;
@@ -910,17 +911,18 @@ describe("[ADR-0090 D12] a delegated answer about a user the caller cannot read 
         for (const [door, answer] of Object.entries(answers)) expect(answer, door).toEqual({ status: 200 });
       });
 
-      it("CONTROL: a tenant-level administrator and the organization administrator still remove the stored grant of the subject the delegate cannot read, through the write door", async () => {
-        for (const [who, context] of [
+      // One rig per remover, so one `it` per remover (the split above, for the same reason).
+      describe("CONTROL: a tenant-level administrator and the organization administrator still remove the stored grant of the subject the delegate cannot read, through the write door", () => {
+        it.each([
           ['tenant-level administrator', delegateCtx('u_org_admin', 'admin_full_access')],
           ['organization administrator', delegateCtx('u_org_admin', 'organization_admin')],
-        ] as const) {
+        ] as const)('%s', async (who, context) => {
           const h = await bootWith(posture, UNREADABLE_INSIDE);
           const removed = await answerOf(() => h.engine.delete('sys_user_permission_set', { where: { id: 'g_subject' }, context }));
           expect(removed, who).toEqual({ status: 200 });
           const left = await h.engine.find('sys_user_permission_set', { where: { id: 'g_subject' }, context: SYS });
           expect(Array.isArray(left) ? left : [], who).toEqual([]);
-        }
+        });
       });
     });
   }
@@ -1127,13 +1129,14 @@ describe('[ADR-0090 D12] a delegate can neither capture nor evict a direct grant
           expect(await holderOf(h, ENDS[end].id)).toBe(ENDS[end].user_id);
         });
 
-        it(`CONTROL: a tenant-level administrator still moves the grant ${which} a holder outside the scope, through the write door`, async () => {
-          const tenant = delegateCtx('u_org_admin', 'admin_full_access');
-          for (const state of ['a user whose business unit is outside the scope', UNREADABLE_INSIDE] as const) {
+        // One rig per subject state, so one `it` per state: its own time budget and failure line.
+        describe(`CONTROL: a tenant-level administrator still moves the grant ${which} a holder outside the scope, through the write door`, () => {
+          it.each(['a user whose business unit is outside the scope', UNREADABLE_INSIDE] as const)('%s', async (state) => {
+            const tenant = delegateCtx('u_org_admin', 'admin_full_access');
             const h = await bootWith(posture, state, [end]);
             expect(await throughWriteDoor(h, end, tenant), state).toEqual({ status: 200 });
             expect(await holderOf(h, ENDS[end].id), state).toBe(ENDS[end].user_id);
-          }
+          });
         });
       }
     });
@@ -1253,13 +1256,14 @@ describe('[ADR-0090 D12] a delegate can neither capture nor evict a direct grant
         expect(await setOf(h, 'g_user')).toBe('field_rep');
       });
 
-      it('CONTROL: a tenant-level administrator re-names a grant freely, FROM a set outside the allowlist and TO one, through the write door', async () => {
-        const tenant = delegateCtx('u_org_admin', 'admin_full_access');
-        for (const [id, to] of [['g_audit', 'field_user'], ['g_user', 'field_audit']] as const) {
+      // One rig per re-naming, so one `it` per re-naming: its own time budget and failure line.
+      describe('CONTROL: a tenant-level administrator re-names a grant freely, FROM a set outside the allowlist and TO one, through the write door', () => {
+        it.each([['g_audit', 'field_user'], ['g_user', 'field_audit']] as const)('%s → %s', async (id, to) => {
+          const tenant = delegateCtx('u_org_admin', 'admin_full_access');
           const h = await bootWith(posture, [id]);
           expect(await renameThroughWriteDoor(h, id, to, tenant), `${id} → ${to}`).toEqual({ status: 200 });
           expect(await setOf(h, id), `${id} → ${to}`).toBe(to);
-        }
+        });
       });
     });
   }

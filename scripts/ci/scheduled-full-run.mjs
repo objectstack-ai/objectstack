@@ -1435,8 +1435,9 @@ export async function runSnapshotCommit({ from, repo, token, readHistory = readF
 // record that it borrowed: the release gate (HALF 3) reads that job and
 // re-reads the head commit's queue run. `testUiFullGreen` answers ci.yml's
 // Test UI question (#31519 Q2 = B): the head's queue run ran all sixteen
-// `Test UI (k/16)` shards green. Whether those shards ran the WHOLE suite is
-// the `borrowed-verdict` job's half, from the queue's own selector.
+// `Test UI (k/16)` shards green, which only a full plan starts
+// (objectstack#31914). Whether those shards ran the WHOLE suite is the
+// `borrowed-verdict` job's half, from the queue's own selector.
 
 // The two ci.yml job ids and the record job's display name, which the release
 // gate finds the record by (`borrowedVerdictWiring` pins all three).
@@ -1449,7 +1450,12 @@ export const QUEUE_VERDICT_COMMIT_CAP = 20;
 // The merge queue's ref for an entry, which carries the base it was built on.
 export const QUEUE_REF = /^gh-readonly-queue\/main\/pr-\d+-([0-9a-f]{40})$/;
 // ci.yml's Test UI matrix: a renamed or resized matrix makes this read false,
-// and Test UI then runs on the push -- the safe direction.
+// and Test UI then runs on the push -- the safe direction. Since
+// objectstack#31914 the matrix is planned and 16 is its slot roster: only a
+// full plan starts all sixteen, so an affected queue run (fewer slots) reads
+// false here as well. The probe job's sparse checkout cannot read ci.yml, so
+// the self-test holds this equal to the roster `scripts/ci-shard-matrix.mjs`
+// reads off it.
 export const TEST_UI_SHARDS = 16;
 const TEST_UI_SHARD_NAME = /^Test UI \((\d+)\/16\)$/;
 const SHA_RE = /^[0-9a-f]{40}$/;
@@ -3733,6 +3739,20 @@ async function selfTest() {
   await check(() => {
     const findings = borrowedVerdictWiring(ciYml);
     if (findings.length > 0) throw new Error(`wiring: the checked-in ci.yml: ${findings.join(' | ')}`);
+  });
+  await check(async () => {
+    // objectstack#31914: the probe's 16 is the planned matrix's slot roster and
+    // its leg name, read the way every other reader of shard sizes reads them.
+    // Imported here, not at the top: the probe job's sparse checkout has no
+    // scripts/ci-shard-matrix.mjs to load.
+    const { shardTotal } = await import('../ci-shard-matrix.mjs');
+    const roster = shardTotal(ciYml, 'test-ui');
+    if (roster !== TEST_UI_SHARDS) throw new Error(`wiring: ci.yml's test-ui roster is ${roster}, the probe counts ${TEST_UI_SHARDS}`);
+    if (!ciYml.includes(`    name: Test UI (\${{ matrix.shard }}/${TEST_UI_SHARDS})\n`) || !TEST_UI_SHARD_NAME.test(`Test UI (1/${TEST_UI_SHARDS})`)) {
+      throw new Error('wiring: the test-ui leg name is not the one TEST_UI_SHARD_NAME reads');
+    }
+    // An affected plan's queue run: three planned slots, all green, is not the whole suite.
+    if (testUiFullGreen(uiJobs().slice(0, 3)) !== false) throw new Error('probe: an affected plan of three green slots read as all green');
   });
   await check(() => {
     const cut = ciYml.replace(`    name: ${BORROWED_VERDICT_JOB_NAME}\n`, '    name: Borrowed verdict\n');

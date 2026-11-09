@@ -271,3 +271,86 @@ describe('ObjectKernel bootPhaseHooks', () => {
         });
     });
 });
+
+/**
+ * `hasBootPhaseSettled('kernel:ready')` — "is this kernel past the point where
+ * something a plugin publishes in `start()` or a ready handler can still
+ * appear?". A consumer uses it to tell "not published yet" from "never
+ * published" (the `/ai` route table). The answer must never say `true` early:
+ * every read taken while the boot can still publish answers `false`, and so
+ * does a kernel whose boot-phase hooks are withheld.
+ */
+describe('ObjectKernel hasBootPhaseSettled', () => {
+    const kernels: ObjectKernel[] = [];
+    const track = (k: ObjectKernel) => { kernels.push(k); return k; };
+
+    afterEach(async () => {
+        for (const k of kernels.splice(0)) {
+            if (k.isRunning()) await k.shutdown();
+        }
+    });
+
+    /** Reads the answer at every point of the boot a plugin can observe. */
+    function phaseReader(read: Record<string, boolean[]>): Plugin {
+        const take = (at: string, k: ObjectKernel) => { (read[at] ??= []).push(k.hasBootPhaseSettled('kernel:ready')); };
+        return {
+            name: 'test.phase-reader',
+            version: '1.0.0',
+            init: async (ctx) => {
+                take('init', ctx.getKernel());
+                ctx.hook('kernel:ready', async () => { take('kernel:ready', ctx.getKernel()); });
+                ctx.hook('kernel:bootstrapped', async () => { take('kernel:bootstrapped', ctx.getKernel()); });
+                ctx.hook('kernel:listening', async () => { take('kernel:listening', ctx.getKernel()); });
+            },
+            start: async (ctx) => { take('start', ctx.getKernel()); },
+        };
+    }
+
+    it('answers false until every kernel:ready handler has settled, true from kernel:bootstrapped on', async () => {
+        const read: Record<string, boolean[]> = {};
+        const kernel = track(newKernel());
+        expect(kernel.hasBootPhaseSettled('kernel:ready')).toBe(false);
+
+        await kernel.use(phaseReader(read));
+        await kernel.bootstrap();
+
+        expect(read).toEqual({
+            init: [false],
+            start: [false],
+            'kernel:ready': [false],
+            'kernel:bootstrapped': [true],
+            'kernel:listening': [true],
+        });
+        expect(kernel.hasBootPhaseSettled('kernel:ready')).toBe(true);
+    });
+
+    it('answers false throughout a boot whose boot-phase hooks are withheld', async () => {
+        const read: Record<string, boolean[]> = {};
+        const kernel = track(newKernel({ bootPhaseHooks: false }));
+
+        await kernel.use(phaseReader(read));
+        await kernel.bootstrap();
+
+        expect(kernel.isRunning()).toBe(true);
+        expect(read).toEqual({ init: [false], start: [false] });
+        expect(kernel.hasBootPhaseSettled('kernel:ready')).toBe(false);
+    });
+
+    it('answers false again once the kernel has shut down', async () => {
+        const kernel = track(newKernel());
+        await kernel.bootstrap();
+        expect(kernel.hasBootPhaseSettled('kernel:ready')).toBe(true);
+
+        await kernel.shutdown();
+
+        expect(kernel.hasBootPhaseSettled('kernel:ready')).toBe(false);
+    });
+
+    it('answers false for any phase other than kernel:ready, booted or not', async () => {
+        const kernel = track(newKernel());
+        await kernel.bootstrap();
+        for (const phase of ['kernel:bootstrapped', 'kernel:listening', 'kernel:shutdown', '']) {
+            expect(kernel.hasBootPhaseSettled(phase as 'kernel:ready')).toBe(false);
+        }
+    });
+});

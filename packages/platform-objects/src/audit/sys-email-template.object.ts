@@ -52,6 +52,23 @@ export const SysEmailTemplate = ObjectSchema.create({
       description: 'Dotted snake_case identifier (e.g. auth.password_reset)',
       group: 'Identity',
     }),
+
+    // [ADR-0150 D8 row R20] The package that holds the email template `name`
+    // names, beside the name (ADR-0126 §4). Backfilled at boot by
+    // `@objectstack/plugin-email` from the template's one package holder, the
+    // email service's own built-in templates included (its overridable
+    // baseline, ADR-0150 D3 (b)); empty for a template the environment
+    // authored and for a name no single package holds. The v18 promotion
+    // ceremony is its reader-to-be; nothing reads it yet and nothing else
+    // writes it. Width: the package-id class (`sys_metadata.package_id`).
+    package_id: Field.text({
+      label: 'Package',
+      required: false,
+      readonly: true,
+      maxLength: 255,
+      description: 'The app the template comes from. Filled in by the platform; empty for templates created here.',
+      group: 'Identity',
+    }),
     label: Field.text({
       label: 'Label',
       required: true,

@@ -18,7 +18,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
   sys_audit_log: {
     label: "Registro de auditoría",
     pluralLabel: "Registros de auditoría",
-    description: "Registro de auditoría inmutable para eventos de la plataforma",
+    description: "Registro de auditoría de los eventos de la plataforma. Solo la plataforma escribe sus entradas, que son de solo lectura en la API de datos y en Configuración.",
     fields: {
       created_at: {
         label: "Marca temporal"

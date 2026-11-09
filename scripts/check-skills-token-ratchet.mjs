@@ -570,7 +570,21 @@ export const CEILINGS = new Map([
   // bytes -> ceil(26272 / 4) = 6568; the ceiling moves +41, the measured
   // remainder only. Pinned AT the measurement.
   //   ceil(($(wc -c < skills/objectstack-automation/SKILL.md) - 20) / 4) == ceil(26272 / 4)
-  ['skills/objectstack-automation/SKILL.md', 6568],
+  // 6568 -> 6687 (card #31853, the ADR-0150 D3 skills follow-up of #31790):
+  // § Assignment rules teaches how a packaged rule's queue `value` resolves
+  // (its package's own, else the one holder in its `dependencies` closure plus
+  // `sys`), the refusals `outside-closure` / `ambiguous-in-closure` (row
+  // written ownerless, in no queue, warned once), the callers that read
+  // environment-wide (`ambiguous-in-environment`) and the `sys_queue` fallback.
+  // Raise path the standing ruling 「A:先削重复,余额按实测提高」 (ruling record
+  // 6513306068, letter B). PAID DOWN FIRST — four restatements cut, each keeping
+  // its other home (listed in the PR body and the changeset). Arithmetic in
+  // priced bytes (stamp line excluded), against `main`'s 26263 (headroom 2):
+  // the text adds 695, the cuts remove 212, so the LANDED priced text is 26746
+  // bytes -> ceil(26746 / 4) = 6687; the ceiling moves +119, the measured
+  // remainder only. Pinned AT the measurement.
+  //   ceil(($(wc -c < skills/objectstack-automation/SKILL.md) - 20) / 4) == ceil(26746 / 4)
+  ['skills/objectstack-automation/SKILL.md', 6687],
   // 13783 -> 13892 (2026-08-31 app-repo-principles raise, see the block above).
   // The invariant-vs-transition-gate choice, placed in the field-conditional-rule
   // bullet list where the tool is actually picked. Both wrong picks are silent:
@@ -1259,7 +1273,20 @@ export const CEILINGS = new Map([
   // SKILL.md row above: cloud#3659 letter A (ruling comment 6682024726) orders
   // the text in; the raise path is the standing 2026-10-27 ruling (record
   // 6513306068), quoted in the PR body.
-  ['skills/objectstack-automation/references/state-machines-and-approvals.md', 5825],
+  // 5825 -> 5916 (card #31853, the ADR-0150 D3 skills follow-up of #31790):
+  // the Approver Types `queue` row points to a new paragraph — a packaged
+  // flow's `queue` approver resolves from the package whose flow body runs,
+  // and a refusal (`outside-closure` / `ambiguous-in-closure`) leaves the node
+  // unopened with `APPROVER_DIRECTORY_UNREADABLE`, `retryable: false`; a
+  // deployment-authored flow or `.custom` override reads environment-wide.
+  // Same raise path (ruling record 6513306068, letter B, 「A:先削重复,余额按实测提高」).
+  // PAID DOWN FIRST — four restatements cut, each keeping its other home
+  // (listed in the PR body). Arithmetic against `main`'s 23237 bytes (headroom
+  // 15 tokens): the text adds 690, the cuts remove 266, so the LANDED text is
+  // 23661 bytes -> ceil(23661 / 4) = 5916; the ceiling moves +91, the measured
+  // remainder only. Pinned AT the measurement.
+  //   ceil($(wc -c < skills/objectstack-automation/references/state-machines-and-approvals.md) / 4) == ceil(23661 / 4)
+  ['skills/objectstack-automation/references/state-machines-and-approvals.md', 5916],
   // 1779 -> 1769 (#26297): RE-LOCK at the landed count after a net cut — two
   // stale `{ type: 'lookup', reference: 'user' }` fields (an object that does
   // not exist) became `type: 'user'`; -10 tokens, the row follows the

@@ -1970,8 +1970,16 @@ export class AnalyticsService implements IAnalyticsService {
     const allowedRelationships = query.cube ? scope.getCompiledDataset(query.cube)?.allowedRelationships : undefined;
     this.assertDimensionJoinsBacked(query, query.cube ? scope.getCube(query.cube) : undefined, allowedRelationships);
     // [#28558] …and a declared path to a column the related object does not
-    // have, which reached SQL as a 500 on the native strategy.
-    this.assertRelationshipColumnsExist(query, query.cube ? scope.getCube(query.cube) : undefined, allowedRelationships);
+    // have, which reached SQL as a 500 on the native strategy. [#31881] On
+    // every cube, a hand-authored one included: its path is judged against
+    // the allowlist the native strategy enforces for it (a compiled dataset's
+    // `include`, else the configured hook, else none), so a path that list
+    // refuses keeps the strategy's refusal.
+    this.assertRelationshipColumnsExist(
+      query,
+      query.cube ? scope.getCube(query.cube) : undefined,
+      query.cube ? reads.getAllowedRelationships(query.cube) : undefined,
+    );
     // [#21267] …and the order-key door: an `order` key must name a member this
     // query selects, or the query is refused `INVALID_FIELD` / 400
     // (`order-key-door.ts`). On this seam because it is the one `query()` and
@@ -4510,6 +4518,19 @@ export class AnalyticsService implements IAnalyticsService {
    * `created_at` and `updated_at` are admitted as they are there. Asked right
    * after {@link assertDimensionJoinsBacked}, so an unbacked path keeps that
    * refusal.
+   *
+   * [#31881] Asked on a hand-authored cube too. Measured on `80c4c9a2` (real
+   * SQLite), `vendor.nope` and `vendor.region` (a lookup to an object with no
+   * `region`) reached SQL on the native strategy through `query()` and
+   * answered `DATABASE_ERROR` / 500 as a `where` leaf, a dimension and a
+   * windowed time dimension, where a compiled dataset refused the same input
+   * here. `allowed` is the allowlist the native strategy enforces for the cube
+   * (`getAllowedRelationships`): a compiled dataset's `include`, else the
+   * configured hook, else none. A path that list does not back is left to its
+   * owner's refusal; with no list, every path is judged. An unknown hop (no
+   * relationship field of that name) resolves to an object the probe cannot
+   * answer for, and stands down as before; so does a cube whose `sql` is a
+   * statement rather than an object name.
    */
   private assertRelationshipColumnsExist(
     query: AnalyticsQuery,
@@ -4517,11 +4538,11 @@ export class AnalyticsService implements IAnalyticsService {
     allowed: ReadonlySet<string> | undefined,
   ): void {
     const probe = this.getObjectFieldNames;
-    if (!probe || !cube || !allowed) return;
+    if (!probe || !cube) return;
     const baseObject = typeof cube.sql === 'string' ? cube.sql.trim() : '';
     if (!baseObject || !BARE_IDENTIFIER.test(baseObject)) return;
     for (const { member, param, column } of relationshipMembers(query, cube, true)) {
-      if (unbackedRelationshipPath(column, allowed) !== null) continue;
+      if (allowed && unbackedRelationshipPath(column, allowed) !== null) continue;
       const segments = column.split('.');
       const field = segments[segments.length - 1];
       const hops = resolvePathHops(cube, baseObject, segments.slice(0, -1), this.hopReference);

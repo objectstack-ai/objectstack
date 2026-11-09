@@ -2953,6 +2953,10 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
         label: "الاسم",
         help: "معرّف بصيغة snake_case مفصول بنقاط (مثل auth.password_reset)"
       },
+      package_id: {
+        label: "Package",
+        help: "The app the template comes from. Filled in by the platform; empty for templates created here."
+      },
       label: {
         label: "التسمية",
         help: "اسم مقروء يظهر في Studio"

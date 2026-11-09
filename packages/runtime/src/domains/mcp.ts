@@ -9,7 +9,7 @@
  */
 
 import { isMcpServerEnabled } from '@objectstack/types';
-import { MCP_OAUTH_SCOPES } from '@objectstack/spec/ai';
+import { MCP_OAUTH_SCOPES, deriveAiFaceName } from '@objectstack/spec/ai';
 import type { ErrorCode, MetadataProtocol } from '@objectstack/spec/api';
 import type { ISecurityService } from '@objectstack/spec/contracts';
 import type { AIActionConfirmation, IExternalDatasourceService } from '@objectstack/spec/contracts';
@@ -495,6 +495,23 @@ async function readMergedSkillRows(
 }
 
 /**
+ * [ADR-0150 D2/D6] The manifest namespace of the package `packageId` names,
+ * from the engine's registry (`getPackage`), or `undefined`: no package id, no
+ * engine, or an id with no package record. A row's face is then its bare name.
+ */
+function packageNamespaceOf(engine: any, packageId: string | undefined): string | undefined {
+    if (!packageId) return undefined;
+    let pkg: any;
+    try {
+        pkg = engine?.registry?.getPackage?.(packageId);
+    } catch {
+        return undefined;
+    }
+    const namespace = pkg?.manifest?.namespace;
+    return typeof namespace === 'string' && namespace !== '' ? namespace : undefined;
+}
+
+/**
  * [commit e783e163d, #25120] One type's merged listing, as `GET /api/v1/meta/TYPE`
  * reads it — or `undefined` when this host has no merged read to offer.
  *
@@ -696,6 +713,9 @@ export function buildMcpBridge(
      */
     const readServedActions = async (): Promise<any[] | undefined> =>
         (await readMergedItems(await getProtocol(), 'action')) as any[] | undefined;
+
+    // [ADR-0150 D6] The engine the skill read last resolved (`listSkills`).
+    let skillEngine: any;
 
     /**
      * [ADR-0106 D1/D5] An object definition as THIS caller is served it: the
@@ -935,10 +955,17 @@ export function buildMcpBridge(
         // of #8328, whose own reproduction runs through THIS endpoint. See
         // {@link readMergedSkillRows}.
         listSkills: async () => {
+            // [ADR-0150 D6] The engine whose registry places each row's package
+            // ({@link packageNamespaceOf}), resolved beside the read it serves:
+            // `@objectstack/mcp` asks `packageNamespace` only for rows this
+            // call returned.
+            skillEngine = await deps.getObjectQL(context, envId).catch(() => undefined);
             // Resolved per request through {@link getProtocol}, the typed
             // per-environment handle the object reads above use too.
             return await readMergedSkillRows(deps, await getProtocol(), getMeta);
         },
+        // [ADR-0150 D6] A package-held skill's prompt name is `NS-NAME`.
+        packageNamespace: (packageId: string) => packageNamespaceOf(skillEngine, packageId),
 
         create: async (object: string, data: any) =>
             await callData('create', { object, data }, driver, envId, ec),
@@ -972,10 +999,8 @@ export function buildMcpBridge(
             // declaration's `target || body`. A declared action nothing bound
             // (measured: an `os package install`ed package) was listed here and
             // refused there with "No handler registered".
-            const hasHandler = actionExec.registeredActionHandlerProbe(
-                deps,
-                await deps.getObjectQL(context, envId).catch(() => undefined),
-            );
+            const listingEngine: any = await deps.getObjectQL(context, envId).catch(() => undefined);
+            const hasHandler = actionExec.registeredActionHandlerProbe(deps, listingEngine);
             const out: any[] = [];
             const servedObjects = await readServedObjects();
             // [ADR-0106 D1] The objects an action's `objectOverride` params
@@ -985,7 +1010,7 @@ export function buildMcpBridge(
             const declarations = await actionExec.collectActionDeclarations(
                 deps, meta, servedObjects, await readServedActions(),
             );
-            for (const { action, objectName, obj } of declarations) {
+            for (const { action, objectName, obj, packageId } of declarations) {
                 if (!objectName) continue;
                 // [#27681] Fail-closed on `sys_*` PER ACTION: the same predicate
                 // `run_action` asks, so an agent that lists sees exactly the
@@ -1031,11 +1056,22 @@ export function buildMcpBridge(
                 // served it, and not listed where `/meta` withholds it.
                 const served = await servedActionObject(action, objectName, obj, objectsByName);
                 if (!served) continue;
+                // [ADR-0150 D2/D5/D6] The holder's namespace — what `run_action`
+                // takes as `namespace` to name this one action — and the action's
+                // AI face, derived by spec's one derivation from its address.
+                const namespace = packageNamespaceOf(listingEngine, packageId);
+                const face = deriveAiFaceName({
+                    name: action.name,
+                    namespace,
+                    objectName: actionExec.isObjectLessActionKey(objectName) ? undefined : objectName,
+                });
                 out.push({
                     ...actionExec.summarizeAction(
                         deps, action, served.obj, objectName, flow ?? undefined,
                         (name) => (name === objectName ? served.obj : objectsByName.get(name)),
                     ),
+                    ...(namespace !== undefined ? { namespace } : {}),
+                    face,
                     ...(refusal ? { unavailable: { code: refusal.code, reason: refusal.message } } : {}),
                 });
             }
@@ -1065,7 +1101,9 @@ export function buildMcpBridge(
         // the second of the two strip layers that made the member unreachable.
         runAction: async (
             name: string,
-            input: { objectName?: string; recordId?: string; params?: Record<string, unknown> } & AIActionConfirmation,
+            // [ADR-0150 D5] `namespace` rides through like `confirm`: the whole
+            // request object is forwarded, never rebuilt without it.
+            input: { objectName?: string; namespace?: string; recordId?: string; params?: Record<string, unknown> } & AIActionConfirmation,
         ) => actionExec.invokeBusinessAction(deps, context, name, input ?? {}, {
             driver, envId, ec, getMeta, readObjects: readServedObjects, readActions: readServedActions, callData,
         }),
