@@ -142,6 +142,8 @@ describe('kernel:ready index pre-flight (#8725)', () => {
             'idx_sys_metadata_overlay_draft:clear',
             'uniq_sys_setting_organization_id_namespace_key_scope_user_id:table-absent',
             'uniq_sys_notification_preference_a22d7d27:blocked',
+            // The fixture holds no activation ledger.
+            'uniq_sys_metadata_activation_packageless:table-absent',
         ]);
 
         // The overlay conflict. [ADR-0131 C7b] The organization is no part of
@@ -235,6 +237,7 @@ describe('kernel:ready index pre-flight (#8725)', () => {
                 'ensureMetadataOverlayIndexes:sys_metadata:idx_sys_metadata_overlay_draft',
                 'ensureSysSettingIdentityIndex:sys_setting:uniq_sys_setting_organization_id_namespace_key_scope_user_id',
                 'ensureNotificationPreferenceIdentityIndex:sys_notification_preference:uniq_sys_notification_preference_a22d7d27',
+                'ensureActivationLedgerPackagelessIndex:sys_metadata_activation:uniq_sys_metadata_activation_packageless',
             ]);
         }
     });

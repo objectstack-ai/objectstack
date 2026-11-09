@@ -74,6 +74,20 @@
  * by `metadata_type`, so no consumer can touch a neighbour's state through a
  * table all of them are told to treat as generic. It is a constructor
  * argument, not a per-call one, so a caller cannot forget it at a single site.
+ *
+ * ## The row identity carries the package (ADR-0150 D4, D8 row R4)
+ *
+ * The object's unique key is `(metadata_type, package_id, name)`: two packages
+ * may each hold a row for an item of the same name, one package may not hold
+ * two. `package_id` is null for an item no package holds (an environment-
+ * authored position, permission set or action), and SQL `UNIQUE` is
+ * NULL-distinct, so for those rows the key constrains nothing. A runtime index
+ * keeps them to one per `(metadata_type, name)` (`metadata-protocol`'s
+ * `activation-ledger-packageless-index.ts`, and `driver-mongodb`'s copy), and
+ * this module's read-then-write (`setActive`) keeps to it on every driver,
+ * including the memory driver, which has no such index. Rows written before the key carried the package may have a null
+ * `package_id` for an item a package holds: {@link backfillActivationLedgerPackages}
+ * binds each one to its one holder and reports the rest, never guessing.
  */
 
 /**
@@ -266,16 +280,18 @@ export class ObjectStoreMetadataActivationStore implements MetadataActivationSto
      *
      * Read-then-write rather than a blind upsert because the object's
      * uniqueness is a DECLARED index (`unique: 'global'` over
-     * `(metadata_type, name)`), not a primary key this store controls: there is
-     * no id to collide on, so an insert-and-catch could not tell "already
-     * there" from a real store failure.
+     * `(metadata_type, package_id, name)`, ADR-0150 D4), not a primary key this
+     * store controls: there is no id to collide on, so an insert-and-catch
+     * could not tell "already there" from a real store failure.
      *
-     * That index is also why taking the FIRST match is taking the only one: the
-     * read below is keyed on exactly the index's two columns, so it can match
-     * at most one row. It used to pick the first row with a NULL organization
-     * out of the result, back when the table carried a reserved tenant column;
-     * with no such column the set it was choosing from can no longer hold more
-     * than one member.
+     * The write still addresses the row by `(metadata_type, name)`: the bare
+     * path, kept (ADR-0150 red line 3). This is the ledger's only writer, and it
+     * inserts only where that read finds nothing, so it keeps one row per
+     * `(metadata_type, name)` and taking the FIRST match is taking the only one.
+     * The wider index permits a second package's row of the same name; nothing
+     * writes one until a type's own readers consult the ledger by
+     * `(package, name)` (that type's ADR-0150 child), so no name-keyed reader
+     * ever sees two rows for one name.
      *
      * `packageId` absent writes NO package (`null`), the ledger's spelling for
      * an item no package ships. An empty string is refused before anything is
@@ -394,4 +410,114 @@ export async function listPackageMetadataActivations(
 ): Promise<MetadataActivationLedgerRow[]> {
     if (typeof packageId !== 'string' || packageId === '') return [];
     return readActivationLedgerRows(engine, { package_id: packageId });
+}
+
+/**
+ * [ADR-0150 D8 row R4] Who holds the item one ledger row names, as the
+ * backfill asks it of the environment's package-scoped resolver. The resolver
+ * lives in `@objectstack/objectql` (`resolvePackageScopedName`), which this
+ * package cannot import, so the caller answers through
+ * {@link backfillActivationLedgerPackages}'s `holderOf` and this module never
+ * re-states the resolution rule.
+ *
+ *  - `package`: exactly one package holds the name. The row takes it.
+ *  - `environment`: the environment's own item, held by no package
+ *    (ADR-0150 D1 bucket 4). The row stays null, which is its spelling.
+ *  - `ambiguous`: two or more packages hold the name, `candidates` naming
+ *    every one. The row stays null and is reported, ⛔ never bound on a guess.
+ *  - `unheld`: nothing holds the name any more. The row stays null.
+ *  - `unaddressed`: the type is not addressed by package (a position, one
+ *    environment-wide slot, ADR-0150 D7). The row stays null.
+ */
+export type ActivationLedgerHolder =
+    | { readonly kind: 'package'; readonly packageId: string }
+    | { readonly kind: 'environment' }
+    | { readonly kind: 'ambiguous'; readonly candidates: readonly string[] }
+    | { readonly kind: 'unheld' }
+    | { readonly kind: 'unaddressed' };
+
+/** One ledger row the backfill read with no package: its type and name. */
+export interface ActivationLedgerUnboundRow {
+    readonly metadataType: string;
+    readonly name: string;
+}
+
+/** What one backfill run did, or would do in a dry run. */
+export interface ActivationLedgerBackfillReport {
+    /** Rows given the package that holds their item: written, or to be written in a dry run. */
+    readonly bound: ReadonlyArray<ActivationLedgerUnboundRow & { readonly packageId: string }>;
+    /** Rows left null because two or more packages hold the name: every candidate named. */
+    readonly ambiguous: ReadonlyArray<ActivationLedgerUnboundRow & { readonly candidates: readonly string[] }>;
+    /** Rows left null with no question to ask: the environment's own item, an unheld name, an unaddressed type. */
+    readonly unchanged: ReadonlyArray<ActivationLedgerUnboundRow & { readonly reason: 'environment' | 'unheld' | 'unaddressed' }>;
+}
+
+/** Options for {@link backfillActivationLedgerPackages}. */
+export interface ActivationLedgerBackfillOptions {
+    /** Report what would be bound and write nothing. */
+    readonly dryRun?: boolean;
+}
+
+/**
+ * [ADR-0150 D8 row R4, D10] Give every ledger row that names no package the
+ * package that holds its item, now that the ledger's unique key is
+ * `(metadata_type, package_id, name)`.
+ *
+ * The source is the environment's one holder of `(metadata_type, name)` when
+ * the backfill runs (`holderOf`, the package-scoped resolver asked as a caller
+ * with no package). Phase 1's boot seal makes that holder unique for its
+ * covered types, so a name it left held twice, and a name of an uncovered type
+ * two packages hold, is the ambiguous set: the row is left null and reported
+ * with every candidate, ⛔ never bound to one of them.
+ *
+ * Re-runnable: it reads only rows with no package and writes only the package,
+ * so a second run over the same environment finds nothing to bind and writes
+ * nothing. It writes no other column (`active` is the administrator's choice
+ * and stays as it is), inserts nothing and deletes nothing. A row a package
+ * holds already is never read as a candidate, so a run can only add a package
+ * to a row, never move one.
+ *
+ * The read is unscoped by `metadata_type` (it is the one cross-type pass, like
+ * {@link listPackageMetadataActivations}); each row is judged by its own type.
+ * A row that carries no usable `id` or `name` is left alone: there is nothing
+ * to address it by.
+ */
+export async function backfillActivationLedgerPackages(
+    engine: Pick<MetadataActivationStoreEngine, 'find' | 'update'>,
+    holderOf: (metadataType: string, name: string) => ActivationLedgerHolder,
+    options?: ActivationLedgerBackfillOptions,
+): Promise<ActivationLedgerBackfillReport> {
+    const bound: Array<ActivationLedgerUnboundRow & { packageId: string }> = [];
+    const ambiguous: Array<ActivationLedgerUnboundRow & { candidates: string[] }> = [];
+    const unchanged: Array<ActivationLedgerUnboundRow & { reason: 'environment' | 'unheld' | 'unaddressed' }> = [];
+    const rows = await engine.find(METADATA_ACTIVATION_TABLE, { where: {}, context: SYSTEM_CTX });
+    if (!Array.isArray(rows)) return { bound, ambiguous, unchanged };
+    for (const row of rows) {
+        const r = row as { id?: unknown; metadata_type?: unknown; name?: unknown; package_id?: unknown };
+        // Only a row with NO package is a backfill candidate. An empty string
+        // is not a spelling the writer produces ({@link refuseEmptyPackageId}),
+        // so it is left as it stands rather than read as "no package".
+        if (r.package_id !== null && r.package_id !== undefined) continue;
+        if (r.id == null || typeof r.name !== 'string' || r.name === '' || typeof r.metadata_type !== 'string') continue;
+        const at = { metadataType: r.metadata_type, name: r.name };
+        const holder = holderOf(r.metadata_type, r.name);
+        switch (holder.kind) {
+            case 'package':
+                if (!options?.dryRun) {
+                    await engine.update(
+                        METADATA_ACTIVATION_TABLE,
+                        { id: r.id, package_id: holder.packageId },
+                        { context: SYSTEM_CTX },
+                    );
+                }
+                bound.push({ ...at, packageId: holder.packageId });
+                break;
+            case 'ambiguous':
+                ambiguous.push({ ...at, candidates: [...holder.candidates] });
+                break;
+            default:
+                unchanged.push({ ...at, reason: holder.kind });
+        }
+    }
+    return { bound, ambiguous, unchanged };
 }

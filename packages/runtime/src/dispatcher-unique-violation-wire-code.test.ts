@@ -23,7 +23,8 @@
  *    `POST /actions/_activation/:object/:action`, a flip whose ledger read
  *    misses the row a concurrent flip is inserting (two real concurrent
  *    flips reproduce it): the same answer, for `sys_metadata_activation`'s
- *    `(metadata_type, name)` key.
+ *    keys (`(metadata_type, package_id, name)` for a packaged action, the
+ *    package-less `(metadata_type, name)` index for a position, ADR-0150 D4).
  *
  * ## The rig
  *
@@ -40,12 +41,15 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { ObjectQL, DuplicateRecordError, ObjectStoreActionActivationStore } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
-import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+import { ObjectStackProtocolImplementation, ensureActivationLedgerPackagelessIndex } from '@objectstack/metadata-protocol';
 import { SysMetadataActivation } from '@objectstack/platform-objects/system';
 import { HttpDispatcher } from './http-dispatcher.js';
 import type { HttpProtocolContext } from './http-dispatcher.js';
 import { bindTestSecurityCatalog } from './security/security-catalog.testkit.js';
 import { installDefaultOrganization } from './default-organization.testkit.js';
+// Paid at collection, not inside a clocked case: the dispatcher's package domain
+// reaches it through a dynamic import (check:test-source-alias).
+import '@objectstack/metadata';
 
 const PREFIX = '/api/v1';
 /** `registry.registerObject` requires a package id (see the sibling real-stack tests). */
@@ -237,7 +241,7 @@ describe('[#23686] the actions door answers the engine\'s duplicate as 409 UNIQU
 /**
  * The engine as a flip that races another sees it: its read of the activation
  * ledger misses the row the other flip has inserted, so its own insert is the
- * one the ledger's unique `(metadata_type, name)` key refuses. Every other
+ * one the ledger's unique keys refuse. Every other
  * call reaches the real engine, the insert included, so the refusal is the
  * engine's own envelope over a real driver error. Two real concurrent flips
  * reproduce the same answer; this holds the race window open so the pin does
@@ -263,6 +267,19 @@ describe('[#23686] the activation doors answer a ledger write that loses a race 
 
     beforeAll(async () => {
         engine = await bootEngine([UDOC, SysMetadataActivation]);
+        // [ADR-0150 D4] The ledger's declared key is `(metadata_type, package_id, name)`,
+        // NULL-distinct, so a position row (no package) is kept to one by the
+        // package-less index the metadata-protocol assembly builds at
+        // `kernel:ready`. This rig boots no kernel, so it builds it here, the same
+        // export over the same driver the ledger lives on, as production does.
+        const ledgerDriver = (engine as any).getDriverForObject(LEDGER);
+        expect(
+            await ensureActivationLedgerPackagelessIndex(
+                (sql: string) => ledgerDriver.execute(sql, []),
+                undefined,
+                { client: 'better-sqlite3' },
+            ),
+        ).toEqual({ status: 'created' });
         bindTestSecurityCatalog(engine, {
             positions: [{ name: 'sales_rep', permissionSets: ['sales_access'] }],
             permissions: [
